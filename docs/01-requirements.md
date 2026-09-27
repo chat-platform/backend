@@ -36,6 +36,11 @@
 ### 1.7 Notifications
 - Users receive notifications for new messages when appropriate.
 
+### 1.8 Devices
+- Users can use multiple devices.
+- Users can be logged in from multiple devices simultaneously.
+- Users can manage their connected devices.
+
 ---
 ## 2. Non-Functional Requirements
 
