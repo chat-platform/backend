@@ -47,6 +47,17 @@
 - If the recipient comes online after 30 days, the expired message shall not be delivered.
 - The recipient shall not be notified about the expired message; it shall appear as if nothing was sent.
 
+### 1.10 Blocking
+- Users can block other users.
+- Users can unblock previously blocked users.
+- Users can view their list of blocked users.
+- Blocking shall be enforced across:
+  - **Messages** — dropped both directions; sender sees no error.
+  - **Presence** — hidden from each other.
+  - **Typing & receipts** — suppressed both directions.
+  - **Group chats** — group messages still flow; the block only applies to direct messages. A blocked user cannot add the blocker to new groups.
+  - **Media** — new and old media access revoked. Anything already downloaded to a device stays there.
+
 ---
 ## 2. Non-Functional Requirements
 
