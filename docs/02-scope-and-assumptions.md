@@ -32,6 +32,18 @@
 - Mobile users may be offline for extended periods.
 - Messages should be persisted for offline recipients.
 
+### Message Retention Distribution
+
+| Retention Time | % of Pending Messages |
+|---|---:|
+| Within 1 hour | 50% |
+| Within 1 day | 30% |
+| Within 7 days | 15% |
+| Within 30 days | 5% |
+| **Total** | **100%** |
+
+=> Average pending-message retention: 3.1days
+
 ---
 
 ## 3. Constraints
