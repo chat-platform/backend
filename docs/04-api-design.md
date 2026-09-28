@@ -90,7 +90,6 @@ Conventions:
 |---|---|---|
 | `GET` | `/v1/sync?since=<cursor>` | Backfill missed events. |
 | `GET` | `/v1/chats` | List chats. |
-| `GET` | `/v1/chats/{id}/messages?before=<cursor>` | Paginated history. |
 
 Notes:
 
@@ -98,7 +97,7 @@ Notes:
   both session and device identity.
 - `/profile/picture` stores a media ID from `/v1/media`; the binary
   itself goes through the media endpoint.
-- `/sync` is the recovery path when WS frames are missed.
+- `/sync` is the catch-up path when WS frames are missed. (eg: when Phone was not online, etc)
 
 ## 4. WebSocket API
 <!-- define ws APIs here -->
@@ -120,7 +119,7 @@ connect → auth (session token) → auth_ok → heartbeat → events
 ```json
 {
   "type": "message.send" | "message.recv" | "typing" | "presence" | "receipt" | ...,
-  "id": "<client-generated id>",
+  "id": "<client-generated id>",//for idempotency
   "ts": 1699999999,
   "payload": { ... }
 }
@@ -130,11 +129,11 @@ connect → auth (session token) → auth_ok → heartbeat → events
 
 | Event | Direction | Payload | Notes |
 |---|---|---|---|
-| `message.send` | C → S | `{ chatId, clientMsgId, content }` | Idempotent via `clientMsgId`. |
-| `message.ack` | S → C | `{ clientMsgId, messageId, ts }` | Confirms persistence. |
-| `message.recv` | S → C | `{ chatId, messageId, senderId, content, ts }` | |
-| `receipt.delivered` | S → C | `{ chatId, messageId, userId, ts }` | |
-| `receipt.read` | both | `{ chatId, upToMessageId, ts }` | |
+| `message.send` | C → S | `{ chatId, clientMsgId, content }` | Idempotent via `clientMsgId`. Attempt only; no durability yet. |
+| `message.ack` | S → C | `{ clientMsgId, messageId, ts }` | Server has durably accepted the message. Correlates to `message.send` via `clientMsgId`. |
+| `message.recv` | S → C | `{ chatId, messageId, senderId, content, ts }` | Server pushed to recipient. WS is lossy/Client may not be online, so not a delivery guarantee  |
+| `receipt.delivered` | S → C | `{ chatId, messageId, userId, ts }` | Recipient's device confirmed receipt. |
+| `receipt.read` | both | `{ chatId, upToMessageId, ts }` | Recipient has read this message. (opened the chat)|
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |
 | `presence` | S → C | `{ userId, status, lastSeen }` | Pushed on change. |
 | `group.*` | S → C | `{ groupId, ... }` | Member added, admin promoted, etc. |
