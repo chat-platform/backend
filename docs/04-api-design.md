@@ -201,3 +201,23 @@ Resume live over WebSocket
 
 HTTP first, then WS — subscribing before backfill drops events that
 occur during the sync window.
+
+### 5.4 Block / Unblock
+
+Operation is HTTP; enforcement is in the WebSocket layer.
+
+```
+POST   /v1/users/{id}/block     → block
+DELETE /v1/users/{id}/block     → unblock
+GET    /v1/users/me/blocked     → list
+```
+
+Enforced across:
+
+- **Messages** — dropped both directions; sender sees no error.
+- **Presence** — hidden from each other.
+- **Typing & receipts** — suppressed both directions.
+- **Group chats** — group messages still flow; the block only applies to direct messages. A blocked user cannot add the blocker to new groups.
+- **Media** — new and old media access revoked. Anything already downloaded to a device stays there.
+
+The blocked party is not notified.
