@@ -1,10 +1,13 @@
 ## Availability Target
 
-Target availability: TBD
+- Target availability: 99.999%
 
 ## Failure Scenarios
-<!-- Need to detail such and others -->
+<!-- Need to detail these and other failure scenarios -->
 - Server failures
-- Database failure
-- Network partition
-- Dependency failure
+- Database failures
+- Network partitions
+- Dependency failures
+- Message delivery failures
+- Client disconnections
+- Push notification failures

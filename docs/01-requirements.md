@@ -41,6 +41,12 @@
 - Users can be logged in from multiple devices simultaneously.
 - Users can manage their connected devices.
 
+### 1.9 Message Retention and Expiry
+- Undelivered messages shall be stored for a maximum of **30 days**.
+- After 30 days, undelivered messages shall be **expired and deleted**.
+- If the recipient comes online after 30 days, the expired message shall not be delivered.
+- The recipient shall not be notified about the expired message; it shall appear as if nothing was sent.
+
 ---
 ## 2. Non-Functional Requirements
 
