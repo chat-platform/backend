@@ -102,6 +102,50 @@ Notes:
 
 ## 4. WebSocket API
 <!-- define ws APIs here -->
+### Lifecycle
+
+```text
+connect → auth (session token) → auth_ok → heartbeat → events
+```
+
+- First frame must carry the session token from `/auth/otp/verify`.
+- Server pings periodically; missing pongs mark the socket dead.
+- Each device opens its own socket. A user is online if any socket
+  is live.
+- On disconnect, client reconnects and runs the HTTP sync (see 5.3)
+  before resuming live delivery.
+
+### Envelope
+
+```json
+{
+  "type": "message.send" | "message.recv" | "typing" | "presence" | "receipt" | ...,
+  "id": "<client-generated id>",
+  "ts": 1699999999,
+  "payload": { ... }
+}
+```
+
+### Events
+
+| Event | Direction | Payload | Notes |
+|---|---|---|---|
+| `message.send` | C → S | `{ chatId, clientMsgId, content }` | Idempotent via `clientMsgId`. |
+| `message.ack` | S → C | `{ clientMsgId, messageId, ts }` | Confirms persistence. |
+| `message.recv` | S → C | `{ chatId, messageId, senderId, content, ts }` | |
+| `receipt.delivered` | S → C | `{ chatId, messageId, userId, ts }` | |
+| `receipt.read` | both | `{ chatId, upToMessageId, ts }` | |
+| `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |
+| `presence` | S → C | `{ userId, status, lastSeen }` | Pushed on change. |
+| `group.*` | S → C | `{ groupId, ... }` | Member added, admin promoted, etc. |
+
+Reconnect sync is not a WS event — it goes over HTTP (`/v1/sync`).
+
+Reliability:
+
+- WS is treated as lossy; anything important is recoverable via `/sync`.
+- Client sends carry `clientMsgId`; server deduplicates on it.
+- Server persists the message, then acks the sender, then fans out.
 
 ## 5. Core Flows
 
@@ -124,3 +168,36 @@ Set name             [PUT /v1/profile/name]
     ↓
 Set picture          [PUT /v1/profile/picture]
 ```
+
+### 5.2 Send Message
+
+```text
+Client
+  ↓
+WS: message.send { clientMsgId, ... }
+  ↓
+Server persists
+  ↓
+WS: message.ack → sender
+  ↓
+WS: message.recv → recipient's device(s)
+  ↓
+WS: receipt.delivered / receipt.read
+```
+
+### 5.3 Reconnect / Sync
+
+```text
+WebSocket lost
+    ↓
+Reconnect + auth
+    ↓
+HTTP: GET /v1/sync?since=<cursor>
+    ↓
+Apply missed events
+    ↓
+Resume live over WebSocket
+```
+
+HTTP first, then WS — subscribing before backfill drops events that
+occur during the sync window.
