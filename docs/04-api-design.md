@@ -25,7 +25,9 @@ message.
 | Upload media | HTTP | Binary upload; returns media ID. Plan for direct uploads via signed URLs. |
 | Send message | WebSocket | Latency-sensitive; frequent; small payloads. |
 | Receive message | WebSocket | Server-pushed. |
+| Delivery/read receipts (live) | WebSocket | Pushed to peers. |
 | Presence events | WebSocket | Tied to socket lifecycle. |
+| Typing indicators | WebSocket | Ephemeral. |
 | Block / unblock user | HTTP | Mutation; enforced in WS layer. |
 | List blocked users | HTTP | Settings query. |
 | Reconnect sync | HTTP, then WebSocket | HTTP backfills; WS resumes live. |
@@ -102,3 +104,23 @@ Notes:
 <!-- define ws APIs here -->
 
 ## 5. Core Flows
+
+### 5.1 Registration
+
+```text
+Enter phone number
+    ↓
+Request OTP          [POST /v1/auth/otp/request]
+    ↓
+Verify OTP           [POST /v1/auth/otp/verify]  ← session + device creds
+    ↓
+New user?
+    ├── Yes → Create account
+    └── No  → Authenticate
+    ↓
+Register device
+    ↓
+Set name             [PUT /v1/profile/name]
+    ↓
+Set picture          [PUT /v1/profile/picture]
+```
