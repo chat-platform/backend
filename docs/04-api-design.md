@@ -161,8 +161,6 @@ New user?
     ├── Yes → Create account
     └── No  → Authenticate
     ↓
-Register device
-    ↓
 Set name             [PUT /v1/profile/name]
     ↓
 Set picture          [PUT /v1/profile/picture]
