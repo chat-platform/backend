@@ -9,7 +9,7 @@ member_tag
 chat
 ----
 chat_id
-type
+type //DIRECT,GROUP,etc
 name
 profile_pic
 created_by
@@ -24,6 +24,7 @@ chat_id
 sender_id
 client_msg_id //for Client->Server idempotency
 content
+message_type //eg: TEXT,MEDIA,TEXT_CUM_MEDIA, etc
 created_at
 media_id <!-- optional -->
 
@@ -53,6 +54,7 @@ media
 -----
 media_id
 file_name
+caption //text along with the media
 thumbnail_storage_key
 full_storage_key
 mime_type
@@ -73,6 +75,46 @@ user_blocks
 blocker_id
 blocked_id
 created_at
+
+message_delivery 
+----------------
+message_id
+user_id
+delivered_at
+read_at
+
+notes: No seperate delivery record for each device
+
+device
+------
+device_id
+user_id
+platform          // ANDROID / IOS / WEB
+device_name
+created_at
+last_seen_at
+revoked_at
+
+session
+-------
+session_id
+device_id
+created_at
+refresh_last_used_at
+refresh_expires_at
+revoked_at
+
+note: no refresh token/its hash here, 
+    instead in refresh token, there shall be sessionId. 
+    Each refresh token be for each session.
+    If required immediate session revoke, lets introduce jti here later
+
+-----------------------------------
+user
+ │
+ └── 1:N device
+          │
+          └── 1:N session (incl old sessions)
 
 --------------------------------------
 
