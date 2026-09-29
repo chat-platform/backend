@@ -1,7 +1,7 @@
 chat_membership (includes group and personal)
 ----------------
-chat_id
-user_id
+chat_id → chat.chat_id
+user_id → user.user_id
 role
 joined_at
 member_tag
@@ -20,13 +20,13 @@ deleted_at
 chat_msg
 --------
 message_id
-chat_id
-sender_id
+chat_id → chat.chat_id
+sender_id → user.user_id
 client_msg_id //for Client->Server idempotency
 content
 message_type //eg: TEXT,MEDIA,TEXT_CUM_MEDIA, etc
 created_at
-media_id <!-- optional -->
+media_id → media.media_id <!-- optional -->
 
 users
 -----
@@ -34,14 +34,14 @@ user_id
 phone
 username
 display_name
-profile_pic_media_id <!---better to keep it as seperate table if any metadata might become relevant in future-->
+profile_pic_media_id → profile_pic_media.ppic_id
 about (usually used for statuses like 'At work', 'Away, leave a msg',etc)
 created_at
 updated_at
 
 profile_pic_media
 -----------------
-media_id
+ppic_id
 thumbnail_storage_key
 full_storage_key
 status (pending,ready,failed,etc. Only upon 'ready' shall the profile pic be reflected -->)
@@ -65,21 +65,21 @@ deleted_at
 
 phone_history (or as event log?)
 -------------
-user_id
+user_id → user.user_id
 old_phone
 new_phone
 changed_at
 
 user_blocks
 -------------
-blocker_id
-blocked_id
+blocker_id → user.user_id
+blocked_id → user.user_id
 created_at
 
 message_delivery 
 ----------------
-message_id
-user_id
+message_id → chat_msg.message_id
+user_id → user.user_id
 delivered_at
 read_at
 
@@ -88,7 +88,7 @@ notes: No seperate delivery record for each device
 device
 ------
 device_id
-user_id
+user_id → user.user_id
 platform          // ANDROID / IOS / WEB
 device_name
 created_at
@@ -98,7 +98,7 @@ revoked_at
 session
 -------
 session_id
-device_id
+device_id → device.device_id
 created_at
 refresh_last_used_at
 refresh_expires_at
