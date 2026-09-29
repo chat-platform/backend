@@ -24,9 +24,14 @@ chat_id → chat.chat_id
 sender_id → user.user_id
 client_msg_id //for Client->Server idempotency
 content
-message_type //eg: TEXT,MEDIA,TEXT_CUM_MEDIA, etc
+message_type //eg: TEXT,MEDIA etc
 created_at
-media_id → media.media_id <!-- optional -->
+
+chat_msg_media
+--------------
+message_id → chat_msg.message_id
+media_id → media.media_id
+position // optional, useful if multiple media per message
 
 users
 -----
