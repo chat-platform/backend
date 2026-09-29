@@ -39,17 +39,24 @@ updated_at
 profile_pic_media
 -----------------
 media_id
-storage_key
+thumbnail_storage_key
+full_storage_key
+status (pending,ready,failed,etc. Only upon 'ready' shall the profile pic be reflected -->)
 mime_type
 size
+created_at
+deleted_at
 
 media
 -----
 media_id
 file_name
-storage_key
+thumbnail_storage_key
+full_storage_key
 mime_type
 size
+created_at
+deleted_at
 ...
 
 phone_history (or as event log?)
