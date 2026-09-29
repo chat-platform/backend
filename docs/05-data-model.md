@@ -10,11 +10,12 @@ chat
 ----
 chat_id
 type
-created_at
-updated_at
 name
 profile_pic
 created_by
+created_at
+updated_at
+deleted_at
 
 chat_msg
 --------
@@ -33,6 +34,7 @@ phone
 username
 display_name
 profile_pic_media_id <!---better to keep it as seperate table if any metadata might become relevant in future-->
+about (usually used for statuses like 'At work', 'Away, leave a msg',etc)
 created_at
 updated_at
 
@@ -65,6 +67,12 @@ user_id
 old_phone
 new_phone
 changed_at
+
+user_blocks
+-------------
+blocker_id
+blocked_id
+created_at
 
 --------------------------------------
 
