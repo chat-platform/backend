@@ -29,3 +29,16 @@ note A:
         - Other options?
     need to update status (for marking delivery in outbox)
     ensure idempotency
+
+decided to use redis stream. One stream per WS server, ws:deliver:{server_id}
+
+Notification service
+----------------------------
+decided to use redis stream
+
+
+WS registry
+--------------------------
+Redis Hash per user, fields per connection, 
+TTL + heartbeat. 
+Explicit HDEL on disconnect.

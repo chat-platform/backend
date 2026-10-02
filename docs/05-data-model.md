@@ -27,6 +27,13 @@ content
 message_type //eg: TEXT,MEDIA etc
 created_at
 
+msg_seen_status
+---------------
+message_id     → chat_msg.message_id
+user_id        → user.user_id  -- the recipient
+delivered_at
+read_at
+
 chat_msg_media
 --------------
 message_id → chat_msg.message_id
@@ -113,6 +120,31 @@ note: no refresh token/its hash here,
     instead in refresh token, there shall be sessionId. 
     Each refresh token be for each session.
     If required immediate session revoke, lets introduce jti here later
+outbox
+------
+id            BIGSERIAL PK        -- monotonic, the event_id
+event_type    -- NEW_MESSAGE / EDIT / DELETE / REACTION / ...
+message_id    FK → chat_msg.message_id   -- NULL for non-message events
+chat_id       FK → chat.chat_id          -- denormalized for routing/fan-out
+sender_id     FK → user.user_id          -- who caused it (useful for fan-out, audit)
+payload       JSONB                      -- event-specific data (edit diff, reaction, etc.)
+created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+processed_at  TIMESTAMPTZ NULL           -- NULL = not yet fanned out
+
+delivery_events
+---------------
+id                BIGSERIAL PK          -- global, for internal reference
+device_id         FK → device
+seq               BIGINT                -- per-device, monotonic, the cursor. We can use Redis INCR device_seq:{device_id}
+outbox_event_id   FK → outbox           -- dedupe key for fan-out idempotency
+message_id        FK → chat_msg
+event_type
+payload
+state
+created_at
+UNIQUE (device_id, outbox_event_id)     -- fan-out idempotency
+UNIQUE (device_id, seq)                 -- cursor integrity
+INDEX (device_id, seq)                  -- the drain/reconnect query
 
 -----------------------------------
 user
