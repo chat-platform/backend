@@ -1,3 +1,26 @@
+# Architecture Decisions
+
+## Database
+
+Decision: PostgreSQL as primary database
+Status: Accepted
+Reason:
+- relational data model
+- transactions required for message + outbox
+- strong consistency for chat membership/message writes
+- suitable for current project scope
+- not read heavy than writes, so not mysql
+
+### Decision: Redis Streams for relay → WS
+Status: Accepted
+### Communication method: relay → WS
+- Redis streams
+    - Status: Accepted
+
+### Communication method: relay → notification service
+- Redis streams
+    - Status: Accepted
+
 There shall be ws services.
 Need LB to distribute traffic to here
 Need backup LB ready
@@ -19,16 +42,7 @@ relay service
 WS servers
 -----------------
 - recieves message, transfer it to msg service
-- when recieved events from relay service, it sends to corresponding users
-
-note A:
-    which to use?
-        - kafka is overkill
-        - NATS
-        - Redis stream
-        - Other options?
-    need to update status (for marking delivery in outbox)
-    ensure idempotency
+- when recieved events from relay service, it sends to corresponding users's devices via ws
 
 decided to use redis stream. One stream per WS server, ws:deliver:{server_id}
 
@@ -37,8 +51,17 @@ Notification service
 decided to use redis stream
 
 
-WS registry
+Redis:
+- WS connection registry
+- Redis Streams for relay
+- ephemeral/cache data
+
+
+### WS Connection registry
 --------------------------
-Redis Hash per user, fields per connection, 
-TTL + heartbeat. 
-Explicit HDEL on disconnect.
+Decision: Redis
+    Status: Accepted
+    Details: 
+        Hash per user, fields per connection, 
+        TTL + heartbeat. 
+        Explicit HDEL on disconnect.
