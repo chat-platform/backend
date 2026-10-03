@@ -51,36 +51,34 @@ source of truth.
                 │       ┌───────────────┐       │
                 │       │  Message      │       │
                 │       │  Service      │       │
-                │       └───┬───────┬───┘       │
-                │           │       │           │
-                │           │       │ write     │
-                │           │       ▼           │
-                │           │   ┌────────┐      │
-                │           │   │Postgres│      │
-                │           │   └───┬────┘      │
-                │           │       │ outbox    │
-                │           │       ▼           │
-                │           │   ┌────────┐      │
-                │           │   │ Relay  │      │
-                │           │   └───┬────┘      │
-                │           │       │           │
-                │           │       ▼           │
-                │           │  ┌─────────┐      │
-                │           │  │  Redis  │◄─────┘
-                │           │  │ Streams │
-                │           │  │+Registry│
-                │           │  └────┬────┘
-                │           │       │
-                │           │       ├──────────────► Notification Svc
-                │           │       │                (push hints)
-                │           │       │
-                │           │       └──► WS Gateway ──► client
-                │           │
-                │           ▼
-                │       ┌────────┐
-                │       │ Media  │──► Object Storage
-                │       │ Service│
-                │       └────────┘
+                │       └───────┬───────┘       │
+                │               │               │
+                │               │ write         │
+                │               ▼               │
+                │           ┌────────┐          │
+                │           │Postgres│          │
+                │           └───┬────┘          │
+                │               │ outbox        │
+                │               ▼               │
+                │           ┌────────┐          │
+                │           │ Relay  │          │
+                │           └───┬────┘          │
+                │               │               │
+                │               ▼               │
+                │          ┌─────────┐          │
+                │          │  Redis  │◄─────────┘
+                │          │ Streams │
+                │          │+Registry│
+                │          └────┬────┘
+                │               │
+                │               ├──────────────► Notification Svc
+                │               │                (push hints)
+                │               │
+                │               └──► WS Gateway ──► client
+                │                         │                         │       
+                │       
+                │       
+                │       
                 │
                 └──► (auth, profile, groups, blocks, media, sync)
 ```
