@@ -34,6 +34,12 @@ user_id        → user.user_id  -- the recipient
 delivered_at
 read_at
 
+msg_seen_status = per-user read state (has this user seen this message, across any of their devices)
+-- Granularity: one row per (message, recipient user).
+-- Aggregates read state across all the user's devices.
+-- Different question than outbox: outbox asks "did device D get it?",
+-- this asks "has the user seen it anywhere?"
+
 chat_msg_media
 --------------
 message_id → chat_msg.message_id
@@ -129,6 +135,10 @@ dispatched_at          -- when handed to a ws gateway/or to the msg broker
 delivered_at           -- when device acked RECEIVED
 read_at                -- when device acked SEEN
 
+outbox = per-device delivery/transport record (how do I get this event to this specific device)
+-- Granularity: one outbox row per (message, recipient device).
+-- This row *is* the per-device delivery record — no separate table.
+
 -----------------------------------
 user
  │
@@ -151,3 +161,25 @@ chat
   │ 1:N
   ▼
 messages
+
+## Important Access Patterns
+
+### Users
+- Find user by phone
+- Get user's devices
+
+### Chats
+- Get chats for user
+- Get members of chat
+
+### Messages
+- Insert message
+- Get messages for chat ordered by time
+- Get messages after cursor
+- Find message by client_msg_id
+
+### Outbox
+- Get pending events for device
+- Get events after cursor
+- Mark event delivered
+- Mark event read
