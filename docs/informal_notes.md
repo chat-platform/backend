@@ -20,3 +20,21 @@ One stream per gateway (stream:gateway:{id}): relay routes by session:{device_id
 
 
 Design so the transport is swappable.
+
+
+
+## Note on WS routing
+
+>Thinking about making subsequent connections after one, if existing, go to the
+>same WS server — so we can save routing to multiple WS servers.
+>
+>But again, this will add work, bring some cons, LB is not easy, also, such
+>users are rare, so, let it be..
+>
+>Each device just connects wherever the LB drops it. No sticky routing, no
+>hunting for where the user's other session already is. Registry keeps track
+>of user's connections, delivery worker reads it and pushes to whichever
+>nodes hold them.
+>
+>If the former idea comes relevant in future, it could be implemented, seems
+>there won't be much design alterations required then..
