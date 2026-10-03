@@ -27,6 +27,19 @@ content
 message_type //eg: TEXT,MEDIA etc
 created_at
 
+msg_seen_status
+---------------
+message_id     → chat_msg.message_id
+user_id        → user.user_id  -- the recipient
+delivered_at
+read_at
+
+msg_seen_status = per-user read state (has this user seen this message, across any of their devices)
+-- Granularity: one row per (message, recipient user).
+-- Aggregates read state across all the user's devices.
+-- Different question than outbox: outbox asks "did device D get it?",
+-- this asks "has the user seen it anywhere?"
+
 chat_msg_media
 --------------
 message_id → chat_msg.message_id
@@ -81,13 +94,6 @@ blocker_id → user.user_id
 blocked_id → user.user_id
 created_at
 
-message_delivery 
-----------------
-message_id → chat_msg.message_id
-user_id → user.user_id
-delivered_at
-read_at
-
 notes: No seperate delivery record for each device
 
 device
@@ -114,6 +120,25 @@ note: no refresh token/its hash here,
     Each refresh token be for each session.
     If required immediate session revoke, lets introduce jti here later
 
+outbox
+------
+id             PK      -- global monotonic; the device cursor
+message_id             -- FK → chat_msg.message_id
+chat_id                -- denormalized, for routing/cleanup
+recipient_id           -- FK → user.user_id (the target user)
+device_id              -- FK → device.device_id (the target device)
+sender_id              -- FK → user.user_id (who caused it)
+event_type             -- NEW_MESSAGE | EDIT | DELETE | REACTION | ...
+payload                -- event-specific delta (NULL for NEW_MESSAGE)
+created_at             
+dispatched_at          -- when handed to a ws gateway/or to the msg broker
+delivered_at           -- when device acked RECEIVED
+read_at                -- when device acked SEEN
+
+outbox = per-device delivery/transport record (how do I get this event to this specific device)
+-- Granularity: one outbox row per (message, recipient device).
+-- This row *is* the per-device delivery record — no separate table.
+
 -----------------------------------
 user
  │
@@ -136,3 +161,25 @@ chat
   │ 1:N
   ▼
 messages
+
+## Important Access Patterns
+
+### Users
+- Find user by phone
+- Get user's devices
+
+### Chats
+- Get chats for user
+- Get members of chat
+
+### Messages
+- Insert message
+- Get messages for chat ordered by time
+- Get messages after cursor
+- Find message by client_msg_id
+
+### Outbox
+- Get pending events for device
+- Get events after cursor
+- Mark event delivered
+- Mark event read

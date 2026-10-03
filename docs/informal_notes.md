@@ -1,0 +1,22 @@
+"I'm choosing Redis Streams for relay → WS gateway and relay → notification service"
+Fine choice, but review these:
+
+Pros:
+
+Consumer groups give you at-least-once delivery with per-consumer ack.
+
+Backpressure is natural (stream length, pending entries list).
+
+Decouples relay from gateway count and gateway churn.
+
+Cons / things to get right:
+
+Redis Streams is not durable by default unless you configure AOF/RDB persistence properly. If Redis dies, in-flight events are lost. For a chat system where the durable record is delivery_events, that's tolerable — because reconnect-drain will re-deliver anything not acked. But make sure you're not relying on the stream for durability. delivery_events is the source of truth; the stream is a transport.
+
+Consumer groups need care. If a gateway crashes  mid-processing, its pending entries sit in the PEL (pending entries list) until claimed. You need a XAUTOCLAIM/XCLAIM loop to reclaim them, or messages stall. This is real operational work.
+
+One stream per gateway (stream:gateway:{id}): relay routes by session:{device_id} → gateway_id, writes only to the relevant stream. Efficient, but you need to manage stream lifecycle as gateways come and go.or shard by gateway ID. . Noted #TODO
+    When gateway go(stops): Simplest cleanup: TTL the stream (EXPIRE) and let it vanish after the gateway's been gone for a while   
+
+
+Design so the transport is swappable.
