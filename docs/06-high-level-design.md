@@ -163,3 +163,47 @@ they're combined into a single "HTTP API."
 | Redis | WS registry, streams (relay→WS, relay→notif), ephemeral cache | Not durable; loss tolerable |
 | Object storage | Media blobs | Durable |
 
+## 5. Core Data Flows
+
+### 5.1 Send (1:1)
+```
+Client → WS Gateway → Message Service (gRPC)
+                          │
+                          ▼
+                  Postgres TX:
+                    INSERT chat_msg
+                    INSERT outbox × N devices
+                          │
+                          ▼
+                  ack → sender
+                          │
+                  (async) Relay drains outbox
+                          │
+                  Redis registry lookup per device
+                          │
+             ┌────────────┴────────────┐
+             ▼                         ▼
+        online: XADD             offline: XADD
+        ws:deliver:{node}        notif stream
+             │                         │
+             ▼                         ▼
+        WS Gateway → client      Notification Svc → APNs/FCM
+```
+
+### 5.2 Reconnect
+```
+WS lost → client reconnects → WS auth
+       → HTTP GET /v1/sync?since=cursor
+       → apply outbox rows since cursor
+       → resume WS live
+```
+
+### 5.3 Receipts
+```
+Recipient device receives message
+  → WS receipt.delivered → server
+  → Message Service updates outbox.delivered_at for that device
+    → Also updated in `msg_seen_status` table
+  → Relay pushes receipt to sender's devices
+  #TODO: Need to ensure atleast-once delivery with idempotency
+```
