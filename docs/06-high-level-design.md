@@ -111,13 +111,6 @@ validation happens client-side.
 - Returns ack to the sending gateway.
 - Does not deliver. Transport is Relay's job — it reads the outbox rows
   and pushes each to whatever WS node holds that device.
-- Handle media also:
-  - Issues signed upload/download URLs against object storage.
-  - Media metadata (media_id, mime, size, storage keys) is written to
-  Postgres by the HTTP API; the binary itself never touches our servers.
-  - No server-side inspection of media content. Format validation and
-  malware checks happen client-side, consistent with the E2EE model.
-- Auth, profile, groups, blocks, media, sync, chat list.
 - Stateless, scales horizontally.
 
 ### 3.4 Relay (stateless-ish worker)
@@ -143,6 +136,11 @@ validation happens client-side.
 
 ### 3.6 HTTP API
 - Auth, profile, groups, blocks, media, sync, chat list.
+- Media handling:
+  - Signing: issues signed upload/download URLs against object storage.
+  Media metadata is written to Postgres; the binary never touches our servers.
+  - No server-side inspection of media content. Format validation and
+  malware checks happen client-side, consistent with the E2EE model.
 - Stateless, scales horizontally.
 
 #### Why no seperate auth service:
@@ -207,3 +205,41 @@ Recipient device receives message
   → Relay pushes receipt to sender's devices
   #TODO: Need to ensure atleast-once delivery with idempotency
 ```
+
+## 6. Per-Device vs Per-User Granularity
+
+- **outbox** is per (message, device). It's the transport record:
+  "has this specific device received/read this event?"
+- **msg_seen_status** is per (message, user). It's the aggregate:
+  "has this user seen this message on any device?"
+
+These answer different questions and are intentionally separate. A user
+who has 3 devices has 3 outbox rows and 1 msg_seen_status row.
+
+## 7. Failure Boundaries
+
+- Message Service dies mid-send: client retries with same
+  `clientMsgId`; idempotency key prevents duplicates.
+- Relay dies: outbox rows stay undispatched; another worker picks them
+  up. PEL reclaim handles in-flight events.
+- WS Gateway dies: registry entry expires; clients reconnect to a new
+  node; sync catches them up.
+- Redis dies: registry rebuilds as clients reconnect; streams refill
+  from outbox on next drain.
+- Postgres primary dies: failover; writes briefly blocked; reads from
+  replica if configured.
+
+TODO:
+Details in `08-reliability.md`.
+
+
+## 8. Open Questions
+
+- [ ] Sticky vs non-sticky WS routing (decided: non-sticky, but noted
+      as revisitable in `04-api-design.md`).
+- [ ] Stream lifecycle when a WS gateway is decommissioned
+      (from `informal_notes.md`): TTL the stream.
+- [ ] Media access revocation on block — enforce at signed-URL issue
+      time, or at download time?
+      Answer: Media access wont be revoked for already recieved messages. If media belongs to a message which was send before blocking, the message as well as media 
+      will be accessible
