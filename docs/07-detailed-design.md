@@ -455,3 +455,19 @@ TODO. Sketch:
 - Cache: per-session LRU of block lists, refreshed on block/unblock.
 - Direction: check both. (if A blocked B /& B blocked A)
 - Group exception: block applies only to DIRECT chats.
+
+---
+
+## 9. Idempotency and Ordering — Cross-Cutting
+
+Summary table:
+
+| Event | Idempotency key | Where enforced |
+|---|---|---|
+| message.send | (sender_id, client_msg_id) | unique index on chat_msg |
+| outbox delivery | outbox.id (cursor) | client-side cursor |
+| receipt.delivered (device) | (message_id, device_id) + `IS NULL` | outbox.delivered_at and msg_seen_status.delivered_at |
+| receipt.read (user) | (message_id, user_id) + `IS NULL` | msg_seen_status.read_at |
+| XAUTOCLAIM redelivery | outbox.id | client cursor dedupe |
+
+TODO: any event type not covered.
