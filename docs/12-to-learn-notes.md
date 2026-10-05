@@ -51,3 +51,45 @@ works under the hood.
   affect them?
 - When does multi-primary actually pay off vs. a well-run single
   primary? (Spoiler: geography and write locality, not "scale".)
+
+
+## 2. Multi-Region
+
+**Current:** Out of scope. Single-region deployment assumed throughout.
+
+**Trigger to revisit:** Users in multiple geographies where cross-region
+latency is unacceptable, or a product requirement for regional
+data residency.
+
+**Why it's hard:** The current design assumes one Postgres primary and
+one Redis. Multi-region means either:
+
+- **Active-passive.** One region serves writes; others serve reads
+  (stale) or redirect to the primary. Simpler, but fails if the
+  primary region goes down.
+- **Active-active.** Multiple regions accept writes. Requires solving
+  conflict resolution for messages, membership, receipts, and device
+  state. Far more complex; most chat systems don't do this at the
+  message level.
+
+**Other considerations:**
+
+- **User locality.** Most users talk to other users in the same region,
+  so region-pinning a chat (all participants route to one region) is a
+  common approach. Simpler than global consistency.
+- **Outbox and sync.** The cursor is per-device and global. In
+  multi-region, the cursor's source (the outbox) would need to be
+  either replicated (consistency questions) or region-local (breaks
+  cross-region chats).
+- **Redis registry.** Also would need per-region or replicated setup;
+  the registry is on the delivery hot path.
+
+**Leaning if revisited:** Region-pinning by chat, not active-active. Most
+chat traffic is local, and pinning avoids the hardest consistency
+problems while still reducing latency.
+
+**Learning notes:**
+- How do systems like Discord, Slack, or Matrix handle multi-region?
+- What is "home region" pinning, and how does it interact with user
+  mobility?
+- Consistency models: eventual, causal, strong — which fits chat?

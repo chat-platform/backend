@@ -245,3 +245,49 @@ Best-effort. Stale presence is possible:
 
 The product accepts stale presence as the cost of avoiding synchronous
 presence updates across the system.
+
+## 5. Failure Detection and Response
+
+| Component | Signal | Detection | Automated Response |
+|---|---|---|---|
+| WS Gateway | Process down | LB health check | LB removes node; clients reconnect |
+| Relay | No dispatch progress | Outbox lag metric | Alert; scale up |
+| Message Service | gRPC errors | Client-side + LB | Retry, circuit-break |
+| Postgres | Health check | Managed failover | Promote replica |
+| Redis | Connection errors | Client-side | Reconnect; degrade gracefully |
+| Notification Service | PEL growth | XPENDING metric | Scale up; investigate |
+
+TODO: formalize SLOs and alerts in `10-observability.md`.
+
+## 6. Recovery Procedures
+
+TODO. For each failure, what's the manual runbook?
+
+- Postgres failover: what to check, what to verify.
+- Redis loss: what rebuilds automatically, what doesn't.
+- WS Gateway rolling restart: drain behavior.
+- Relay scale-down: ensure no batch is left mid-flight.
+
+## 7. Design Properties Supporting Reliability
+
+Summary of the design choices that make the reliability story work:
+
+1. **Outbox is the source of truth.** Every durable event ends up in
+   Postgres before it's dispatched. Redis is transport.
+2. **Idempotency everywhere.** `client_msg_id` for sends, `outbox.id`
+   for delivery, `IS NULL` guards for receipts. Retries are safe.
+3. **Sync as universal recovery.** Any missed live event is recoverable
+   via `GET /v1/sync`. There's one catch-up mechanism, not many.
+4. **Uniform transport.** Messages, receipts, edits, deletes all flow
+   through the outbox. One path, one set of guarantees.
+5. **Non-sticky WS routing.** Gateways are disposable; no rebalance on
+   node loss.
+6. **At-least-once, not exactly-once.** Duplicates are deduped
+   client-side; simpler than coordination.
+
+## 8. Open / Deferred
+
+- [ ] Recovery runbooks (§6).
+- [ ] Backpressure: what happens when Relay can't keep up with outbox writes?
+- [ ] Outbox partition strategy at scale.
+- [ ] Multi-region — out of scope for now; see `12-to-learn-notes.md`.
