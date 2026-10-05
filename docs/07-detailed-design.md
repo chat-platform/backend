@@ -258,3 +258,11 @@ TODO: revisit if outbox write amplification becomes a problem. See: 11-future-no
 
 Receipt writes are idempotent because of the `IS NULL` guards. Reapplying
 a receipt is a no-op. This handles relay at-least-once.
+
+### 3.5 Notification Service consumer group
+
+Notification Service consumes `notif:stream` as a Redis Streams consumer
+group. Multiple workers(in notification service) share the stream; each message goes to one worker.
+On crash, the dead worker's un-acked messages sit in the group's PEL;
+other workers reclaim them via `XAUTOCLAIM` (idle threshold ~60s). This
+makes push delivery at-least-once under worker crashes.
