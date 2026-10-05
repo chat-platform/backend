@@ -67,6 +67,17 @@ Redis:
 Decision: Redis
     Status: Accepted
     Details: 
-        Hash per user, fields per connection, 
-        TTL + heartbeat. 
-        Explicit HDEL on disconnect.
+        Key:   ws:conn:{device_id}    (Per-device keys)
+        Value: {ws_node, conn_id}
+        TTL refreshed on heartbeat; key expires if the Gateway stops
+    heartbeating. Explicit DEL on clean disconnect.
+
+    Liveness is the key's TTL — no per-field timestamp, no reaper.
+    Device-to-user mapping stays in Postgres (device table); Redis
+    only tracks live connections.
+
+Why not a per-user hash:
+    A hash per user means every device's heartbeat writes to the same
+    key (contention), and per-field TTL isn't universally available
+    (HEXPIRE is Redis 7.4+). Per-device keys avoid both: one SET per
+    heartbeat, TTL handles cleanup, no reaper.

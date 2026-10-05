@@ -183,3 +183,14 @@ messages
 - Get events after cursor
 - Mark event delivered
 - Mark event read
+
+# Other
+## Redis - WS registruy
+    key: ws:conn:{device_id}
+    value: { ws_node, conn_id }
+    TTL:   refreshed on heartbeat (e.g. 90s, 3× heartbeat cadence)
+    notes:
+        - Presence in this key = device has a live socket.
+        - Explicit DEL on clean disconnect.
+        - Unclean disconnect: TTL expires the key; no reaper needed.
+        - Device-to-user mapping is in Postgres (device table), not here.

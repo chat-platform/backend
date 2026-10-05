@@ -162,9 +162,11 @@ under N ms during peak.
 
 ### 2.2 Registry lookup
 
-Redis key: `ws:conn:{user_id}` → hash of `{device_id → {ws_node,
-conn_id, last_heartbeat}}`. Relay reads the hash for the row's
-`recipient_id`, finds `row.device_id`, gets `ws_node`.
+Redis key: `ws:conn:{device_id}` → `{ws_node, conn_id}`, with a TTL
+refreshed on heartbeat. Relay looks up the row's `device_id` directly to
+find the current `ws_node`. No hash, no per-user aggregation in Redis —
+the device list lives in Postgres (`device` table), and Redis only tracks
+*live* connections for devices that currently have one.
 
 Race: the device may disconnect between the lookup and the `XADD`. The
 event lands in `ws:deliver:{ws_node}` but the socket is gone. The WS
