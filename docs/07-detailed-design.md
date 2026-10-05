@@ -254,7 +254,7 @@ every event (message, receipt, edit, delete) is delivered the same way.
 
 TODO: revisit if outbox write amplification becomes a problem. See: 11-future-notes.md §1
 
-### 3.4 Idempotency (TODO from 06 §5.3)
+### 3.4 Idempotency
 
 Receipt writes are idempotent because of the `IS NULL` guards. Reapplying
 a receipt is a no-op. This handles relay at-least-once.

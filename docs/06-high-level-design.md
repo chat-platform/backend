@@ -203,7 +203,6 @@ Recipient device receives message
   → Message Service updates outbox.delivered_at for that device
     → Also updated in `msg_seen_status` table
   → Relay pushes receipt to sender's devices
-  #TODO: Need to ensure atleast-once delivery with idempotency
 ```
 
 ## 6. Per-Device vs Per-User Granularity
