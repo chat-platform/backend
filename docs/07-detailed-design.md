@@ -443,3 +443,15 @@ that device are not deleted — they age out via retention (§02 §1.9).
 Deleting them isn't necessary; the device won't reconnect with the
 revoked session, so the rows are never claimed.
 TODO: Deletion can be considered as retention is 30 days.
+
+
+---
+
+## 8. Block Enforcement
+
+TODO. Sketch:
+
+- Where checked: Message Service on send, at authorization time.
+- Cache: per-session LRU of block lists, refreshed on block/unblock.
+- Direction: check both. (if A blocked B /& B blocked A)
+- Group exception: block applies only to DIRECT chats.
