@@ -59,17 +59,19 @@ multi-device echo is **on**: a message sent by user X from device A is
 also delivered to X's other devices (B, C), so they see it in real time
 and stay in sync.
 
-- **DIRECT chat**: the peer user's devices, plus the sender's own other
-  devices.
-- **GROUP chat**: every member's devices, plus the sender's own other
-  devices.
+- **DIRECT chat**: the peer user's devices, plus all of the sender's own
+  devices (including the originating device).
+- **GROUP chat**: every member's devices, including all of the sender's
+  own devices (including the originating device).
 
-The sender's originating device (A) is **excluded** — it already has the
-message optimistically and doesn't need an echo of its own send.
+The sender's originating device (A) **is included** — it receives its own
+echo as a fallback acknowledgement. If the inline `message.ack` is lost
+(WS drop, Gateway crash, network failure), the echo arriving via the
+normal transport confirms the message was durably stored, and A can
+reconcile its optimistic state (§7.1).
 
-So N = (peer's live devices) + (sender's other live devices) for a DIRECT
-chat, and N = (sum of all members' live devices − sender's sending device)
-for a GROUP chat.
+So N = (peer's live devices) + (sender's all live devices) for a DIRECT
+chat, and N = (sum of all members' live devices) for a GROUP chat.
 
 ### 1.4 The transaction
 
@@ -413,17 +415,24 @@ TODO. Sketch:
 
 ### 7.1 Own-device echo
 
-When user X sends from device A, device A gets the primary
-acknowledgement inline (`message.ack` from Message Service after the
-transaction commits). This is the fast path.
+Device A receives two signals for its own send:
 
-Echo to device A's own outbox row is a **fallback**: it is written so
-that if the ack is lost (WS drop, Gateway crash, network failure), the
-echo arrives via the normal transport and confirms the message was
-stored. Device A can reconcile its optimistic state against it.
+- **Inline ack** (`message.ack { clientMsgId, messageId, ts }`) from
+  Message Service right after commit. Primary signal. Tells A the
+  message is durably stored.
+- **Echo** — an outbox row addressed to A, delivered via the normal
+  transport. Fallback signal. Arrives whether or not the ack did.
 
-X's other devices (B, C) always receive their own outbox rows. For
-them, echo is the primary delivery path — they have no inline ack.
+**Client behavior when the ack is lost:** A may mark the message as
+sent *before* receiving the ack, based on optimistic UI. The message
+should also be marked **delivered** even if A never received the ack —
+the echo (or sync on reconnect) will confirm the server committed it.
+The client must not treat "no ack received" as "not sent"; the message
+is recoverable and should not be shown as failed.
+
+Concretely: on reconnect (or on receiving the echo), if A finds its own
+message in the outbox with the same `clientMsgId`, it marks the message
+sent (and delivered) rather than re-sending.
 
 ### 7.2 Read state across devices
 
@@ -471,3 +480,17 @@ Summary table:
 | XAUTOCLAIM redelivery | outbox.id | client cursor dedupe |
 
 TODO: any event type not covered.
+
+---
+
+## 10. Open / Deferred
+
+- [ ] Batch size and poll interval for Relay drain.
+- [x] All-devices vs any-device aggregation for `msg_seen_status`.
+- [x] Own-device echo: yes or no
+- [x] Sync buffer location: memory vs Redis.
+- [x] Cursor-too-old handling.
+- [ ] Group admin events, reactions, edits/deletes propagation.
+- [x] Message expiry (30-day undelivered) — where enforced, how surfaced.
+- [ ] Push coalescing window size.
+- [ ] Presence fan-out: who gets notified on online/offline.

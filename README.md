@@ -38,7 +38,7 @@ distributed-system concepts.
 - [x] API design
 - [x] Data model
 - [x] High-level architecture
-- [ ] Detailed design
+- [x] Detailed design
 - [ ] Reliability
 - [ ] Security
 - [ ] Observability
