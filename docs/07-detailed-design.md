@@ -351,3 +351,48 @@ The client applies the returned events, sets `last_seen` to the highest
 `id` received, and resumes live. Events older than the retention window
 are simply not delivered. No "resync from scratch" signal — the client
 does not wipe local state.
+
+---
+
+## 5. Presence
+
+### 5.1 Registry
+
+Each live device has a Redis key:
+
+    ws:conn:{device_id} → {ws_node, conn_id}
+
+TTL is refreshed on every heartbeat. A clean disconnect deletes the key.
+An unclean one lets it expire.
+
+Liveness = key exists. There is no per-user structure in Redis; the
+device list comes from Postgres (`device` table), and Redis only says
+which of those devices currently have a live socket.
+
+### 5.2 Online / offline
+
+- **Online** = the user has at least one device whose `ws:conn:{device_id}`
+  key exists.
+- **Last seen** = `max(device.last_seen_at)` across the user's devices,
+  read from Postgres. Updated on disconnect (and periodically during a
+  long-lived connection).
+
+### 5.3 Heartbeat
+
+Gateway pings; client pongs; missed pongs mark the socket dead.
+TODO. Decide cadence (e.g. 30s) and TTL (e.g. 90s = 3× cadence).
+
+### 5.4 Presence fan-out
+
+TODO. Who gets notified when a user goes online/offline:
+- Only contacts with an open chat?
+- Only contacts currently subscribed to presence?
+- Debounce: a user flipping between networks shouldn't spam contacts.
+
+### 5.5 Write amplification
+
+Presence changes are frequent. Pushing every flip live to every contact
+is expensive. TODO: batch or debounce — e.g. coalesce per-contact
+presence updates over a short window before fan-out.
+
+---
