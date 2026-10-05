@@ -80,7 +80,7 @@ Single Postgres transaction per message. Order:
    sender_id, event_type, payload) VALUES (...)` × N devices
 
 The transaction is insert-only for `chat_msg` and `outbox`. The outbox
-timestamps `dispatched_at`, `delivered_at`, `read_at` are set later by
+timestamps `dispatched_at`, `delivered_at` are set later by
 Relay and receipt handlers.
 
 ### 1.5 Response and retry
@@ -237,11 +237,6 @@ the chat and the client sends `receipt.read { chatId, upToMessageId }`.
 Server-side this is a range update:
 
 ```
-UPDATE outbox
-SET read_at = now()
-WHERE chat_id = ? AND recipient_id = ? AND message_id <= ?
-  AND read_at IS NULL;
-
 UPDATE msg_seen_status
 SET read_at = now()
 WHERE user_id = ? AND message_id <= ?
