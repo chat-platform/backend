@@ -32,12 +32,12 @@ distributed-system concepts.
 
 ## Design Process
 
-- [ ] Requirements
-- [ ] Scale estimation
-- [ ] User flows
-- [ ] API design
-- [ ] Data model
-- [ ] High-level architecture
+- [x] Requirements
+- [x] Scale estimation
+- [x] User flows
+- [x] API design
+- [x] Data model
+- [x] High-level architecture
 - [ ] Detailed design
 - [ ] Reliability
 - [ ] Security
