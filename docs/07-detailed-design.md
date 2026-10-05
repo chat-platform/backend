@@ -396,3 +396,13 @@ is expensive. TODO: batch or debounce — e.g. coalesce per-contact
 presence updates over a short window before fan-out.
 
 ---
+
+## 6. Media Flow
+
+TODO. Sketch:
+
+- Upload: Core signs URL → client uploads direct → client calls back
+  with media_id → Core writes `media` row.
+- Download: Core signs URL → client fetches from object storage.
+- Thumbnails: generated client-side (E2EE constraint).
+- Association: `chat_msg_media` joins messages to media.
