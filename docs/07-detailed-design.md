@@ -195,3 +195,64 @@ delivery is a no-op.
 
 Server-side, `dispatched_at` may be set twice for the same row.
 Harmless — it's just a timestamp, and the value converges.
+
+---
+
+## 3. Delivery Receipts and Read State
+
+Two tables, two granularities (see `06` §6):
+
+- `outbox` — per (message, device). Transport and per-device receipt.
+- `msg_seen_status` — per (message, user). Aggregated read state.
+
+### 3.1 Delivery receipt
+
+When a device receives `message.recv`, it sends `receipt.delivered {
+messageId }`. Server:
+
+```
+UPDATE outbox
+SET delivered_at = now()
+WHERE message_id = ? AND device_id = ? AND delivered_at IS NULL
+```
+
+Idempotent via `delivered_at IS NULL`.
+
+Then aggregate to user level. Any device delivering is sufficient — the
+user is considered delivered as soon as one of their devices confirms:
+
+```
+UPDATE msg_seen_status
+SET delivered_at = now()
+WHERE message_id = ? AND user_id = ? AND delivered_at IS NULL
+```
+TODO: Need to ensure atleast-once here
+
+### 3.2 Read receipt
+
+Same shape as delivery, with `read_at`. Triggered when the user opens
+the chat and the client sends `receipt.read { chatId, upToMessageId }`.
+
+`upToMessageId` marks all messages in the chat up to that ID as read.
+Server-side this is a range update:
+
+```
+UPDATE outbox
+SET read_at = now()
+WHERE chat_id = ? AND recipient_id = ? AND message_id <= ?
+  AND read_at IS NULL
+```
+TODO: In future (atleast), if there are messages missed via block, messages wont be delivered, right? so, update as read as only when delivered_at is not null
+
+### 3.3 Propagation to sender
+
+Each receipt write on the recipient side is itself an event that must
+reach the sender's devices. Receipts flow through the outbox, same as
+messages: the receipt handler inserts an outbox row per sender device
+(`event_type = RECEIPT`). One transport, one cursor, one sync path —
+every event (message, receipt, edit, delete) is delivered the same way.
+
+### 3.4 Idempotency (TODO from 06 §5.3)
+
+Receipt writes are idempotent because of the `IS NULL` guards. Reapplying
+a receipt is a no-op. This handles relay at-least-once.

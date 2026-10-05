@@ -135,6 +135,8 @@ dispatched_at          -- when handed to a ws gateway/or to the msg broker
 delivered_at           -- when device acked RECEIVED
 read_at                -- when device acked SEEN
 
+TODO: do we need read_at here as there is already msg_seen_status table?
+
 outbox = per-device delivery/transport record (how do I get this event to this specific device)
 -- Granularity: one outbox row per (message, recipient device).
 -- This row *is* the per-device delivery record — no separate table.
