@@ -406,3 +406,40 @@ TODO. Sketch:
 - Download: Core signs URL → client fetches from object storage.
 - Thumbnails: generated client-side (E2EE constraint).
 - Association: `chat_msg_media` joins messages to media.
+
+---
+
+## 7. Multi-Device Semantics
+
+### 7.1 Own-device echo
+
+When user X sends from device A, device A gets the primary
+acknowledgement inline (`message.ack` from Message Service after the
+transaction commits). This is the fast path.
+
+Echo to device A's own outbox row is a **fallback**: it is written so
+that if the ack is lost (WS drop, Gateway crash, network failure), the
+echo arrives via the normal transport and confirms the message was
+stored. Device A can reconcile its optimistic state against it.
+
+X's other devices (B, C) always receive their own outbox rows. For
+them, echo is the primary delivery path — they have no inline ack.
+
+### 7.2 Read state across devices
+
+Read is user-level (see §3.1). Reading on any device marks the message
+read for the user (`msg_seen_status.read_at`), and the sender's devices
+see the receipt via the outbox (§3.3). Other devices of the reader learn
+the message is read when their UI next queries user-level read state,
+or on their next sync.
+
+TODO: decide whether reading on device A explicitly pushes a state
+update to device B, or B learns lazily on next sync/render.
+
+### 7.3 Device removal
+
+Revoke the session, delete the registry entry. Existing outbox rows for
+that device are not deleted — they age out via retention (§02 §1.9).
+Deleting them isn't necessary; the device won't reconnect with the
+revoked session, so the rows are never claimed.
+TODO: Deletion can be considered as retention is 30 days.
