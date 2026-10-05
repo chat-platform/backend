@@ -252,6 +252,8 @@ messages: the receipt handler inserts an outbox row per sender device
 (`event_type = RECEIPT`). One transport, one cursor, one sync path —
 every event (message, receipt, edit, delete) is delivered the same way.
 
+TODO: revisit if outbox write amplification becomes a problem. See: 11-future-notes.md §1
+
 ### 3.4 Idempotency (TODO from 06 §5.3)
 
 Receipt writes are idempotent because of the `IS NULL` guards. Reapplying
