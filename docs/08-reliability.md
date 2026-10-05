@@ -205,3 +205,43 @@ it was only a hint, and the client will sync when it next connects.
 
 **No impact on message delivery** — the message is already durable in
 the outbox.
+
+## 4. Consistency
+
+### 4.1 Message durability
+
+Once `message.ack` is sent, the message is in Postgres. A crash of any
+downstream component cannot lose it.
+
+### 4.2 Delivery vs. read state
+
+- `outbox.delivered_at` is per-device: "this device has this message."
+- `msg_seen_status.delivered_at` / `read_at` are per-user: "this user
+  has delivered/read this message on any device."
+
+These are eventually consistent. There is a window where a device has
+delivered but the user-level row hasn't been updated. The UI should read
+from user-level for the tick, so the tick may lag by a moment. Acceptable.
+
+### 4.3 Membership changes
+
+Message Service resolves recipients outside the write transaction
+(`07` §1.3). A membership change landing between resolution and write
+takes effect on the *next* message, not the current one.
+
+**Consequence:** A user removed from a group between resolve and write
+still receives the current message; a user added does not receive it.
+Neither violates any guarantee the product makes, and the window is a
+few milliseconds, so races are extremely rare in practice. Closing it
+entirely would require locking membership rows on every send, which
+isn't worth the contention. A blocked member getting one immediate
+message is acceptable for the same reason.
+
+### 4.4 Presence
+
+Best-effort. Stale presence is possible:
+- Heartbeat hasn't expired yet after a clean disconnect.
+- The registry may not reflect a device that just went offline.
+
+The product accepts stale presence as the cost of avoiding synchronous
+presence updates across the system.
