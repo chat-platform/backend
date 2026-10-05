@@ -266,3 +266,88 @@ group. Multiple workers(in notification service) share the stream; each message 
 On crash, the dead worker's un-acked messages sit in the group's PEL;
 other workers reclaim them via `XAUTOCLAIM` (idle threshold ~60s). This
 makes push delivery at-least-once under worker crashes.
+
+---
+
+## 4. Reconnect and Sync
+
+### 4.1 Cursor semantics
+
+Each device has a cursor: the highest `outbox.id` it has processed.
+Stored client-side, sent as `?since=<cursor>` on `/v1/sync`.
+
+`outbox.id` is a global monotonic sequence, but the sync query filters
+by `device_id`, so the cursor is effectively per-device.
+
+### 4.2 The sync query
+
+```
+SELECT * FROM outbox
+WHERE device_id = ?
+  AND id > ?
+ORDER BY id
+LIMIT page_size
+```
+
+Backing index: `(device_id, id)`.
+
+Client pages until it receives fewer than `page_size` rows, then
+transitions to live. During the sync, the WS Gateway buffers delivery
+frames for this device (see §4.4) — the client is not receiving live
+events yet, so nothing races the sync.
+
+The client tracks:
+- `since` — the cursor it sends.
+- `last_seen` — the highest `id` it has applied so far.
+
+On each page, `last_seen` advances to the max `id` in the page. If the
+client crashes mid-sync, it resumes with `since=last_seen`. Pages are
+applied in order; a single `id` gap between pages is not expected
+because the query is `ORDER BY id` and monotonic within a device.
+
+### 4.3 Ordering
+
+`id` preserves insertion order. For NEW_MESSAGE events, insertion order
+is send order (Message Service writes them in a single TX per message,
+but across messages the order is whatever Postgres assigned). For
+EDIT and DELETE, the same. So the client sees events in the order the
+server processed them.
+
+TODO: cross-check with the edit constraint in `02` — edits originate
+from the sending device. If device A edits a message and device B reads
+it via sync, does B see the edit before or after the original? Answer:
+after, because the edit has a higher `outbox.id`. Good.
+
+### 4.4 Sync vs live handoff
+
+Sequence on reconnect:
+
+1. Client opens WS, authenticates.
+2. WS Gateway registers the connection, but does **not** yet stream
+   live events for this device.
+3. Client calls `GET /v1/sync?since=<cursor>` over HTTP.
+4. Client applies events, advances cursor.
+5. Client signals "ready" over WS.
+6. WS Gateway flushes any events that landed in `ws:deliver:{node}`
+   during the sync window.
+7. Live streaming continues.
+
+The buffering in step 6 prevents the "subscribe before backfill drops
+events" problem. 
+Buffer lives in WS Gateway memory, not Redis. If the Gateway crashes
+mid-sync, the client's socket dies, so the standard reconnect flow runs
+again — connect, auth, sync, ready. No special recovery path; the
+buffer is discarded and the client re-syncs from the outbox. Durability
+is not required because the buffer is a latency optimization, not a
+correctness mechanism.
+
+### 4.5 Cursor too old
+
+If `since` predates the retention window (see `02` §1.9, 30 days), some
+outbox rows are gone. The server returns whatever rows still exist and
+lets the client continue from there.
+
+The client applies the returned events, sets `last_seen` to the highest
+`id` received, and resumes live. Events older than the retention window
+are simply not delivered. No "resync from scratch" signal — the client
+does not wipe local state.
