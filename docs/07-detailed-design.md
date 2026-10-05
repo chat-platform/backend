@@ -397,6 +397,39 @@ Presence changes are frequent. Pushing every flip live to every contact
 is expensive. TODO: batch or debounce — e.g. coalesce per-contact
 presence updates over a short window before fan-out.
 
+### 5.6 Registration failures and recovery
+
+The Gateway writes `ws:conn:{device_id}` on connect. If the write fails
+(Redis unreachable(network partition)), the connection is still accepted — a device that
+can send is better than one that can neither send nor connect. It
+degrades to send-only until registration succeeds.
+
+**Queue.** Each Gateway keeps an in-memory queue of connections whose
+registry write failed or is pending. In-memory is sufficient: if the
+Gateway crashes, the sockets die with it, and the entries become
+meaningless.
+
+**Re-registration on Redis recovery.** When Redis becomes reachable,
+the Gateway drains the queue. For each connection:
+
+1. Ping the client, wait for a pong within the heartbeat timeout.
+2. On pong: write `ws:conn:{device_id}`. The connection becomes routable.
+3. On timeout: drop the socket. The client's next reconnect handles it.
+
+**Why the ping-pong.** During a Redis partition, a client connected to
+Gateway A (unregistered) may also reconnect to Gateway B (registered)
+once its socket to A drops. If Gateway A later re-registers without
+checking, it overwrites B's entry with a stale `ws_node` — a phantom
+routing target. The ping-pong confirms the client is still on A before
+writing.
+
+**Reuse the heartbeat ping.** The check reuses the existing heartbeat
+ping/pong — no new frame type needed.
+
+**Stagger the drain.** At scale, draining every Gateway's queue at once
+produces a Redis write spike on recovery. Stagger the drain (random
+offset within a window) or rate-limit writes per Gateway.
+
 ---
 
 ## 6. Media Flow
