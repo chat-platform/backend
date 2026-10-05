@@ -141,7 +141,14 @@ loop:
 
     UPDATE outbox SET dispatched_at = now() WHERE id IN (...)
 
-    sleep(poll_interval)
+    if rows is empty:
+        sleep(idle_interval)      # slow down
+    else:
+        dispatch(rows)
+        if len(rows) < batch_size:
+            sleep(short_interval) # batch wasn't full; maybe more coming
+        else:
+            continue
 ```
 
 `FOR UPDATE SKIP LOCKED` lets multiple Relay instances drain in parallel
@@ -150,7 +157,7 @@ batch; global ordering across batches is not guaranteed.
 
 TODO: Ensure global ordering atleast at ws-gateways.
 
-TODO: decide `batch_size` and `poll_interval` — target outbox drain lag
+TODO: decide `batch_size` and poll intervals: `idle_interval` and `short_interval` — target outbox drain lag
 under N ms during peak.
 
 ### 2.2 Registry lookup
