@@ -240,9 +240,14 @@ Server-side this is a range update:
 UPDATE outbox
 SET read_at = now()
 WHERE chat_id = ? AND recipient_id = ? AND message_id <= ?
+  AND read_at IS NULL;
+
+UPDATE msg_seen_status
+SET read_at = now()
+WHERE user_id = ? AND message_id <= ?
   AND read_at IS NULL
+  AND delivered_at IS NOT NULL;
 ```
-TODO: In future (atleast), if there are messages missed via block, messages wont be delivered, right? so, update as read as only when delivered_at is not null
 
 ### 3.3 Propagation to sender
 
