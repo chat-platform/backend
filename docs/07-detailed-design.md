@@ -115,3 +115,74 @@ unique index is the dedup key (see §10) — one stored message per
   sender has one device, zero outbox rows. Valid but unusual — arises
   when a user creates a chat with themselves, or when all other members
   have left a group.
+
+---
+
+## 2. Outbox → Relay → WS Delivery
+
+### 2.1 Relay drain loop
+
+Relay runs as N worker instances. Each instance:
+
+```
+loop:
+    rows = SELECT * FROM outbox
+           WHERE dispatched_at IS NULL
+           ORDER BY id
+           LIMIT batch_size
+           FOR UPDATE SKIP LOCKED
+
+    for each row:
+        ws_node = registry.lookup(row.device_id)
+        if ws_node:
+            XADD ws:deliver:{ws_node} * <event>
+        else:
+            XADD notif:stream * <event>
+
+    UPDATE outbox SET dispatched_at = now() WHERE id IN (...)
+
+    sleep(poll_interval)
+```
+
+`FOR UPDATE SKIP LOCKED` lets multiple Relay instances drain in parallel
+without contending. `ORDER BY id` preserves insertion order within a
+batch; global ordering across batches is not guaranteed.
+
+TODO: Ensure global ordering atleast at ws-gateways.
+
+TODO: decide `batch_size` and `poll_interval` — target outbox drain lag
+under N ms during peak.
+
+### 2.2 Registry lookup
+
+Redis key: `ws:conn:{user_id}` → hash of `{device_id → {ws_node,
+conn_id, last_heartbeat}}`. Relay reads the hash for the row's
+`recipient_id`, finds `row.device_id`, gets `ws_node`.
+
+Race: the device may disconnect between the lookup and the `XADD`. The
+event lands in `ws:deliver:{ws_node}` but the socket is gone. The WS
+Gateway drops it on delivery. The client's next reconnect-sync will
+catch it (§5). Acceptable.
+
+### 2.3 Streams
+
+- One stream per WS node: `ws:deliver:{node_id}`.
+- One stream for notifications: `notif:stream`.
+- Consumer group on each: WS nodes consume their own; Notification
+  Service consumes `notif:stream`.
+- Stream lifecycle: TTL when a WS node is decommissioned (see `06` §8).
+TODO: decide this TTL
+
+### 2.4 Duplicate delivery
+
+Relay is at-least-once by construction. It dispatches the event (`XADD`)
+*then* sets `dispatched_at`. If it crashes between those two steps, the
+outbox row stays undispatched and is re-dispatched on the next poll —
+so the same event can be sent twice.
+
+Deduplication happens client-side on `outbox.id` (the cursor). The
+client's sync cursor already skips anything it has seen, so a duplicate
+delivery is a no-op.
+
+Server-side, `dispatched_at` may be set twice for the same row.
+Harmless — it's just a timestamp, and the value converges.
