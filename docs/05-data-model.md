@@ -101,6 +101,7 @@ device
 device_id
 user_id → user.user_id
 platform          // ANDROID / IOS / WEB
+is_primary        -- true for the phone, false for companions like whatsapp-web
 device_name
 created_at
 last_seen_at
