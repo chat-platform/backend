@@ -93,3 +93,36 @@ problems while still reducing latency.
 - What is "home region" pinning, and how does it interact with user
   mobility?
 - Consistency models: eventual, causal, strong — which fits chat?
+
+## 3. Distributed Tracing
+
+**Current:** Not instrumented. Rely on metrics + logs; add tracing
+temporarily when investigating an incident.
+
+**Trigger to revisit:**
+- In a real project: debugging gets hard — a latency regression that
+  spans services, or an incident that logs alone can't reconstruct.
+- Here: learning. Tracing is a standard observability tool that's
+  currently absent from the design. Worth understanding what it would
+  look like and when it pays off.
+
+**Other options:**
+
+- **Head sampling.** Decide at request start whether to trace (e.g.
+  0.1%). Cheap, but errors and slow paths get diluted.
+- **Tail sampling.** Buffer spans, decide after the trace finishes based
+  on outcome. Keeps interesting traces, needs a buffering collector.
+- **On-demand tracing.** Off by default; enable for a specific user,
+  chat, or window during debugging. Requires instrumentation to already
+  exist in code, gated by config.
+
+**Leaning if revisited:** On-demand tracing. Near-zero steady-state
+cost, on exactly when needed. Upfront cost is span code in every service.
+
+**Learning notes:**
+- How does a trace cross async hops (outbox → relay → stream → WS)?
+  Standard tracing assumes a call chain, not an event chain.
+- Head vs. tail sampling: cost, complexity, what each misses.
+- OpenTelemetry: what it standardizes, what it doesn't.
+- What does a trace look like for a message send? How many spans, which
+  services?
