@@ -119,7 +119,6 @@ unique index is the dedup key (see §10) — one stored message per
   have left a group.
 
 ---
-
 ## 2. Outbox → Relay → WS Delivery
 
 ### 2.1 Relay drain loop
@@ -138,10 +137,14 @@ loop:
         ws_node = registry.lookup(row.device_id)
         if ws_node:
             XADD ws:deliver:{ws_node} * <event>
+            routed_to = 'WS'
         else:
             XADD notif:stream * <event>
+            routed_to = 'NOTIF'
 
-    UPDATE outbox SET dispatched_at = now() WHERE id IN (...)
+    UPDATE outbox
+    SET dispatched_at = now(), routed_to = <WS|NOTIF>
+    WHERE id IN (...)
 
     if rows is empty:
         sleep(idle_interval)      # slow down
@@ -172,8 +175,8 @@ the device list lives in Postgres (`device` table), and Redis only tracks
 
 Race: the device may disconnect between the lookup and the `XADD`. The
 event lands in `ws:deliver:{ws_node}` but the socket is gone. The WS
-Gateway drops it on delivery. The client's next reconnect-sync will
-catch it (§5). Acceptable.
+Gateway drops it on delivery. The retry scan (§2.4) picks it up, or the
+client's next reconnect-sync catches it (§4). Acceptable.
 
 ### 2.3 Streams
 
@@ -184,13 +187,81 @@ catch it (§5). Acceptable.
 - Stream lifecycle: TTL when a WS node is decommissioned (see `06` §8).
 TODO: decide this TTL
 
-### 2.4 Duplicate delivery
+### 2.4 Retry scan
+
+Relay's initial dispatch is a one-shot: it hands the event to a WS
+stream or the notification stream, marks `dispatched_at`, and moves on.
+Once marked, it never re-dispatches.
+
+But a row dispatched to a WS stream can still be undelivered: the stream
+entry is lost (Redis crash, failover, eviction), the Gateway crashes
+before consuming, or the socket silently dies. In these cases, the row
+is dispatched but the client never received it.
+
+A separate retry scan finds and re-dispatches these rows:
+
+```
+loop:
+    rows = SELECT * FROM outbox
+           WHERE routed_to = 'WS'
+             AND dispatched_at IS NOT NULL
+             AND delivered_at IS NULL
+             AND dispatched_at < now() - retry_threshold
+             AND dispatched_at > now() - retry_window
+           ORDER BY id
+           LIMIT batch_size
+           FOR UPDATE SKIP LOCKED
+
+    for each row:
+        ws_node = registry.lookup(row.device_id)
+        if ws_node:
+            XADD ws:deliver:{ws_node} * <event>
+
+    sleep(retry_interval)
+```
+
+Key points:
+
+- **Only `routed_to = 'WS'`.** Rows routed to `notif:stream` (offline
+  devices) are excluded — those recover via sync on reconnect, and
+  retrying them would flood the notification stream.
+- **`retry_threshold`** — how long a row must be dispatched-and-
+  undelivered before it's considered stuck. Must exceed the normal
+  delivery round-trip (Gateway send → client ack → Message Service →
+  `delivered_at`), otherwise healthy in-flight rows get retried.
+- **`retry_window`** — how far back the scan looks. Rows dispatched
+  longer ago than this are outside the window; they're either
+  abandoned or handled by another mechanism.
+- **`delivered_at IS NULL`** — the row wasn't acked by the client.
+- **Idempotent re-dispatch.** The client dedupes on `outbox.id`. A
+  retry that arrives after the message was actually delivered is a
+  no-op.
+
+Retry is a correctness mechanism, not just a latency optimization: the
+client cannot detect gaps in the global `outbox.id` sequence (it sees
+only its own rows, which are non-consecutive), so a lost event would be
+silently missing without a server-side redelivery path. The retry scan
+is that path.
+
+If the device is offline at retry time, `registry.lookup` returns
+nothing and the row is skipped. It will be picked up on the device's
+next reconnect-sync.
+
+TODO: decide `retry_threshold`, `retry_window`, `retry_interval`, and
+the scan's `batch_size`.
+
+### 2.5 Duplicate delivery
 
 Relay is at-least-once by construction. It dispatches the event (`XADD`)
 *then* sets `dispatched_at`. If it crashes between those two steps, the
 outbox row stays undispatched and is re-dispatched on the next poll —
 so the same event can be sent twice.
 
+The retry scan (§2.4) can also re-dispatch a row that was already
+delivered but whose ack was lost — the row appears undelivered until
+`delivered_at` is written.
+
+In both cases, the client sees the same event twice. 
 Deduplication happens client-side on `outbox.id` (the cursor). The
 client's sync cursor already skips anything it has seen, so a duplicate
 delivery is a no-op.
