@@ -131,6 +131,7 @@ sender_id              -- FK → user.user_id (who caused it)
 event_type             -- NEW_MESSAGE | EDIT | DELETE | REACTION | ...
 payload                -- event-specific delta (NULL for NEW_MESSAGE)
 created_at             
+routed_to              -- ENUM: WS,NOTIF. Indicates where the dispatch happened to.
 dispatched_at          -- when handed to a ws gateway/or to the msg broker
 delivered_at           -- when device acked RECEIVED
 
