@@ -54,24 +54,28 @@ sender's WS Gateway. Block failures are silent to the sender.
 
 ### 1.3 Recipient resolution
 
-Fan-out decides how many outbox rows to write. In all chat types,
-multi-device echo is **on**: a message sent by user X from device A is
-also delivered to X's other devices (B, C), so they see it in real time
-and stay in sync.
+Fan-out decides how many outbox rows to write. Multi-device echo is
+**on** for all of a user's devices **except the originating device**: a
+message sent by user X from device A is delivered to X's other devices
+(B, C), so they see it in real time and stay in sync, but is **not**
+echoed back to A.
 
-- **DIRECT chat**: the peer user's devices, plus all of the sender's own
-  devices (including the originating device).
-- **GROUP chat**: every member's devices, including all of the sender's
-  own devices (including the originating device).
+- **DIRECT chat**: the peer user's live devices, plus the sender's other
+  live devices (excluding the originating device A).
+- **GROUP chat**: every member's live devices, excluding the sender's
+  originating device A.
 
-The sender's originating device (A) **is included** — it receives its own
-echo as a fallback acknowledgement. If the inline `message.ack` is lost
-(WS drop, Gateway crash, network failure), the echo arriving via the
-normal transport confirms the message was durably stored, and A can
-reconcile its optimistic state (§7.1).
+The originating device (A) is **excluded** from fan-out. Instead, A
+relies on the inline `message.ack` as the sole durability confirmation.
+If the ack is lost (WS drop, Gateway crash, network failure), A retries
+the send with the same `clientMsgId`. The server's idempotent handler
+recognizes the existing `clientMsgId` and **re-returns the same ack**
+without writing a duplicate outbox row, allowing A to reconcile its
+optimistic state (§7.1).
 
-So N = (peer's live devices) + (sender's all live devices) for a DIRECT
-chat, and N = (sum of all members' live devices) for a GROUP chat.
+So N = (peer's live devices) + (sender's other live devices) for a
+DIRECT chat, and N = (sum of all members' live devices) − 1 for a GROUP
+chat.
 
 ### 1.4 The transaction
 
@@ -517,26 +521,21 @@ TODO. Sketch:
 
 ## 7. Multi-Device Semantics
 
-### 7.1 Own-device echo
+### 7.1 Client-side reconciliation
 
-Device A receives two signals for its own send:
+Sending is optimistic: the client renders the message immediately with a
+pending state and retries until acknowledged.
 
-- **Inline ack** (`message.ack { clientMsgId, messageId, ts }`) from
-  Message Service right after commit. Primary signal. Tells A the
-  message is durably stored.
-- **Echo** — an outbox row addressed to A, delivered via the normal
-  transport. Fallback signal. Arrives whether or not the ack did.
+- **Ack received**: mark the message as sent (replace optimistic state).
+- **Ack lost / not received within timeout**: retry the send with the
+  same `clientMsgId`. The server dedupes and re-returns the same ack.
+- **Retry exhausted**: mark the message as failed and surface it in the
+  UI for manual retry or discard.
 
-**Client behavior when the ack is lost:** A may mark the message as
-sent *before* receiving the ack, based on optimistic UI. The message
-should also be marked **delivered** even if A never received the ack —
-the echo (or sync on reconnect) will confirm the server committed it.
-The client must not treat "no ack received" as "not sent"; the message
-is recoverable and should not be shown as failed.
-
-Concretely: on reconnect (or on receiving the echo), if A finds its own
-message in the outbox with the same `clientMsgId`, it marks the message
-sent (and delivered) rather than re-sending.
+Since the originating device is excluded from fan-out (§1.3), the ack is
+the only durability signal — the client must never mark a message as
+sent without it. If no ack is received, retry with exponential back-off
+up to a capped ceiling.
 
 ### 7.2 Read state across devices
 
@@ -587,7 +586,10 @@ TODO: any event type not covered.
 
 ---
 
-## 10. Open / Deferred
+## 10. Client side delegations:
+
+
+## Open / Deferred
 
 - [ ] Batch size and poll interval for Relay drain.
 - [x] All-devices vs any-device aggregation for `msg_seen_status`.
