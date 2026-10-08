@@ -21,8 +21,8 @@ What the system promises, and under what conditions.
 |---|---|---|
 | Message durability | Once acked, never lost | Postgres commit before ack |
 | Message delivery | At-least-once to each target device | Outbox + relay re-dispatch |
-| Message ordering | Per-device, by `outbox.id` | Sync query `ORDER BY id` |
-| Receipt delivery | At-least-once | `IS NULL` idempotent writes |
+| Message ordering | Per-device, per-table, by `direct_outbox.id` / `group_outbox.id` | Sync query `ORDER BY id` |
+| Receipt delivery | At-least-once | Outbox dispatch; client dedup on the first receipt |
 | Push notification | Best-effort | Not source of truth; sync catches up |
 | Presence | Best-effort, eventually consistent | Registry TTL; no durability |
 
@@ -64,16 +64,16 @@ their sockets drop.
 **Recovery:**
 - Clients reconnect to other WS nodes; the LB routes them.
 - Reconnect runs the standard sync flow, pulling missed events from the
-  outbox.
+  outboxes.
 - The abandoned stream `ws:deliver:{node_id}` is drained by... nobody.
   Its entries are simply lost — but they were never the source of truth;
-  the outbox rows they were derived from remain in Postgres regardless
+  the outboxes rows they were derived from remain in Postgres regardless
   of `dispatched_at`.
 
-**Why sync is sufficient:** The sync query reads the outbox directly and
+**Why sync is sufficient:** The sync queries reads the outboxes directly and
 filters on `device_id` and `id` — it does not look at `dispatched_at`.
 Whether or not an event was dispatched to a stream, sync returns it. The
-stream is a best-effort live channel; the outbox is the durable record.
+stream is a best-effort live channel; the outboxes are the durable records.
 
 **Cleanup:** The abandoned stream should be TTL'd when the node is
 decommissioned (see `07` §2.3).
@@ -84,12 +84,13 @@ decommissioned (see `07` §2.3).
 
 **Impact:**
 - In-flight batch processing is interrupted. The `FOR UPDATE SKIP LOCKED`
-  transaction rolls back; those rows stay `dispatched_at IS NULL`.
+  transaction rolls back; those rows stay `dispatched_at IS NULL` in each
+  table.
 
 **Recovery:** Next Relay poll (any worker) picks up the undispatched
 rows. At-least-once means some events may be dispatched twice.
 
-**No data loss:** The outbox rows persist in Postgres. Crashes only
+**No data loss:** The outboxes' rows persist in Postgres. Crashes only
 delay dispatch, they don't drop rows.
 
 ### 3.4 Message Service crashes mid-write
@@ -101,10 +102,14 @@ delay dispatch, they don't drop rows.
 - If it commits but the ack is lost, the client retries (§1.5).
 
 **Recovery:** Client retry with the same `clientMsgId`. Unique index
-makes it idempotent. See `07` §1.5.
+on `message_idempotency(sender_id, client_msg_id)` makes it idempotent:
+on retry, the insert conflicts, Message Service treats the message as
+already accepted, and re-returns the same ack without writing duplicate
+outbox rows. See `07` §1.5.
 
-**No duplicates:** The unique index on `(sender_id, client_msg_id)`
-guarantees one stored message per client send attempt.
+**No duplicates:** The unique index on
+`message_idempotency(sender_id, client_msg_id)` guarantees one fan-out
+per client send attempt.
 
 ### 3.5 Postgres primary fails
 
@@ -139,9 +144,9 @@ building HA infrastructure; self-hosting it is a topic for later (see
 
 **Recovery:**
 - Registry rebuilds as clients reconnect and re-register.
-- Streams: undelivered frames are lost, but the outbox rows they derived
-  from are either already dispatched (and will be missed until reconnect-
-  sync) or not yet dispatched (and will be re-XADDed on next Relay poll).
+- Streams: undelivered frames are lost. The retry scan (`07` §2.4)
+  finds dispatched-but-undelivered rows and re-dispatches them.
+  Not-yet-dispatched rows are re-XADDed on the next Relay poll.
 - Notification stream: lost pushes are missed; client relies on
   reconnect-sync.
 
@@ -155,8 +160,6 @@ clients don't all reconnect at once and the registry doesn't rebuild
 from zero. Not required for correctness (the outbox is the durable
 record); it's about avoiding a recovery storm, not about preventing
 loss.
-
-
 
 ### 3.7 Notification Service crashes
 
@@ -193,6 +196,7 @@ reconnect, or sync. The `WS Gateway ↔ Redis` partition is the exception:
 live sockets need server-driven re-registration on heal (see `07` §5.6).
 Any client whose socket *did* drop still recovers via the standard
 reconnect + sync path. 
+If a dispatched row was never delivered, the retry scan (`07` §2.4) re-dispatches it.
 
 ### 3.9 Push provider (APNs / FCM) failure
 
@@ -215,13 +219,15 @@ downstream component cannot lose it.
 
 ### 4.2 Delivery vs. read state
 
-- `outbox.delivered_at` is per-device: "this device has this message."
-- `msg_seen_status.delivered_at` / `read_at` are per-user: "this user
-  has delivered/read this message on any device."
+- `direct_outbox.delivered_at` / `group_outbox.delivered_at` — per
+  device: "this device has received this event."
+- Read state — not stored server-side. RECEIPT events are delivered to
+  the sender's devices via `direct_outbox`; the sender's client applies
+  the first receipt for a message and ignores duplicates from other
+  devices of the same reader.
 
-These are eventually consistent. There is a window where a device has
-delivered but the user-level row hasn't been updated. The UI should read
-from user-level for the tick, so the tick may lag by a moment. Acceptable.
+There is no `msg_seen_status` table. Read is per-user, aggregated
+client-side (`06` §6).
 
 ### 4.3 Membership changes
 
@@ -256,6 +262,7 @@ presence updates across the system.
 | Postgres | Health check | Managed failover | Promote replica |
 | Redis | Connection errors | Client-side | Reconnect; degrade gracefully |
 | Notification Service | PEL growth | XPENDING metric | Scale up; investigate |
+| Retry scan | Retry lag (oldest dispatched-but-undelivered) | Outbox metric | Alert; investigate |
 
 TODO: formalize SLOs and alerts in `10-observability.md`.
 
@@ -272,14 +279,15 @@ TODO. For each failure, what's the manual runbook?
 
 Summary of the design choices that make the reliability story work:
 
-1. **Outbox is the source of truth.** Every durable event ends up in
-   Postgres before it's dispatched. Redis is transport.
-2. **Idempotency everywhere.** `client_msg_id` for sends, `outbox.id`
-   for delivery, `IS NULL` guards for receipts. Retries are safe.
-3. **Sync as universal recovery.** Any missed live event is recoverable
-   via `GET /v1/sync`. There's one catch-up mechanism, not many.
+1. **Outboxes are the durable records.** Every event ends up in either of the outboxes
+   before dispatch. Redis is transport.
+2. **Idempotency.** `client_msg_id` for sends; the row's `id` (per-table
+   cursor) for delivery; client-side first-receipt-wins for receipts.
+   Retries are safe.
+3. **Sync as universal recovery.** Missed live events are recoverable
+   via `GET /v1/sync` (two cursors, one per outbox table).
 4. **Uniform transport.** Messages, receipts, edits, deletes all flow
-   through the outbox. One path, one set of guarantees.
+   through the outboxes. One path, one set of guarantees.
 5. **Non-sticky WS routing.** Gateways are disposable; no rebalance on
    node loss.
 6. **At-least-once, not exactly-once.** Duplicates are deduped

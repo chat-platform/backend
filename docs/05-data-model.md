@@ -17,35 +17,6 @@ created_at
 updated_at
 deleted_at
 
-chat_msg
---------
-message_id
-chat_id → chat.chat_id
-sender_id → user.user_id
-client_msg_id //for Client->Server idempotency
-content
-message_type //eg: TEXT,MEDIA etc
-created_at
-
-msg_seen_status
----------------
-message_id     → chat_msg.message_id
-user_id        → user.user_id  -- the recipient
-delivered_at
-read_at
-
-msg_seen_status = per-user read state (has this user seen this message, across any of their devices)
--- Granularity: one row per (message, recipient user).
--- Aggregates read state across all the user's devices.
--- Different question than outbox: outbox asks "did device D get it?",
--- this asks "has the user seen it anywhere?"
-
-chat_msg_media
---------------
-message_id → chat_msg.message_id
-media_id → media.media_id
-position // optional, useful if multiple media per message
-
 users
 -----
 user_id
@@ -94,8 +65,6 @@ blocker_id → user.user_id
 blocked_id → user.user_id
 created_at
 
-notes: No seperate delivery record for each device
-
 device
 ------
 device_id
@@ -121,24 +90,60 @@ note: no refresh token/its hash here,
     Each refresh token be for each session.
     If required immediate session revoke, lets introduce jti here later
 
-outbox
-------
-id             PK      -- global monotonic; the device cursor
-message_id             -- FK → chat_msg.message_id
-chat_id                -- denormalized, for routing/cleanup
-recipient_id           -- FK → user.user_id (the target user)
-device_id              -- FK → device.device_id (the target device)
-sender_id              -- FK → user.user_id (who caused it)
+direct_outbox
+-------------
+id             PK      -- per-device cursor
+sender_id              -- FK → user.user_id
+client_msg_id   TEXT -- 
+recipient_id           -- FK → user.user_id
+device_id              -- FK → device.device_id
 event_type             -- NEW_MESSAGE | EDIT | DELETE | REACTION | ...
-payload                -- event-specific delta (NULL for NEW_MESSAGE)
-created_at             
-routed_to              -- ENUM: WS,NOTIF. Indicates where the dispatch happened to.
-dispatched_at          -- when handed to a ws gateway/or to the msg broker
-delivered_at           -- when device acked RECEIVED
+payload                -- the wire payload (content included)
+created_at
+routed_to              -- ENUM: WS, NOTIF
+dispatched_at
+delivered_at
 
-outbox = per-device delivery/transport record (how do I get this event to this specific device)
--- Granularity: one outbox row per (message, recipient device).
--- This row *is* the per-device delivery record — no separate table.
+-- UNIQUE (sender_id, client_msg_id, device_id)
+-- Idempotency: on retry, the insert conflicts, and Message Service
+-- returns the same ack without re-inserting.
+-- Granularity: one row per (message, recipient device) in a DIRECT chat.
+-- Carries the full payload; no join needed at dispatch.
+-- Events addressed to a single user's devices:
+--   - NEW_MESSAGE / EDIT / DELETE / REACTION in a DIRECT chat
+--   - RECEIPT for any message (direct or group) — goes to the sender only
+
+group_outbox
+------------
+id             PK      -- per-device cursor
+event_id       FK → group_event.event_id
+recipient_id           -- FK → user.user_id
+device_id              -- FK → device.device_id
+created_at
+routed_to
+dispatched_at
+delivered_at
+
+-- UNIQUE (sender_id, client_msg_id)
+-- Idempotency: same as direct_outbox, one row per group message.
+-- Granularity: one row per (group event, recipient device).
+-- No payload here; join group_event on event_id at dispatch.
+-- Events addressed to all members of a GROUP chat:
+--   - NEW_MESSAGE / EDIT / DELETE / REACTION in a GROUP chat
+--   (Receipts do NOT go here; they go to direct_outbox.)
+
+group_event
+-----------
+event_id       PK
+chat_id        FK → chat.chat_id
+sender_id      FK → user.user_id
+client_msg_id   TEXT
+event_type
+payload        -- the wire payload (content included)
+created_at
+
+-- One row per group event. Shared by all recipient devices.
+-- This is where the payload lives, so it isn't duplicated per device.
 
 -----------------------------------
 user
@@ -159,9 +164,8 @@ chat_membership
   ▼
 chat
   │
-  │ 1:N
-  ▼
-messages
+  ├── 1:N ──> direct_outbox   (for DIRECT chats)
+  └── 1:N ──> group_event     (for GROUP chats)
 
 ## Important Access Patterns
 
@@ -173,17 +177,11 @@ messages
 - Get chats for user
 - Get members of chat
 
-### Messages
-- Insert message
-- Get messages for chat ordered by time
-- Get messages after cursor
-- Find message by client_msg_id
-
-### Outbox
-- Get pending events for device
+### Outboxes
+- Get pending events for device (direct_outbox, group_outbox)
 - Get events after cursor
+- Mark event dispatched
 - Mark event delivered
-- Mark event read
 
 # Other
 ## Redis - WS registruy

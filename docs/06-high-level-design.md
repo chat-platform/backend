@@ -4,7 +4,7 @@ The system has four logical planes:
 
 - **Edge** — load balancers fronting HTTP and WebSocket traffic.
 - **Stateless services** — HTTP API, Message Service, Relay, Notification
-  Service, Media Service. They read and write durable state in Postgres /
+  Service. They read and write durable state in Postgres /
   Redis / object storage, but hold none in process memory. Any instance
   can serve any request; scale by adding replicas.
 - **Stateful service** — WS Gateway. Holds live client sockets in process
@@ -12,8 +12,8 @@ The system has four logical planes:
   node dies, its clients must reconnect, the registry entry expires, and
   sync catches them up. That property drives the non-sticky routing
   decision in `04-api-design.md`.
-- **Storage** — Postgres (source of truth), Redis (registry + streams +
-  cache), object storage (media).
+- **Storage** — Postgres (metadata + delivery state), Redis (registry +
+  streams + cache), object storage (media).
 - **Clients** — mobile/web apps, each device with its own WS connection
   and its own sync cursor.
 
@@ -63,7 +63,8 @@ validation happens client-side.
                 │           ┌────────┐          │
                 │           │Postgres│          │
                 │           └───┬────┘          │
-                │               │ outbox        │
+                │               │ direct/group  │
+                │               │   outboxes    │
                 │               ▼               │
                 │           ┌────────┐          │
                 │           │ Relay  │          │
@@ -80,7 +81,7 @@ validation happens client-side.
                 │               │                (push hints)
                 │               │
                 │               └──► WS Gateway ──► client
-                │                         │                         │       
+                │
                 │       
                 │       
                 │       
@@ -97,7 +98,7 @@ validation happens client-side.
 ### 3.2 WS Gateway
 - Holds live client sockets. One socket per device.
 - On connect: validates session, registers connection in Redis
-  (`user → {device_id → {ws_node, conn_id}}`), heartbeats.
+  (`ws:conn:{device_id} → {ws_node, conn_id}`), heartbeats.
 - On `message.send`: forwards to Message Service over gRPC.
 - On delivery: reads from its Redis stream `ws:deliver:{node_id}` and
   writes frames to the matching sockets.
@@ -106,8 +107,12 @@ validation happens client-side.
 
 ### 3.3 Message Service (stateless, gRPC)
 - Authorizes the send (chat membership, block state).
-- Persists `chat_msg` + N `outbox` rows (one per recipient device) in a
-  single Postgres transaction.
+- Persists outbox rows in a single Postgres transaction:
+  - DIRECT chat: N `direct_outbox` rows with the payload inline.
+  - GROUP chat: one `group_event` row (the shared payload) plus N
+    `group_outbox` rows.
+  - Receipts (direct or group): N `direct_outbox` rows, addressed to
+    the sender's devices.
 - Returns ack to the sending gateway.
 - Does not deliver. Transport is Relay's job — it reads the outbox rows
   and pushes each to whatever WS node holds that device.
@@ -119,7 +124,6 @@ validation happens client-side.
   - If online → `XADD` to `ws:deliver:{node_id}`.
   - If offline → `XADD` to the notification stream.
 - Marks `dispatched_at`.
-- Reclaims stuck PEL entries via XAUTOCLAIM on crash.
 - Redis is transport; Postgres outbox is truth. If Redis is lost,
   reconnect-drain re-delivers.
 
@@ -143,12 +147,12 @@ validation happens client-side.
   malware checks happen client-side, consistent with the E2EE model.
 - Stateless, scales horizontally.
 
-#### Why no seperate auth service:
+#### Why no seperate auth service and media service:
 For a real WhatsApp, a separate auth service would be the better call — security
 isolation (secrets, reduced blast radius), multiple consumers (Facebook, WhatsApp
 Pay), bigger teams with dedicated ownership, independent scaling and deployment.
 We're not doing that. This project uses one service for auth and the other HTTP
-endpoints, media URL handling included. A separate media service is also less
+endpoints, media URL handling included. A separate media service is also not
 necessary here, since virus scans and similar checks happen client-side. Splitting
 services wouldn't teach me much, and the operational overhead isn't worth it. So
 they're combined into a single "HTTP API."
@@ -157,7 +161,7 @@ they're combined into a single "HTTP API."
 
 | Store | Role | Durability |
 |---|---|---|
-| Postgres | Source of truth: users, chats, messages, outbox, blocks, devices, sessions | Durable, replicated |
+| Postgres | Metadata + delivery state: users, chats, direct_outbox, group_outbox, group_event, blocks, devices, sessions | Durable, replicated |
 | Redis | WS registry, streams (relay→WS, relay→notif), ephemeral cache | Not durable; loss tolerable |
 | Object storage | Media blobs | Durable |
 
@@ -168,9 +172,12 @@ they're combined into a single "HTTP API."
 Client → WS Gateway → Message Service (gRPC)
                           │
                           ▼
-                  Postgres TX:
-                    INSERT chat_msg
-                    INSERT outbox × N devices
+                  Postgres TX (DIRECT):
+                    INSERT direct_outbox × N devices
+
+                  Postgres TX (GROUP):
+                    INSERT group_event (1 row)
+                    INSERT group_outbox × N devices
                           │
                           ▼
                   ack → sender
@@ -200,27 +207,33 @@ WS lost → client reconnects → WS auth
 ```
 Recipient device receives message
   → WS receipt.delivered → server
-  → Message Service updates outbox.delivered_at for that device
-    → Also updated in `msg_seen_status` table
-  → Relay pushes receipt to sender's devices
+  → Message Service writes a RECEIPT event into direct_outbox,
+    addressed to the sender's devices
+  → Relay dispatches it like any other outbox event
+  → Sender's devices receive the receipt and render the tick
 ```
 
 ## 6. Per-Device vs Per-User Granularity
 
-- **outbox** is per (message, device). It's the transport record:
-  "has this specific device received/read this event?"
-- **msg_seen_status** is per (message, user). It's the aggregate:
-  "has this user seen this message on any device?"
+- **direct_outbox** and **group_outbox** are per (event, device): the
+  per-device delivery record.
+- **Read state is per-user, but not stored server-side.** Multiple
+  devices of the same recipient may each send a RECEIPT event for the
+  same message. These flow through `direct_outbox`, addressed to the
+  sender's devices. The client applies the **first receipt received**
+  and ignores duplicates from other devices — the user is considered
+  to have read the message once, regardless of which device they read
+  it on.
 
-These answer different questions and are intentionally separate. A user
-who has 3 devices has 3 outbox rows and 1 msg_seen_status row.
+There is no `msg_seen_status` table. The aggregation happens on the
+client, from the stream of RECEIPT events.
 
 ## 7. Failure Boundaries
 
 - Message Service dies mid-send: client retries with same
   `clientMsgId`; idempotency key prevents duplicates.
 - Relay dies: outbox rows stay undispatched; another worker picks them
-  up. PEL reclaim handles in-flight events.
+  up.
 - WS Gateway dies: registry entry expires; clients reconnect to a new
   node; sync catches them up.
 - Redis dies: registry rebuilds as clients reconnect; streams refill

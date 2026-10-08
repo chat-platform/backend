@@ -29,8 +29,9 @@ Message Service
     │  1. authorize (membership, block state, chat type)
     │  2. resolve recipients → recipient devices
     │  3. BEGIN TX
-    │       INSERT chat_msg
-    │       INSERT outbox × N devices
+    │       DIRECT: INSERT direct_outbox × N devices
+    │       GROUP:  INSERT group_event (1 row)
+    │               INSERT group_outbox × N devices
     │     COMMIT
     │  4. return ack
     ▼
@@ -81,11 +82,14 @@ chat.
 
 Single Postgres transaction per message. Order:
 
-1. `INSERT INTO chat_msg (...) RETURNING message_id`
-2. `INSERT INTO outbox (message_id, chat_id, recipient_id, device_id,
-   sender_id, event_type, payload) VALUES (...)` × N devices
+1. Resolve recipients and their live devices. (Before transaction begins)
+2. BEGIN
+   - DIRECT: INSERT direct_outbox × N devices (payload inline)
+   - GROUP:  INSERT group_event (1 row)
+             INSERT group_outbox × N devices
+   COMMIT
 
-The transaction is insert-only for `chat_msg` and `outbox`. The outbox
+The transaction is insert-only`. Both outboxs'
 timestamps `dispatched_at`, `delivered_at` are set later by
 Relay and receipt handlers.
 
@@ -97,16 +101,14 @@ sender does not wait for delivery.
 
 Two failure modes, both handled idempotently:
 
-**Transaction fails.** Nothing is written — no `chat_msg`, no outbox
+**Transaction fails.** Nothing is written — no outbox
 rows. The client retries; on the second attempt the insert succeeds
 (if the failure was transient) and the normal path continues.
 
-**Commit succeeds, ack is lost.** The message is durably stored, but
+**Commit succeeds, ack is lost.** The message is durably stored in the outbox, but 
 the ack never reaches the client (WS drop, Gateway crash, network
-failure). The client retries; Message Service attempts the insert,
-hits the unique index on `(sender_id, client_msg_id)`, catches the
-violation, looks up the existing `message_id`, and returns the same ack
-as the first attempt.
+failure). The client retries; the Message Service recognizes the same `(sender_id, client_msg_id)` and
+re-returns the same ack without writing duplicate outbox rows.
 
 In both cases the client retries with the same `clientMsgId`. The
 unique index is the dedup key (see §10) — one stored message per
@@ -116,8 +118,8 @@ unique index is the dedup key (see §10) — one stored message per
 
 - **Chat deleted / sender removed mid-flight**: transaction fails on
   membership check inside the TX (re-check under lock).
-- **Empty peer set** (sender is the only member): write `chat_msg`,
-  write outbox rows only for the sender's other devices (echo). If the
+- **Empty peer set** (sender is the only member):
+  write outbox rows only for the sender's other devices (no echo). If the
   sender has one device, zero outbox rows. Valid but unusual — arises
   when a user creates a chat with themselves, or when all other members
   have left a group.
@@ -131,30 +133,47 @@ Relay runs as N worker instances. Each instance:
 
 ```
 loop:
-    rows = SELECT * FROM outbox
+    rows_direct = SELECT * FROM direct_outbox
            WHERE dispatched_at IS NULL
            ORDER BY id
            LIMIT batch_size
            FOR UPDATE SKIP LOCKED
 
-    for each row:
+    rows_group  = SELECT * FROM group_outbox
+          JOIN group_event ON group_event.event_id = group_outbox.event_id
+          WHERE group_outbox.dispatched_at IS NULL
+          ORDER BY group_outbox.id LIMIT batch_size FOR UPDATE SKIP LOCKED
+
+    for each row in rows_direct:
         ws_node = registry.lookup(row.device_id)
         if ws_node:
-            XADD ws:deliver:{ws_node} * <event>
+            XADD ws:deliver:{ws_node} * <row.payload>
             routed_to = 'WS'
         else:
-            XADD notif:stream * <event>
+            XADD notif:stream * <row.payload>
             routed_to = 'NOTIF'
 
-    UPDATE outbox
+    for each row in rows_group:
+        ws_node = registry.lookup(row.device_id)
+        if ws_node:
+            XADD ws:deliver:{ws_node} * <row.event_payload>
+            routed_to = 'WS'
+        else:
+            XADD notif:stream * <row.event_payload>
+            routed_to = 'NOTIF'
+
+    UPDATE direct_outbox
     SET dispatched_at = now(), routed_to = <WS|NOTIF>
     WHERE id IN (...)
 
-    if rows is empty:
+    UPDATE group_outbox
+    SET dispatched_at = now(), routed_to = <WS|NOTIF>
+    WHERE id IN (...)
+
+    if rows_direct is empty AND rows_group is empty:
         sleep(idle_interval)      # slow down
     else:
-        dispatch(rows)
-        if len(rows) < batch_size:
+        if len(rows_direct) < batch_size AND len(rows_group) < batch_size:
             sleep(short_interval) # batch wasn't full; maybe more coming
         else:
             continue
@@ -206,7 +225,7 @@ A separate retry scan finds and re-dispatches these rows:
 
 ```
 loop:
-    rows = SELECT * FROM outbox
+    rows = SELECT * FROM outbox (do for both direct and group outboxes)
            WHERE routed_to = 'WS'
              AND dispatched_at IS NOT NULL
              AND delivered_at IS NULL
@@ -258,7 +277,7 @@ the scan's `batch_size`.
 
 Relay is at-least-once by construction. It dispatches the event (`XADD`)
 *then* sets `dispatched_at`. If it crashes between those two steps, the
-outbox row stays undispatched and is re-dispatched on the next poll —
+outbox (direct_ or group_) row stays undispatched and is re-dispatched on the next poll — 
 so the same event can be sent twice.
 
 The retry scan (§2.4) can also re-dispatch a row that was already
@@ -266,75 +285,106 @@ delivered but whose ack was lost — the row appears undelivered until
 `delivered_at` is written.
 
 In both cases, the client sees the same event twice. 
-Deduplication happens client-side on `outbox.id` (the cursor). The
-client's sync cursor already skips anything it has seen, so a duplicate
+Deduplication happens client-side on the row's `id`, relative to that table's cursor.
+The client tracks **two cursors** — one for `direct_outbox`, one for `group_outbox`. 
+Within each table, the cursor skips anything already applied, so a duplicate 
 delivery is a no-op.
 
 Server-side, `dispatched_at` may be set twice for the same row.
 Harmless — it's just a timestamp, and the value converges.
 
+The two tables have separate sequences, so `direct_outbox.id = 5` and
+`group_outbox.id = 5` are distinct events. Dedup is per-table, not
+across tables.
+
 ---
 
 ## 3. Delivery Receipts and Read State
 
-Two tables, two granularities (see `06` §6):
-
-- `outbox` — per (message, device). Transport and per-device receipt.
-- `msg_seen_status` — per (message, user). Aggregated read state.
+Receipts are events, not state updates. When a device receives or reads
+a message, it sends a `receipt.*` frame. The server writes a RECEIPT
+event into `direct_outbox`, addressed to the sender's devices. No
+server-side read state — the client aggregates.
 
 ### 3.1 Delivery receipt
 
 When a device receives `message.recv`, it sends `receipt.delivered {
 messageId }`. Server:
 
-```
-UPDATE outbox
-SET delivered_at = now()
-WHERE message_id = ? AND device_id = ? AND delivered_at IS NULL
-```
+1. Marks the corresponding outbox row (in direct_outbox or
+   group_outbox) as delivered:
+     UPDATE <table> SET delivered_at = now()
+     WHERE message_id = ? AND device_id = ? AND delivered_at IS NULL
 
-Idempotent via `delivered_at IS NULL`.
+   Idempotent via `delivered_at IS NULL`.
 
-Then aggregate to user level. Any device delivering is sufficient — the
-user is considered delivered as soon as one of their devices confirms:
-
-```
-UPDATE msg_seen_status
-SET delivered_at = now()
-WHERE message_id = ? AND user_id = ? AND delivered_at IS NULL
-```
-TODO: Need to ensure atleast-once here
+2. Writes a RECEIPT event into direct_outbox, addressed to the
+   sender's devices. This is how the sender learns the message was
+   delivered.
 
 ### 3.2 Read receipt
 
-Same shape as delivery, with `read_at`. Triggered when the user opens
-the chat and the client sends `receipt.read { chatId, upToMessageId }`.
+Triggered when the user (recipient) opens the chat and the client sends
+`receipt.read { chatId, upToMessageId }`.
 
-`upToMessageId` marks all messages in the chat up to that ID as read.
-Server-side this is a range update:
+`upToMessageId` means "everything in this chat up to and including this
+message has been read." The server does not store read state — there is
+no `msg_seen_status`, and no `read_at` column on the outbox.
 
-```
-UPDATE msg_seen_status
-SET read_at = now()
-WHERE user_id = ? AND message_id <= ?
-  AND read_at IS NULL
-  AND delivered_at IS NOT NULL;
-```
+Read is represented as a **new event**, not a mutation of the original
+delivery row. The handler writes RECEIPT events into `direct_outbox`,
+addressed to the sender's devices:
+
+- DIRECT chat: one `direct_outbox` row per device of the peer,
+  `event_type = RECEIPT`, `payload = { upToMessageId, readAt,
+  readerUserId }`.
+- GROUP chat: same — the receipt is addressed to the original sender,
+  so one `direct_outbox` row per device of that user.
+
+The sender's devices receive the RECEIPT event, apply the first one for
+a given message (ignoring duplicates from other devices of the same
+reader), and render the read tick.
+
+Read state is per-user, aggregated client-side (see `06` §6).
 
 ### 3.3 Propagation to sender
 
 Each receipt write on the recipient side is itself an event that must
-reach the sender's devices. Receipts flow through the outbox, same as
-messages: the receipt handler inserts an outbox row per sender device
-(`event_type = RECEIPT`). One transport, one cursor, one sync path —
-every event (message, receipt, edit, delete) is delivered the same way.
+reach the sender's devices. Receipts flow through `direct_outbox`, same
+as messages: the receipt handler inserts one `direct_outbox` row per
+sender device, with `event_type = RECEIPT`. One transport, one cursor,
+one sync path — every event (message, receipt, edit, delete) is
+delivered the same way.
+
+Note: receipts for group messages also go through `direct_outbox`, not
+`group_outbox`. A receipt is addressed to one user (the sender), so it
+fits the "fan-out to a single user" shape. See `06` §6.
 
 TODO: revisit if outbox write amplification becomes a problem. See: 11-future-notes.md §1
 
 ### 3.4 Idempotency
 
-Receipt writes are idempotent because of the `IS NULL` guards. Reapplying
-a receipt is a no-op. This handles relay at-least-once.
+Receipt processing has two parts: marking the delivery on the row, and
+writing a RECEIPT event to the sender.
+
+- **Delivery:**
+  1. `UPDATE <outbox table> SET delivered_at = now() WHERE message_id
+     = ? AND device_id = ? AND delivered_at IS NULL`. Reapplying is a
+     no-op because of the `delivered_at IS NULL` guard.
+  2. Write a RECEIPT event to `direct_outbox`, addressed to the
+     sender's devices.
+
+- **Read:** no state to update. Read is represented solely by writing a
+  RECEIPT event to `direct_outbox`, addressed to the sender's devices.
+
+Both cases produce a RECEIPT event to the sender. Duplicates are
+handled client-side — the sender's client applies the first receipt for
+a message and ignores later ones.
+
+The `IS NULL` guard on delivery covers Relay's at-least-once delivery:
+a receipt arriving twice marks `delivered_at` once. The RECEIPT event
+itself has no server-side dedup — a retried receipt writes another
+event, which the client ignores.
 
 ### 3.5 Notification Service consumer group
 
@@ -350,50 +400,76 @@ makes push delivery at-least-once under worker crashes.
 
 ### 4.1 Cursor semantics
 
-Each device has a cursor: the highest `outbox.id` it has processed.
-Stored client-side, sent as `?since=<cursor>` on `/v1/sync`.
+Each device has **two cursors**, one per outbox table:
 
-`outbox.id` is a global monotonic sequence, but the sync query filters
-by `device_id`, so the cursor is effectively per-device.
+- `direct_cursor` — the highest `direct_outbox.id` the device has applied.
+- `group_cursor` — the highest `group_outbox.id` the device has applied.
+
+Both are stored client-side. They are sent on `/v1/sync` as `?since_direct=<direct_cursor>&since_group=<group_cursor>`.
+
+The two tables have **separate sequences**, so `id` is not comparable
+across them. `direct_outbox.id = 5` and `group_outbox.id = 5` are
+distinct events.
+
+Within each table, the sync query filters by `device_id` and `id >
+cursor`, so each cursor is effectively per-device, per-table.
 
 ### 4.2 The sync query
 
+Sync runs two queries, one per table:
+
 ```
-SELECT * FROM outbox
+SELECT * FROM direct_outbox
 WHERE device_id = ?
   AND id > ?
 ORDER BY id
 LIMIT page_size
+
+SELECT group_outbox.*, group_event.payload
+FROM group_outbox
+JOIN group_event ON group_event.event_id = group_outbox.event_id
+WHERE group_outbox.device_id = ?
+  AND group_outbox.id > ?
+ORDER BY group_outbox.id
+LIMIT page_size
 ```
 
-Backing index: `(device_id, id)`.
+Backing indexes: `direct_outbox (device_id, id)` and
+`group_outbox (device_id, id)`.
 
-Client pages until it receives fewer than `page_size` rows, then
+The client pages each table independently until both are exhausted, then
 transitions to live. During the sync, the WS Gateway buffers delivery
 frames for this device (see §4.4) — the client is not receiving live
 events yet, so nothing races the sync.
 
-The client tracks:
+The client tracks, per table:
 - `since` — the cursor it sends.
 - `last_seen` — the highest `id` it has applied so far.
 
-On each page, `last_seen` advances to the max `id` in the page. If the
+On each page, `last_seen` advances to the max `id` in that page. If the
 client crashes mid-sync, it resumes with `since=last_seen`. Pages are
-applied in order; a single `id` gap between pages is not expected
-because the query is `ORDER BY id` and monotonic within a device.
+applied in order within each table; a gap between pages is not expected
+because the query is `ORDER BY id` and monotonic per table.
 
 ### 4.3 Ordering
 
-`id` preserves insertion order. For NEW_MESSAGE events, insertion order
+Within each table, `id` preserves insertion order. For NEW_MESSAGE events, insertion order 
 is send order (Message Service writes them in a single TX per message,
 but across messages the order is whatever Postgres assigned). For
 EDIT and DELETE, the same. So the client sees events in the order the
-server processed them.
+server processed them, per table.
+
+**Cross-table ordering is not defined — by design.** `direct_outbox.id` and
+`group_outbox.id` are separate sequences; a direct event and a group
+event have no relative order. This is acceptable: events are applied
+per-chat, and a chat is either DIRECT or GROUP, never both. So within a
+chat, ordering is preserved (one table, one sequence). Across chats,
+ordering doesn't matter.
 
 TODO: cross-check with the edit constraint in `02` — edits originate
 from the sending device. If device A edits a message and device B reads
 it via sync, does B see the edit before or after the original? Answer:
-after, because the edit has a higher `outbox.id`. Good.
+after, because the edit has a higher `id` in the same outbox table. Good.
 
 ### 4.4 Sync vs live handoff
 
@@ -421,11 +497,12 @@ correctness mechanism.
 ### 4.5 Cursor too old
 
 If `since` predates the retention window (see `02` §1.9, 30 days), some
-outbox rows are gone. The server returns whatever rows still exist and
+outbox rows are gone. Both tables use the same retention; each cursor is
+checked independently. The server returns whatever rows still exist and
 lets the client continue from there.
 
 The client applies the returned events, sets `last_seen` to the highest
-`id` received, and resumes live. Events older than the retention window
+`id` received per table, and resumes live. Events older than the retention window
 are simply not delivered. No "resync from scratch" signal — the client
 does not wipe local state.
 
@@ -515,7 +592,8 @@ TODO. Sketch:
   with media_id → Core writes `media` row.
 - Download: Core signs URL → client fetches from object storage.
 - Thumbnails: generated client-side (E2EE constraint).
-- Association: `chat_msg_media` joins messages to media.
+- Association: - Association: media IDs are carried in the message payload (E2EE).
+  The server does not store message-media associations.
 
 ---
 
@@ -545,8 +623,8 @@ see the receipt via the outbox (§3.3). Other devices of the reader learn
 the message is read when their UI next queries user-level read state,
 or on their next sync.
 
-TODO: decide whether reading on device A explicitly pushes a state
-update to device B, or B learns lazily on next sync/render.
+TODO: decide how multi-session devices sync across themselves on last
+read position of each chat.
 
 ### 7.3 Device removal
 
@@ -582,6 +660,14 @@ Summary table:
 | receipt.read (user) | (message_id, user_id) + `IS NULL` | msg_seen_status.read_at |
 | XAUTOCLAIM redelivery | outbox.id | client cursor dedupe |
 
+| Event | Idempotency key | Where enforced |
+|---|---|---|
+| message.send | `(sender_id, client_msg_id)` | unique index on outbox tables |
+| outbox delivery | outbox `id`s (cursors) | client-side cursor |
+| receipt.delivered | `(message_id, device_id)` + `IS NULL` | outbox `delivered_at` |
+| receipt.read | same, on the RECEIPT row | outbox `delivered_at` |
+| XAUTOCLAIM redelivery | outbox `id` | client cursor dedupe |
+
 TODO: any event type not covered.
 
 ---
@@ -592,11 +678,10 @@ TODO: any event type not covered.
 ## Open / Deferred
 
 - [ ] Batch size and poll interval for Relay drain.
-- [x] All-devices vs any-device aggregation for `msg_seen_status`.
-- [x] Own-device echo: yes or no
 - [x] Sync buffer location: memory vs Redis.
 - [x] Cursor-too-old handling.
 - [ ] Group admin events, reactions, edits/deletes propagation.
 - [x] Message expiry (30-day undelivered) — where enforced, how surfaced.
 - [ ] Push coalescing window size.
 - [ ] Presence fan-out: who gets notified on online/offline.
+- [ ] Multi-device last-read sync across a user's own devices.

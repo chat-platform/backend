@@ -49,7 +49,8 @@ Every log line and metric carries identifiers that tie it to the
 client's action:
 
 - `clientMsgId` — at message send.
-- `outbox.id` — for any outbox event (dispatch, delivery, retry).
+- **Outbox row id** — for any outbox event (dispatch, delivery, retry).
+  Qualify with the table: `direct_outbox.id` or `group_outbox.id`.
 - `device_id` — the target device.
 - `chat_id` — the chat, when relevant.
 
@@ -65,3 +66,5 @@ coarse labels (`service`, `operation`, `region`), not per-entity ones.
 
 - Distributed tracing: not enabled (cost/scale). Revisit if debugging requires it.
 - Log aggregation: provider-managed; service logs are structured.
+- Retry scan is a correctness mechanism, not just a latency optimization. 
+  Its lag metric (§2, §4) needs alerting, not just dashboarding.
