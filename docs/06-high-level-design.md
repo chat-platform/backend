@@ -1,6 +1,6 @@
 ## 1. Overview
 
-The system has four logical planes:
+The system has five logical planes:
 
 - **Edge** — load balancers fronting HTTP and WebSocket traffic.
 - **Stateless services** — HTTP API, Message Service, Relay, Notification
@@ -172,12 +172,10 @@ they're combined into a single "HTTP API."
 Client → WS Gateway → Message Service (gRPC)
                           │
                           ▼
-                  Postgres TX (DIRECT):
-                    INSERT direct_outbox × N devices
-
-                  Postgres TX (GROUP):
-                    INSERT group_event (1 row)
-                    INSERT group_outbox × N devices
+                  Postgres TX:
+                    DIRECT: INSERT direct_outbox × N devices
+                    GROUP:  INSERT group_event (1 row)
+                            INSERT group_outbox × N devices
                           │
                           ▼
                   ack → sender
