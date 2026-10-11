@@ -124,8 +124,9 @@ routed_to
 dispatched_at
 delivered_at
 
--- UNIQUE (sender_id, client_msg_id)
--- Idempotency: same as direct_outbox, one row per group message.
+-- UNIQUE (event_id, device_id)
+-- Idempotency: enforced on group_event via UNIQUE (sender_id, client_msg_id);
+--              this table only guarantees one row per (event, device).
 -- Granularity: one row per (group event, recipient device).
 -- No payload here; join group_event on event_id at dispatch.
 -- Events addressed to all members of a GROUP chat:
@@ -142,6 +143,7 @@ event_type
 payload        -- the wire payload (content included)
 created_at
 
+-- UNIQUE (sender_id, client_msg_id)  -- for idempotency
 -- One row per group event. Shared by all recipient devices.
 -- This is where the payload lives, so it isn't duplicated per device.
 
