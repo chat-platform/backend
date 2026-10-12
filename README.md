@@ -39,9 +39,9 @@ distributed-system concepts.
 - [x] Data model
 - [x] High-level architecture
 - [x] Detailed design
-- [ ] Reliability
-- [ ] Security
-- [ ] Observability
+- [x] Reliability
+- [x] Security
+- [x] Observability
 - [ ] Capacity planning
 - [ ] Implementation
 - [ ] Load testing
