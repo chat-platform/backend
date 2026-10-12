@@ -1,0 +1,9 @@
+go 1.25.0
+
+use (
+	./services/message-service
+	./services/relay
+	./services/ws-gateway
+	./shared/gen
+	./shared/pkg
+)
