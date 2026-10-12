@@ -95,6 +95,7 @@ direct_outbox
 id             PK      -- per-device cursor
 sender_id              -- FK → user.user_id
 client_msg_id   TEXT -- 
+originating_device_id -- sending device; used to scope send retries
 recipient_id           -- FK → user.user_id
 device_id              -- FK → device.device_id
 event_type             -- NEW_MESSAGE | EDIT | DELETE | REACTION | ...
@@ -104,7 +105,7 @@ routed_to              -- ENUM: WS, NOTIF
 dispatched_at
 delivered_at
 
--- UNIQUE (sender_id, client_msg_id, device_id)
+-- UNIQUE (sender_id, client_msg_id, originating_device_id, device_id)
 -- Idempotency: on retry, the insert conflicts, and Message Service
 -- returns the same ack without re-inserting.
 -- Granularity: one row per (message, recipient device) in a DIRECT chat.

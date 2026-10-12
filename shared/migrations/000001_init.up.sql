@@ -51,6 +51,7 @@ CREATE TABLE direct_outbox (
     id BIGSERIAL PRIMARY KEY,
     sender_id UUID NOT NULL REFERENCES users (user_id),
     client_msg_id TEXT NOT NULL,
+    originating_device_id UUID NOT NULL REFERENCES device (device_id),
     recipient_id UUID NOT NULL REFERENCES users (user_id),
     device_id UUID NOT NULL REFERENCES device (device_id),
     event_type TEXT NOT NULL,
@@ -59,7 +60,7 @@ CREATE TABLE direct_outbox (
     routed_to TEXT CHECK (routed_to IN ('WS', 'NOTIF')),
     dispatched_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
-    UNIQUE (sender_id, client_msg_id, device_id)
+    UNIQUE (sender_id, client_msg_id, originating_device_id, device_id)
 );
 
 CREATE INDEX direct_outbox_device_id_idx ON direct_outbox (device_id, id);
