@@ -1,7 +1,8 @@
 # Implementation
 
-This directory contains the implementation of the WhatsApp-like
-messaging system described in the system design documentation.
+This directory holds notes on the WhatsApp-like messaging system
+implementation. Service code lives in `services/`; shared contracts and
+schema live in `shared/`.
 
 ## Goals
 
@@ -12,49 +13,70 @@ messaging system described in the system design documentation.
 
 ## Current Status
 
-🚧 Not started
+Phase 0 skeleton (no product behavior yet).
 
 ## Architecture
 
-See:
-TBD
-<!-- 
-eg:
 - [High-Level Design](../docs/06-high-level-design.md)
-- [Detailed Design](../docs/07-detailed-design/) 
--->
+- [Detailed Design](../docs/07-detailed-design.md)
+- [Data model](../docs/05-data-model.md)
+- [API design](../docs/04-api-design.md)
 
 ## Technology Stack
 
 ### Backend
-- TBD
+
+Go 1.25 or newer, gRPC (WS Gateway → Message Service), WebSocket (clients).
 
 ### Database
-- TBD
+
+PostgreSQL (metadata + outbox; source of truth).
 
 ### Messaging / Streaming
-- TBD
+
+Redis Streams (Relay → WS Gateway).
 
 ### Cache
-- TBD
+
+Redis (WS connection registry).
 
 ### Infrastructure
-- TBD
+
+Docker Compose for local Postgres and Redis.
 
 ## Components
-TBD
-<!-- 
-example:
-- [ ] Authentication
-- [ ] Messaging Service
-- [ ] Presence
-- [ ] Notification Service
-- [ ] Media Service 
--->
+
+- [ ] Message Service (`services/message-service`)
+- [ ] WS Gateway (`services/ws-gateway`)
+- [ ] Relay (`services/relay`)
+- [ ] Core API (Phase 4)
+- [ ] Notification Service (later)
 
 ## Development
 
-Instructions for running the system locally.
+From the repo root:
+
+```bash
+make up          # Postgres + Redis (schema + seeds on first start)
+make proto       # generate gRPC stubs into shared/gen
+make tidy        # sync Go workspace / modules
+```
+
+The `proto` target requires `protoc`, `protoc-gen-go`, and
+`protoc-gen-go-grpc` on `PATH`. The database migration and dev seed run only
+when Postgres initializes a new data volume; `make down` preserves that volume.
+
+Seeded DIRECT chat (Phase 0 fixtures):
+
+| Role  | user_id                                | device_id                              |
+|-------|----------------------------------------|----------------------------------------|
+| Alice | `11111111-1111-4111-8111-111111111111` | `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa` |
+| Bob   | `22222222-2222-4222-8222-222222222222` | `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb` |
+
+Chat id: `cccccccc-cccc-4ccc-8ccc-cccccccccccc`
+
+Postgres: `postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable`  
+Redis: `localhost:6379`
 
 ## Testing
 
@@ -68,7 +90,7 @@ Document measured results here.
 
 ## Known Limitations
 
-Document limitations of the current implementation.
+Phase 0 has no send/delivery path; services print a skeleton banner and exit.
 
 ## Design vs Implementation
 

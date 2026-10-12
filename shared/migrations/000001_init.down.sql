@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS direct_outbox;
+DROP TABLE IF EXISTS chat_membership;
+DROP TABLE IF EXISTS chat;
+DROP TABLE IF EXISTS device;
+DROP TABLE IF EXISTS users;
