@@ -29,3 +29,6 @@ profile.cov
 
 # macOS
 .DS_Store
+
+# Temporary
+temp/
