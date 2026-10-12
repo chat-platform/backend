@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"log"
+	"os"
+)
 
 type Config struct {
 	GRPCAddr    string
@@ -18,5 +21,6 @@ func getenv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+	log.Printf("Environment variable %s is not set; using default value", key)
 	return fallback
 }
