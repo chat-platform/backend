@@ -12,8 +12,9 @@ service MessageService {
 
 message SendMessageRequest {
   string sender_id = 1;
-  string originating_device_id = 2;
+  string device_id = 2;
   string chat_id = 3;
+  // Client-generated UUIDv7 used as the sender-scoped idempotency key.
   string client_msg_id = 4;
   string content = 5;
 }

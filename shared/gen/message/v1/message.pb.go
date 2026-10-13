@@ -22,14 +22,15 @@ const (
 )
 
 type SendMessageRequest struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	SenderId            string                 `protobuf:"bytes,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
-	OriginatingDeviceId string                 `protobuf:"bytes,2,opt,name=originating_device_id,json=originatingDeviceId,proto3" json:"originating_device_id,omitempty"`
-	ChatId              string                 `protobuf:"bytes,3,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
-	ClientMsgId         string                 `protobuf:"bytes,4,opt,name=client_msg_id,json=clientMsgId,proto3" json:"client_msg_id,omitempty"`
-	Content             string                 `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	SenderId string                 `protobuf:"bytes,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	DeviceId string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	ChatId   string                 `protobuf:"bytes,3,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	// Client-generated UUIDv7 used as the sender-scoped idempotency key.
+	ClientMsgId   string `protobuf:"bytes,4,opt,name=client_msg_id,json=clientMsgId,proto3" json:"client_msg_id,omitempty"`
+	Content       string `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SendMessageRequest) Reset() {
@@ -69,9 +70,9 @@ func (x *SendMessageRequest) GetSenderId() string {
 	return ""
 }
 
-func (x *SendMessageRequest) GetOriginatingDeviceId() string {
+func (x *SendMessageRequest) GetDeviceId() string {
 	if x != nil {
-		return x.OriginatingDeviceId
+		return x.DeviceId
 	}
 	return ""
 }
@@ -154,10 +155,10 @@ var File_message_v1_message_proto protoreflect.FileDescriptor
 const file_message_v1_message_proto_rawDesc = "" +
 	"\n" +
 	"\x18message/v1/message.proto\x12\n" +
-	"message.v1\"\xbc\x01\n" +
+	"message.v1\"\xa5\x01\n" +
 	"\x12SendMessageRequest\x12\x1b\n" +
-	"\tsender_id\x18\x01 \x01(\tR\bsenderId\x122\n" +
-	"\x15originating_device_id\x18\x02 \x01(\tR\x13originatingDeviceId\x12\x17\n" +
+	"\tsender_id\x18\x01 \x01(\tR\bsenderId\x12\x1b\n" +
+	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x17\n" +
 	"\achat_id\x18\x03 \x01(\tR\x06chatId\x12\"\n" +
 	"\rclient_msg_id\x18\x04 \x01(\tR\vclientMsgId\x12\x18\n" +
 	"\acontent\x18\x05 \x01(\tR\acontent\"X\n" +

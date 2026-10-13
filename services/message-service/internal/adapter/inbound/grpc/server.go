@@ -26,7 +26,7 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 		return nil, status.Error(codes.InvalidArgument, "request is required")
 	}
 	ack, err := s.send.Execute(ctx, domain.SendMessage{
-		SenderID: request.GetSenderId(), DeviceID: request.GetOriginatingDeviceId(),
+		SenderID: request.GetSenderId(), DeviceID: request.GetDeviceId(),
 		ChatID: request.GetChatId(), ClientMsgID: request.GetClientMsgId(), Content: request.GetContent(),
 	})
 	if err != nil {

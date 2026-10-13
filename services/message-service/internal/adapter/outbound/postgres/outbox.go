@@ -30,14 +30,14 @@ func (o *Outbox) PersistMessage(ctx context.Context, message domain.SendMessage)
 	}
 	defer tx.Rollback(ctx)
 
-	// Serialize retries of this logical message, including requests arriving concurrently.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2 || ':' || $3))`, message.SenderID, message.ClientMsgID, message.DeviceID); err != nil {
+	// Serialize retries of this sender-scoped UUIDv7, including concurrent requests.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, message.SenderID, message.ClientMsgID); err != nil {
 		return domain.MessageAck{}, fmt.Errorf("lock idempotency key: %w", err)
 	}
 	var existingTime *int64
 	err = tx.QueryRow(ctx, `
 		SELECT (extract(epoch FROM min(created_at)) * 1000)::bigint
-		FROM direct_outbox WHERE sender_id = $1 AND client_msg_id = $2 AND originating_device_id = $3`, message.SenderID, message.ClientMsgID, message.DeviceID).Scan(&existingTime)
+		FROM direct_outbox WHERE sender_id = $1 AND client_msg_id = $2::uuid`, message.SenderID, message.ClientMsgID).Scan(&existingTime)
 	if err != nil {
 		return domain.MessageAck{}, fmt.Errorf("look up idempotency key: %w", err)
 	}
@@ -105,10 +105,10 @@ func (o *Outbox) PersistMessage(ctx context.Context, message domain.SendMessage)
 	for _, recipient := range recipients {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO direct_outbox
-			(sender_id, client_msg_id, originating_device_id, recipient_id, device_id, event_type, payload, created_at)
-			VALUES ($1, $2, $3, $4, $5, 'NEW_MESSAGE', $6::jsonb,
-				to_timestamp($7::double precision / 1000))`,
-			message.SenderID, message.ClientMsgID, message.DeviceID, recipient.userID, recipient.deviceID, payload, timestampMS)
+			(sender_id, client_msg_id, recipient_id, device_id, event_type, payload, created_at)
+			VALUES ($1, $2::uuid, $3, $4, 'NEW_MESSAGE', $5::jsonb,
+				to_timestamp($6::double precision / 1000))`,
+			message.SenderID, message.ClientMsgID, recipient.userID, recipient.deviceID, payload, timestampMS)
 		if err != nil {
 			return domain.MessageAck{}, fmt.Errorf("insert outbox row: %w", err)
 		}
