@@ -13,6 +13,7 @@ import (
 	"github.com/chat-platform/backend/services/message-service/internal/app"
 	"github.com/chat-platform/backend/services/message-service/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/bufbuild/protovalidate-go"
 	"google.golang.org/grpc"
 )
 
@@ -35,7 +36,11 @@ func main() {
 		log.Fatalf("listen on %s: %v", cfg.GRPCAddr, err)
 	}
 	server := grpc.NewServer()
-	grpcserver.Register(server, app.NewSendMessage(postgres.NewOutbox(pool)))
+	validator, err := protovalidate.New()
+	if err != nil {
+		log.Fatalf("initialize request validator: %v", err)
+	}
+	grpcserver.Register(server, app.NewSendMessage(postgres.NewOutbox(pool)), validator)
 	go func() {
 		<-ctx.Done()
 		server.GracefulStop()

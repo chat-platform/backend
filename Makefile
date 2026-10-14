@@ -1,16 +1,9 @@
 .PHONY: proto up down tidy
 
-PROTOC ?= protoc
-GEN_MODULE := github.com/chat-platform/backend/shared/gen
+BUF ?= buf
 
 proto:
-	$(PROTOC) \
-		--proto_path=shared/proto \
-		--go_out=shared/gen \
-		--go_opt=module=$(GEN_MODULE) \
-		--go-grpc_out=shared/gen \
-		--go-grpc_opt=module=$(GEN_MODULE) \
-		shared/proto/message/v1/message.proto
+	$(BUF) generate
 
 up:
 	docker compose up -d

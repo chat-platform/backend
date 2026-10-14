@@ -3,6 +3,7 @@ module github.com/chat-platform/backend/services/message-service
 go 1.25.0
 
 require (
+	github.com/bufbuild/protovalidate-go v0.10.0
 	github.com/chat-platform/backend/shared/gen v0.0.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.2
