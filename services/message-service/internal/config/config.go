@@ -1,26 +1,30 @@
 package config
 
 import (
-	"log"
+	"context"
 	"os"
+
+	"github.com/chat-platform/backend/shared/pkg/logging"
 )
 
 type Config struct {
 	GRPCAddr    string
 	PostgresDSN string
+	RedisAddr   string
 }
 
-func FromEnv() Config {
+func FromEnv(logger logging.Logger) Config {
 	return Config{
-		GRPCAddr:    getenv("GRPC_ADDR", ":50051"),
-		PostgresDSN: getenv("POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"),
+		GRPCAddr:    getenv(logger, "GRPC_ADDR", ":50051"),
+		PostgresDSN: getenv(logger, "POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"),
+		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"),
 	}
 }
 
-func getenv(key, fallback string) string {
+func getenv(logger logging.Logger, key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
-	log.Printf("Environment variable %s is not set; using default value", key)
+	logger.Info(context.Background(), "environment variable is not set; using default value", "variable", key)
 	return fallback
 }

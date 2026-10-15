@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package message.v1;
 
+import "buf/validate/validate.proto";
+
 option go_package = "github.com/chat-platform/backend/shared/gen/message/v1;messagev1";
 
 // MessageService is the durability boundary for sends.
@@ -11,11 +13,15 @@ service MessageService {
 }
 
 message SendMessageRequest {
-  string sender_id = 1;
-  string originating_device_id = 2;
-  string chat_id = 3;
-  string client_msg_id = 4;
-  string content = 5;
+  string sender_id = 1 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
+  string device_id = 2 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
+  string chat_id = 3 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
+  // Client-generated UUIDv7 used as the sender-scoped idempotency key.
+  string client_msg_id = 4 [(buf.validate.field).string = {
+    uuid: true,
+    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+  }];
+  string content = 5 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
 }
 
 message SendMessageAck {

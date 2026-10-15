@@ -94,7 +94,7 @@ direct_outbox
 -------------
 id             PK      -- per-device cursor
 sender_id              -- FK → user.user_id
-client_msg_id   TEXT -- 
+client_msg_id   UUID      -- Client-generated UUIDv7; sender-scoped idempotency key
 recipient_id           -- FK → user.user_id
 device_id              -- FK → device.device_id
 event_type             -- NEW_MESSAGE | EDIT | DELETE | REACTION | ...
@@ -138,7 +138,7 @@ group_event
 event_id       PK
 chat_id        FK → chat.chat_id
 sender_id      FK → user.user_id
-client_msg_id   TEXT
+client_msg_id   UUID      -- Client-generated UUIDv7
 event_type
 payload        -- the wire payload (content included)
 created_at

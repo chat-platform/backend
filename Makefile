@@ -1,16 +1,10 @@
-.PHONY: proto up down tidy
+.PHONY: proto up down tidy\
+	running
 
-PROTOC ?= protoc
-GEN_MODULE := github.com/chat-platform/backend/shared/gen
+BUF ?= buf
 
 proto:
-	$(PROTOC) \
-		--proto_path=shared/proto \
-		--go_out=shared/gen \
-		--go_opt=module=$(GEN_MODULE) \
-		--go-grpc_out=shared/gen \
-		--go-grpc_opt=module=$(GEN_MODULE) \
-		shared/proto/message/v1/message.proto
+	$(BUF) generate
 
 up:
 	docker compose up -d
@@ -25,3 +19,10 @@ tidy:
 	cd services/message-service && go mod tidy
 	cd services/ws-gateway && go mod tidy
 	cd services/relay && go mod tidy
+
+running:
+	CompileDaemon \
+		-build="go build -o /tmp/message-service ./services/message-service/cmd/message-service" \
+		-command="env LOG_LEVEL=debug /tmp/message-service" \
+		-directory="." \
+		-exclude-dir=.git

@@ -15,7 +15,7 @@ CREATE TABLE users (
 CREATE TABLE device (
     device_id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users (user_id),
-    platform TEXT NOT NULL CHECK (platform IN ('ANDROID', 'IOS', 'WEB')),
+    platform TEXT NOT NULL CHECK (platform IN ('ANDROID', 'IOS', 'WEB')),-- Consider ENUM later for more compact storage.
     is_primary BOOLEAN NOT NULL DEFAULT true,
     device_name TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -39,7 +39,7 @@ CREATE TABLE chat (
 CREATE TABLE chat_membership (
     chat_id UUID NOT NULL REFERENCES chat (chat_id),
     user_id UUID NOT NULL REFERENCES users (user_id),
-    role TEXT NOT NULL DEFAULT 'member',
+    role TEXT NOT NULL DEFAULT 'member',-- Consider ENUM later for more compact storage.
     joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     member_tag TEXT,
     PRIMARY KEY (chat_id, user_id)
@@ -50,13 +50,13 @@ CREATE INDEX chat_membership_user_id_idx ON chat_membership (user_id);
 CREATE TABLE direct_outbox (
     id BIGSERIAL PRIMARY KEY,
     sender_id UUID NOT NULL REFERENCES users (user_id),
-    client_msg_id TEXT NOT NULL,
+    client_msg_id UUID NOT NULL,
     recipient_id UUID NOT NULL REFERENCES users (user_id),
     device_id UUID NOT NULL REFERENCES device (device_id),
     event_type TEXT NOT NULL,
-    payload JSONB NOT NULL,
+    payload TEXT NOT NULL, -- Transport-only payload; no inner querying, so not JSONB as of now. avoiding JSONB parsing overhead
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    routed_to TEXT CHECK (routed_to IN ('WS', 'NOTIF')),
+    routed_to TEXT CHECK (routed_to IN ('WS', 'NOTIF')),-- Consider ENUM later for more compact storage.
     dispatched_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
     UNIQUE (sender_id, client_msg_id, device_id)
