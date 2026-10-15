@@ -8,7 +8,29 @@ distributed-system concepts.
 
 ## Current Status
 
-🚧 System design phase
+🚧 Development phase — implementation is in progress.
+
+See [implementation/README.md](implementation/README.md) for implementation
+details, local setup, and current limitations.
+
+## System Design and Plans
+
+The system design documents and implementation plans are in [`docs/`](docs/):
+
+- [Requirements](docs/01-requirements.md)
+- [Scope and assumptions](docs/02-scope-and-assumptions.md)
+- [Scale estimation](docs/03-scale-estimation.md)
+- [API design](docs/04-api-design.md)
+- [Data model](docs/05-data-model.md)
+- [High-level design](docs/06-high-level-design.md)
+- [Detailed design](docs/07-detailed-design.md)
+- [Reliability](docs/08-reliability.md)
+- [Security](docs/09-security.md)
+- [Observability](docs/10-observability.md)
+- [Future revision notes](docs/11-future-revison-notes.md)
+- [Topics to learn](docs/12-to-learn-notes.md)
+- [Cache plans](docs/13-cache-plans/01-send-msg.md) and [cache TTLs](docs/13-cache-plans/01-TTLs.md)
+- [Design decisions](docs/decisions.md)
 
 ## Scope
 
@@ -45,15 +67,3 @@ distributed-system concepts.
 - [ ] Capacity planning
 - [ ] Implementation
 - [ ] Load testing
-
-## Architecture
-
-_TBD_
-
-## Design Decisions
-
-_TBD_
-
-## Learnings
-
-_TBD_
