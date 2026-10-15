@@ -34,10 +34,6 @@ func NewCachedChatRepository(store port.ChatRepository, cache RoutingCache) *Cac
 	return &CachedChatRepository{store: store, cache: cache}
 }
 
-func (r *CachedChatRepository) FindMessageEvent(ctx context.Context, message domain.SendMessage) (domain.MessageAck, bool, error) {
-	return r.store.FindMessageEvent(ctx, message)
-}
-
 func (r *CachedChatRepository) IsAuthorizedToSend(ctx context.Context, chatID, userID string) (bool, error) {
 	key := "chat_auth:" + chatID + ":" + userID
 	if value, found, err := r.cache.Get(ctx, key); err == nil && found {

@@ -16,14 +16,6 @@ func NewChatOperations(chatRepository port.ChatRepository) *ChatOperations {
 }
 
 func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMessage) (domain.MessageAck, error) {
-	ack, found, err := s.chatRepository.FindMessageEvent(ctx, command)
-	if err != nil {
-		return domain.MessageAck{}, err
-	}
-	if found {
-		return ack, nil
-	}
-
 	allowed, err := s.chatRepository.IsAuthorizedToSend(ctx, command.ChatID, command.SenderID)
 	if err != nil {
 		return domain.MessageAck{}, err

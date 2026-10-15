@@ -30,23 +30,6 @@ type messagePayload struct {
 	TS          int64  `json:"ts"`
 }
 
-func (r *ChatRepository) FindMessageEvent(ctx context.Context, message domain.SendMessage) (domain.MessageAck, bool, error) {
-	var timestampMS int64
-	err := r.pool.QueryRow(ctx, `
-		SELECT (extract(epoch FROM created_at) * 1000)::bigint
-		FROM direct_outbox
-		WHERE sender_id = $1 AND client_msg_id = $2::uuid AND event_type = 'NEW_MESSAGE'
-		ORDER BY id
-		LIMIT 1`, message.SenderID, message.ClientMsgID).Scan(&timestampMS)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.MessageAck{}, false, nil
-	}
-	if err != nil {
-		return domain.MessageAck{}, false, fmt.Errorf("look up message idempotency key: %w", err)
-	}
-	return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, true, nil
-}
-
 func (r *ChatRepository) IsAuthorizedToSend(ctx context.Context, chatID, senderID string) (bool, error) {
 	var allowed bool
 	err := r.pool.QueryRow(ctx, `

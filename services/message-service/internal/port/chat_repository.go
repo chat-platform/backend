@@ -7,7 +7,6 @@ import (
 )
 
 type ChatRepository interface {
-	FindMessageEvent(context.Context, domain.SendMessage) (domain.MessageAck, bool, error)
 	IsAuthorizedToSend(context.Context, string, string) (bool, error)
 	ResolveMessageRecipients(context.Context, string) ([]domain.RecipientDevice, error)
 	EnqueueMessageEvent(context.Context, domain.SendMessage, []domain.RecipientDevice) (domain.MessageAck, error)
