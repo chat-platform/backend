@@ -9,17 +9,21 @@ import (
 
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	"github.com/chat-platform/backend/services/message-service/internal/port"
+	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type ChatRepository struct{ pool *pgxpool.Pool }
+type ChatRepository struct {
+	pool   *pgxpool.Pool
+	logger logging.Logger
+}
 
 const postgresUniqueViolationCode = "23505"
 
-func NewChatRepository(pool *pgxpool.Pool) *ChatRepository {
-	return &ChatRepository{pool: pool}
+func NewChatRepository(pool *pgxpool.Pool, logger logging.Logger) *ChatRepository {
+	return &ChatRepository{pool: pool, logger: logger}
 }
 
 type messagePayload struct {
@@ -70,6 +74,7 @@ func (r *ChatRepository) ResolveMessageRecipients(ctx context.Context, chatID st
 		return nil, fmt.Errorf("read message recipients: %w", err)
 	}
 	if len(recipients) == 0 {
+		r.logger.Warn(ctx, "database query returned no active chat recipient devices", "chat_id", chatID)
 		return nil, domain.ErrNoRecipients
 	}
 	return recipients, nil
@@ -119,12 +124,12 @@ func (r *ChatRepository) EnqueueMessageEvent(
 			recipient_id,
 			device_id,
 			'NEW_MESSAGE',
-			$3::jsonb,
+			$3::text,
 			to_timestamp($4::double precision / 1000)
 		FROM unnest($5::text[], $6::text[]) AS r(recipient_id, device_id)`,
 		message.SenderID,
 		message.ClientMsgID,
-		payload,
+		string(payload),
 		timestampMS,
 		recipientIDs,
 		deviceIDs,

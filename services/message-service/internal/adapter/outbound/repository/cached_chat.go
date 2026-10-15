@@ -7,6 +7,7 @@ import (
 
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	"github.com/chat-platform/backend/services/message-service/internal/port"
+	"github.com/chat-platform/backend/shared/pkg/logging"
 )
 
 const (
@@ -26,12 +27,13 @@ type ChatCache interface {
 // CachedChatRepository keeps cache-aside behavior out of application use cases.
 // The wrapped repository remains the durable source of truth.
 type CachedChatRepository struct {
-	store port.ChatRepository
-	cache ChatCache
+	store  port.ChatRepository
+	cache  ChatCache
+	logger logging.Logger
 }
 
-func NewCachedChatRepository(store port.ChatRepository, cache ChatCache) *CachedChatRepository {
-	return &CachedChatRepository{store: store, cache: cache}
+func NewCachedChatRepository(store port.ChatRepository, cache ChatCache, logger logging.Logger) *CachedChatRepository {
+	return &CachedChatRepository{store: store, cache: cache, logger: logger}
 }
 
 func (r *CachedChatRepository) IsAuthorizedToSend(ctx context.Context, chatID, userID string) (bool, error) {
@@ -62,6 +64,9 @@ func (r *CachedChatRepository) ResolveMessageRecipients(ctx context.Context, cha
 	if value, found, err := r.cache.Get(ctx, key); err == nil && found {
 		var recipients []domain.RecipientDevice
 		if err := json.Unmarshal([]byte(value), &recipients); err == nil {
+			if len(recipients) == 0 {
+				r.logger.Warn(ctx, "chat recipient cache contains an empty list", "chat_id", chatID)
+			}
 			return recipients, nil
 		}
 	}

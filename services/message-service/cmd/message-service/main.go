@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -15,23 +15,34 @@ import (
 	chatrepo "github.com/chat-platform/backend/services/message-service/internal/adapter/outbound/repository"
 	"github.com/chat-platform/backend/services/message-service/internal/app"
 	"github.com/chat-platform/backend/services/message-service/internal/config"
+	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 )
 
 func main() {
-	cfg := config.FromEnv()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	logger, err := logging.New(os.Stdout, logging.Config{
+		Level: os.Getenv("LOG_LEVEL"), Format: os.Getenv("LOG_FORMAT"),
+		AddSource: os.Getenv("LOG_ADD_SOURCE") == "true",
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	logger = logger.With("service", "message-service")
+	cfg := config.FromEnv(logger)
+
 	pool, err := pgxpool.New(ctx, cfg.PostgresDSN)
 	if err != nil {
-		log.Fatalf("connect to postgres: %v", err)
+		fatal(ctx, logger, "connect to postgres", err)
 	}
 	defer pool.Close()
 	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("ping postgres: %v", err)
+		fatal(ctx, logger, "ping postgres", err)
 	}
 
 	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
@@ -39,24 +50,30 @@ func main() {
 
 	listener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
-		log.Fatalf("listen on %s: %v", cfg.GRPCAddr, err)
+		fatal(ctx, logger, "listen for gRPC", err, "address", cfg.GRPCAddr)
 	}
 	server := grpc.NewServer()
 	validator, err := protovalidate.New()
 	if err != nil {
-		log.Fatalf("initialize request validator: %v", err)
+		fatal(ctx, logger, "initialize request validator", err)
 	}
-	postgresRepository := postgres.NewChatRepository(pool)
-	ChatCache := rediscache.NewChatCache(redisClient)
+	postgresRepository := postgres.NewChatRepository(pool, logger.With("component", "postgres_repository"))
+	ChatCache := rediscache.NewChatCache(redisClient, logger.With("component", "chat_cache"))
 	ChatCache.StartRepairWorker(ctx)
-	chatRepository := chatrepo.NewCachedChatRepository(postgresRepository, ChatCache)
-	grpcserver.Register(server, app.NewChatOperations(chatRepository), validator)
+	chatRepository := chatrepo.NewCachedChatRepository(postgresRepository, ChatCache, logger.With("component", "cached_chat_repository"))
+	grpcserver.Register(server, app.NewChatOperations(chatRepository, logger.With("component", "chat_operations")), validator, logger.With("component", "grpc_server"))
 	go func() {
 		<-ctx.Done()
 		server.GracefulStop()
 	}()
-	log.Printf("message-service listening on %s", cfg.GRPCAddr)
+	logger.Info(ctx, "message-service listening", "address", cfg.GRPCAddr)
 	if err := server.Serve(listener); err != nil {
-		log.Fatalf("serve gRPC: %v", err)
+		fatal(ctx, logger, "serve gRPC", err)
 	}
+}
+
+func fatal(ctx context.Context, logger logging.Logger, message string, err error, attrs ...any) {
+	attrs = append(attrs, "error", err)
+	logger.Error(ctx, message, attrs...)
+	os.Exit(1)
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/bufbuild/protovalidate-go"
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
+	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -21,10 +22,11 @@ type Server struct {
 	messagev1.UnimplementedMessageServiceServer
 	operations ChatOperations
 	validator  protovalidate.Validator
+	logger     logging.Logger
 }
 
-func Register(server *grpc.Server, operations ChatOperations, validator protovalidate.Validator) {
-	messagev1.RegisterMessageServiceServer(server, &Server{operations: operations, validator: validator})
+func Register(server *grpc.Server, operations ChatOperations, validator protovalidate.Validator, logger logging.Logger) {
+	messagev1.RegisterMessageServiceServer(server, &Server{operations: operations, validator: validator, logger: logger})
 }
 
 func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessageRequest) (*messagev1.SendMessageAck, error) {
@@ -49,6 +51,12 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 		if errors.Is(err, domain.ErrNoRecipients) {
 			return nil, status.Error(codes.FailedPrecondition, err.Error())
 		}
+		s.logger.Error(ctx, "message send failed",
+			"error", err,
+			"chat_id", request.GetChatId(),
+			"sender_id", request.GetSenderId(),
+			"client_msg_id", request.GetClientMsgId(),
+		)
 		return nil, status.Error(codes.Internal, "could not persist message")
 	}
 	return &messagev1.SendMessageAck{ClientMsgId: ack.ClientMsgID, TsUnixMilli: ack.TimestampMS}, nil

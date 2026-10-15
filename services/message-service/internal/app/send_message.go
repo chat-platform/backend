@@ -5,14 +5,16 @@ import (
 
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	"github.com/chat-platform/backend/services/message-service/internal/port"
+	"github.com/chat-platform/backend/shared/pkg/logging"
 )
 
 type ChatOperations struct {
 	chatRepository port.ChatRepository
+	logger         logging.Logger
 }
 
-func NewChatOperations(chatRepository port.ChatRepository) *ChatOperations {
-	return &ChatOperations{chatRepository: chatRepository}
+func NewChatOperations(chatRepository port.ChatRepository, logger logging.Logger) *ChatOperations {
+	return &ChatOperations{chatRepository: chatRepository, logger: logger}
 }
 
 func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMessage) (domain.MessageAck, error) {
@@ -29,15 +31,16 @@ func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMes
 		return domain.MessageAck{}, err
 	}
 	recipients := make([]domain.RecipientDevice, 0, len(allRecipients))
-	//removing sender device from allRecipients
-	for i, recipient := range allRecipients {
-		if recipient.DeviceID == command.DeviceID {
-			allRecipients[i] = allRecipients[len(allRecipients)-1]
-			allRecipients = allRecipients[:len(allRecipients)-1]
-			break
+	for _, recipient := range allRecipients {
+		if recipient.DeviceID != command.DeviceID {
+			recipients = append(recipients, recipient)
 		}
 	}
 	if len(recipients) == 0 {
+		s.logger.Warn(ctx, "no recipient devices remain after excluding sender device",
+			"chat_id", command.ChatID,
+			"resolved_devices", len(allRecipients),
+		)
 		return domain.MessageAck{}, domain.ErrNoRecipients
 	}
 	return s.chatRepository.EnqueueMessageEvent(ctx, command, recipients)

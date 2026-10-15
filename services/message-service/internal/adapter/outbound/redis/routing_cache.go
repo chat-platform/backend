@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync/atomic"
 	"time"
 
+	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -15,10 +15,11 @@ type ChatCache struct {
 	client   *redis.Client
 	repairs  chan string
 	failures atomic.Uint64
+	logger   logging.Logger
 }
 
-func NewChatCache(client *redis.Client) *ChatCache {
-	return &ChatCache{client: client, repairs: make(chan string, 256)}
+func NewChatCache(client *redis.Client, logger logging.Logger) *ChatCache {
+	return &ChatCache{client: client, repairs: make(chan string, 256), logger: logger}
 }
 
 func (c *ChatCache) Get(ctx context.Context, key string) (string, bool, error) {
@@ -48,11 +49,14 @@ func (c *ChatCache) InvalidateChatRecipients(ctx context.Context, chatID string)
 
 func (c *ChatCache) invalidate(ctx context.Context, key string) error {
 	if err := c.client.Del(ctx, key).Err(); err != nil {
-		c.recordInvalidationFailure(key, err)
+		c.recordInvalidationFailure(ctx, key, err)
 		select {
 		case c.repairs <- key:
 		default:
-			log.Printf("metric=routing_cache_invalidation_repair_enqueue_dropped_total key=%q", key)
+			c.logger.Error(ctx, "routing cache invalidation repair could not be queued",
+				"metric", "routing_cache_invalidation_repair_enqueue_dropped_total",
+				"key", key,
+			)
 		}
 		return err
 	}
@@ -74,7 +78,7 @@ func (c *ChatCache) StartRepairWorker(ctx context.Context) {
 					if err := c.client.Del(ctx, key).Err(); err == nil {
 						break
 					} else {
-						c.recordInvalidationFailure(key, err)
+						c.recordInvalidationFailure(ctx, key, err)
 					}
 					delay := time.Second * time.Duration(1<<min(attempt, 5))
 					if delay > 30*time.Second {
@@ -93,7 +97,12 @@ func (c *ChatCache) StartRepairWorker(ctx context.Context) {
 	}()
 }
 
-func (c *ChatCache) recordInvalidationFailure(key string, err error) {
+func (c *ChatCache) recordInvalidationFailure(ctx context.Context, key string, err error) {
 	count := c.failures.Add(1)
-	log.Printf("metric=routing_cache_invalidation_failures_total value=%d key=%q error=%v", count, key, err)
+	c.logger.Error(ctx, "routing cache invalidation failed",
+		"metric", "routing_cache_invalidation_failures_total",
+		"count", count,
+		"key", key,
+		"error", err,
+	)
 }
