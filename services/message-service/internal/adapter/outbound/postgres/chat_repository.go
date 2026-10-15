@@ -121,8 +121,8 @@ func (r *ChatRepository) EnqueueMessageEvent(
 		SELECT
 			$1,
 			$2::uuid,
-			recipient_id,
-			device_id,
+			recipient_id::uuid,
+			device_id::uuid,
 			'NEW_MESSAGE',
 			$3::text,
 			to_timestamp($4::double precision / 1000)
