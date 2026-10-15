@@ -47,9 +47,9 @@ func main() {
 		log.Fatalf("initialize request validator: %v", err)
 	}
 	postgresRepository := postgres.NewChatRepository(pool)
-	routingCache := rediscache.NewRoutingCache(redisClient)
-	routingCache.StartRepairWorker(ctx)
-	chatRepository := chatrepo.NewCachedChatRepository(postgresRepository, routingCache)
+	ChatCache := rediscache.NewChatCache(redisClient)
+	ChatCache.StartRepairWorker(ctx)
+	chatRepository := chatrepo.NewCachedChatRepository(postgresRepository, ChatCache)
 	grpcserver.Register(server, app.NewChatOperations(chatRepository), validator)
 	go func() {
 		<-ctx.Done()

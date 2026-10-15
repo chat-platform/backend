@@ -15,22 +15,22 @@ const (
 	recipientListTTL      = 30 * time.Second
 )
 
-// RoutingCache is an infrastructure dependency of the cached repository.
-type RoutingCache interface {
+// ChatCache is an infrastructure dependency of the cached repository.
+type ChatCache interface {
 	Get(context.Context, string) (string, bool, error)
 	Set(context.Context, string, string, time.Duration) error
-	InvalidateAuthorization(context.Context, string, string) error
-	InvalidateRecipients(context.Context, string) error
+	InvalidateChatAuthorization(context.Context, string, string) error
+	InvalidateChatRecipients(context.Context, string) error
 }
 
 // CachedChatRepository keeps cache-aside behavior out of application use cases.
 // The wrapped repository remains the durable source of truth.
 type CachedChatRepository struct {
 	store port.ChatRepository
-	cache RoutingCache
+	cache ChatCache
 }
 
-func NewCachedChatRepository(store port.ChatRepository, cache RoutingCache) *CachedChatRepository {
+func NewCachedChatRepository(store port.ChatRepository, cache ChatCache) *CachedChatRepository {
 	return &CachedChatRepository{store: store, cache: cache}
 }
 
@@ -80,15 +80,14 @@ func (r *CachedChatRepository) EnqueueMessageEvent(ctx context.Context, message 
 	return r.store.EnqueueMessageEvent(ctx, message, recipients)
 }
 
-// InvalidateAuthorization must be called after a routing-related database
-// transaction commits.
-func (r *CachedChatRepository) InvalidateAuthorization(ctx context.Context, chatID, userID string) error {
-	return r.cache.InvalidateAuthorization(ctx, chatID, userID)
+// InvalidateChatAuthorization removes the cached authorization decision for a user in a chat.
+func (r *CachedChatRepository) InvalidateChatAuthorization(ctx context.Context, chatID, userID string) error {
+	return r.cache.InvalidateChatAuthorization(ctx, chatID, userID)
 }
 
-// InvalidateRecipients must be called after a recipient/device mutation commits.
-func (r *CachedChatRepository) InvalidateRecipients(ctx context.Context, chatID string) error {
-	return r.cache.InvalidateRecipients(ctx, chatID)
+// InvalidateChatRecipients must be called after a recipient/device mutation commits.
+func (r *CachedChatRepository) InvalidateChatRecipients(ctx context.Context, chatID string) error {
+	return r.cache.InvalidateChatRecipients(ctx, chatID)
 }
 
 var _ port.ChatRepository = (*CachedChatRepository)(nil)
