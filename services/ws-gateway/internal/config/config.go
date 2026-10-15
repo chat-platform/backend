@@ -1,8 +1,10 @@
 package config
 
 import (
-	"log"
+	"context"
 	"os"
+
+	"github.com/chat-platform/backend/shared/pkg/logging"
 )
 
 type Config struct {
@@ -10,21 +12,23 @@ type Config struct {
 	RedisAddr          string
 	MessageServiceAddr string
 	NodeID             string
+	Path               string
 }
 
-func FromEnv() Config {
+func FromEnv(logger logging.Logger) Config {
 	return Config{
-		ListenAddr:         getenv("LISTEN_ADDR", ":8080"),
-		RedisAddr:          getenv("REDIS_ADDR", "localhost:6379"),
-		MessageServiceAddr: getenv("MESSAGE_SERVICE_ADDR", "localhost:50051"),
-		NodeID:             getenv("NODE_ID", "ws-1"),
+		ListenAddr:         getenv(logger, "LISTEN_ADDR", ":8080"),
+		RedisAddr:          getenv(logger, "REDIS_ADDR", "localhost:6379"),
+		MessageServiceAddr: getenv(logger, "MESSAGE_SERVICE_ADDR", "localhost:50051"),
+		NodeID:             getenv(logger, "NODE_ID", "ws-1"),
+		Path:               getenv(logger, "WS_PATH", "/ws"),
 	}
 }
 
-func getenv(key, fallback string) string {
+func getenv(logger logging.Logger, key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
-	log.Printf("Environment variable %s is not set; using default value", key)
+	logger.Info(context.Background(), "environment variable is not set; using default value", "variable", key)
 	return fallback
 }

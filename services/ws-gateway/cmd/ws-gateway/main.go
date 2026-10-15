@@ -1,13 +1,80 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	wsadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/websocket"
+	grpcadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/grpc"
+	redisadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/redis"
+	"github.com/chat-platform/backend/services/ws-gateway/internal/app"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
+	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
+	"github.com/chat-platform/backend/shared/pkg/logging"
+	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
-	cfg := config.FromEnv()
-	fmt.Fprintf(os.Stderr, "ws-gateway skeleton (phase 0); listen=%s node_id=%s\n", cfg.ListenAddr, cfg.NodeID)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger, err := logging.New(os.Stdout, logging.Config{
+		Level: os.Getenv("LOG_LEVEL"), Format: os.Getenv("LOG_FORMAT"),
+		AddSource: os.Getenv("LOG_ADD_SOURCE") == "true",
+	})
+	if err != nil {
+		fatal(err)
+	}
+	logger = logger.With("service", "ws-gateway")
+	cfg := config.FromEnv(logger)
+
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	defer redisClient.Close()
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		logger.Error(ctx, "could not connect to redis", "error", err, "address", cfg.RedisAddr)
+		os.Exit(1)
+	}
+
+	grpcConn, err := grpc.NewClient(cfg.MessageServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		logger.Error(ctx, "could not create message-service gRPC client", "error", err)
+		os.Exit(1)
+	}
+	defer grpcConn.Close()
+
+	registry := redisadapter.NewConnectionRegistry(redisClient)
+	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn))
+	operations := app.New(cfg.NodeID, registry, messageService)
+	mux := http.NewServeMux()
+	mux.Handle(cfg.Path, wsadapter.NewServer(operations, logger.With("component", "websocket")))
+	server := &http.Server{
+		Addr: cfg.ListenAddr, Handler: mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Error(shutdownCtx, "http server shutdown failed", "error", err)
+		}
+	}()
+	logger.Info(ctx, "ws-gateway listening", "address", cfg.ListenAddr, "path", cfg.Path, "node_id", cfg.NodeID)
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error(ctx, "http server failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func fatal(err error) {
+	fmt.Fprintln(os.Stderr, err)
+	os.Exit(1)
 }

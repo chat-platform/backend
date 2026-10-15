@@ -13,7 +13,9 @@ schema live in `shared/`.
 
 ## Current Status
 
-Phase 0 skeleton (no product behavior yet).
+Phase 1 complete: Message Service persists idempotent direct messages and
+returns acknowledgements over gRPC. Phase 2 WS Gateway implementation is in
+progress; its no-auth stub identity path will forward sends and return acks.
 
 ## Architecture
 
@@ -46,8 +48,8 @@ Docker Compose for local Postgres and Redis.
 
 ## Components
 
-- [ ] Message Service (`services/message-service`)
-- [ ] WS Gateway (`services/ws-gateway`)
+- [x] Message Service (`services/message-service`, Phase 1)
+- [ ] WS Gateway (`services/ws-gateway`, Phase 2 in progress)
 - [ ] Relay (`services/relay`)
 - [ ] Core API (Phase 4)
 - [ ] Notification Service (later)
@@ -90,7 +92,9 @@ Document measured results here.
 
 ## Known Limitations
 
-Phase 0 has no send/delivery path; services print a skeleton banner and exit.
+Phase 2 uses unauthenticated stub identity and does not deliver messages to
+recipients. Relay delivery, session validation, and reconnect sync are deferred
+to later phases.
 
 ## Design vs Implementation
 

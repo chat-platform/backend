@@ -11,10 +11,16 @@ type Envelope struct {
 }
 
 const (
+	TypeIdentity    = "identity"
 	TypeMessageSend = "message.send"
 	TypeMessageAck  = "message.ack"
 	TypeMessageRecv = "message.recv"
 )
+
+type IdentityPayload struct {
+	UserID   string `json:"userId"`
+	DeviceID string `json:"deviceId"`
+}
 
 type MessageSendPayload struct {
 	ChatID      string `json:"chatId"`
