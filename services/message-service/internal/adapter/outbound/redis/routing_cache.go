@@ -36,14 +36,12 @@ func (c *RoutingCache) Set(ctx context.Context, key, value string, ttl time.Dura
 	return c.client.Set(ctx, key, value, ttl).Err()
 }
 
-// InvalidateAuthorization removes the per-user authorization decision after
-// its PostgreSQL mutation has committed.
+// InvalidateAuthorization removes the per-user authorization decision.
 func (c *RoutingCache) InvalidateAuthorization(ctx context.Context, chatID, userID string) error {
 	return c.invalidate(ctx, fmt.Sprintf("chat_auth:%s:%s", chatID, userID))
 }
 
-// InvalidateRecipients removes the cached recipient/device set after its
-// PostgreSQL mutation has committed.
+// InvalidateRecipients removes the cached recipient/device set.
 func (c *RoutingCache) InvalidateRecipients(ctx context.Context, chatID string) error {
 	return c.invalidate(ctx, "chat_recipients:"+chatID)
 }

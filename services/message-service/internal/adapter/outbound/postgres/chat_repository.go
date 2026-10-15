@@ -10,10 +10,13 @@ import (
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	"github.com/chat-platform/backend/services/message-service/internal/port"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type ChatRepository struct{ pool *pgxpool.Pool }
+
+const postgresUniqueViolationCode = "23505"
 
 func NewChatRepository(pool *pgxpool.Pool) *ChatRepository {
 	return &ChatRepository{pool: pool}
@@ -84,47 +87,114 @@ func (r *ChatRepository) ResolveMessageRecipients(ctx context.Context, chatID st
 		return nil, fmt.Errorf("read message recipients: %w", err)
 	}
 	if len(recipients) == 0 {
-		return nil, domain.ErrInvalidMessage
+		return nil, domain.ErrNoRecipients
 	}
 	return recipients, nil
 }
 
-func (r *ChatRepository) EnqueueMessageEvent(ctx context.Context, message domain.SendMessage, recipients []domain.RecipientDevice) (domain.MessageAck, error) {
+func (r *ChatRepository) EnqueueMessageEvent(
+	ctx context.Context,
+	message domain.SendMessage,
+	recipients []domain.RecipientDevice,
+) (domain.MessageAck, error) {
 	if len(recipients) == 0 {
-		return domain.MessageAck{}, domain.ErrInvalidMessage
+		return domain.MessageAck{}, domain.ErrNoRecipients
 	}
+
+	timestampMS := time.Now().UnixMilli()
+	payload, err := json.Marshal(messagePayload{
+		ChatID:      message.ChatID,
+		SenderID:    message.SenderID,
+		ClientMsgID: message.ClientMsgID,
+		Content:     message.Content,
+		TS:          timestampMS,
+	})
+	if err != nil {
+		return domain.MessageAck{}, fmt.Errorf("encode message payload: %w", err)
+	}
+
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return domain.MessageAck{}, fmt.Errorf("begin message event write transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	timestampMS := time.Now().UnixMilli()
+	recipientIDs := make([]string, len(recipients))
+	deviceIDs := make([]string, len(recipients))
 
-	payload, err := json.Marshal(messagePayload{
-		ChatID: message.ChatID, SenderID: message.SenderID, ClientMsgID: message.ClientMsgID,
-		Content: message.Content, TS: timestampMS,
-	})
+	for i, recipient := range recipients {
+		recipientIDs[i] = recipient.UserID
+		deviceIDs[i] = recipient.DeviceID
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO direct_outbox
+		(sender_id, client_msg_id, recipient_id, device_id, event_type, payload, created_at)
+		SELECT
+			$1,
+			$2::uuid,
+			recipient_id,
+			device_id,
+			'NEW_MESSAGE',
+			$3::jsonb,
+			to_timestamp($4::double precision / 1000)
+		FROM unnest($5::text[], $6::text[]) AS r(recipient_id, device_id)`,
+		message.SenderID,
+		message.ClientMsgID,
+		payload,
+		timestampMS,
+		recipientIDs,
+		deviceIDs,
+	)
 	if err != nil {
-		return domain.MessageAck{}, fmt.Errorf("encode message payload: %w", err)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == postgresUniqueViolationCode {
+			// The message was already enqueued during an earlier request.
+			// Return the acknowledgement that the first request would have returned.
+			return r.findExistingMessageAck(ctx, message.SenderID, message.ClientMsgID)
+		}
+
+		return domain.MessageAck{}, fmt.Errorf("insert outbox rows: %w", err)
 	}
 
-	for _, recipient := range recipients {
-		_, err := tx.Exec(ctx, `
-			INSERT INTO direct_outbox
-			(sender_id, client_msg_id, recipient_id, device_id, event_type, payload, created_at)
-			VALUES ($1, $2::uuid, $3, $4, 'NEW_MESSAGE', $5::jsonb,
-				to_timestamp($6::double precision / 1000))
-			ON CONFLICT (sender_id, client_msg_id, device_id) DO NOTHING`,
-			message.SenderID, message.ClientMsgID, recipient.UserID, recipient.DeviceID, payload, timestampMS)
-		if err != nil {
-			return domain.MessageAck{}, fmt.Errorf("insert outbox row: %w", err)
-		}
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.MessageAck{}, fmt.Errorf("commit send transaction: %w", err)
 	}
-	return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, nil
+
+	return domain.MessageAck{
+		ClientMsgID: message.ClientMsgID,
+		TimestampMS: timestampMS,
+	}, nil
+}
+
+func (r *ChatRepository) findExistingMessageAck(
+	ctx context.Context,
+	senderID string,
+	clientMsgID string,
+) (domain.MessageAck, error) {
+	var timestampMS int64
+
+	err := r.pool.QueryRow(ctx, `
+		SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint
+		FROM direct_outbox
+		WHERE sender_id = $1 AND client_msg_id = $2::uuid
+		ORDER BY created_at ASC
+		LIMIT 1`,
+		senderID,
+		clientMsgID,
+	).Scan(&timestampMS)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.MessageAck{}, fmt.Errorf("existing message acknowledgement not found: %w", err)
+	}
+	if err != nil {
+		return domain.MessageAck{}, fmt.Errorf("find existing message acknowledgement: %w", err)
+	}
+
+	return domain.MessageAck{
+		ClientMsgID: clientMsgID,
+		TimestampMS: timestampMS,
+	}, nil
 }
 
 var _ port.ChatRepository = (*ChatRepository)(nil)

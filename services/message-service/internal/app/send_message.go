@@ -29,7 +29,7 @@ func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMes
 		return domain.MessageAck{}, err
 	}
 	if !allowed {
-		return domain.MessageAck{}, domain.ErrInvalidMessage
+		return domain.MessageAck{}, domain.ErrChatAccessDenied
 	}
 
 	allRecipients, err := s.chatRepository.ResolveMessageRecipients(ctx, command.ChatID)
@@ -46,7 +46,7 @@ func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMes
 		}
 	}
 	if len(recipients) == 0 {
-		return domain.MessageAck{}, domain.ErrInvalidMessage
+		return domain.MessageAck{}, domain.ErrNoRecipients
 	}
 	return s.chatRepository.EnqueueMessageEvent(ctx, command, recipients)
 }

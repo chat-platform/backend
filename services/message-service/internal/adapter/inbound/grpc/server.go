@@ -43,6 +43,12 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 		if errors.Is(err, domain.ErrInvalidMessage) {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
+		if errors.Is(err, domain.ErrChatAccessDenied) {
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+		}
+		if errors.Is(err, domain.ErrNoRecipients) {
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		}
 		return nil, status.Error(codes.Internal, "could not persist message")
 	}
 	return &messagev1.SendMessageAck{ClientMsgId: ack.ClientMsgID, TsUnixMilli: ack.TimestampMS}, nil
