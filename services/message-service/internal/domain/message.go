@@ -16,3 +16,8 @@ type MessageAck struct {
 	ClientMsgID string
 	TimestampMS int64
 }
+
+type RecipientDevice struct {
+	UserID   string
+	DeviceID string
+}

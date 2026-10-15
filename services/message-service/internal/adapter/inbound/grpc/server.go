@@ -4,24 +4,27 @@ import (
 	"context"
 	"errors"
 
-	"github.com/chat-platform/backend/services/message-service/internal/app"
+	"github.com/bufbuild/protovalidate-go"
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
-	"github.com/bufbuild/protovalidate-go"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type Server struct {
-	messagev1.UnimplementedMessageServiceServer
-	send      *app.SendMessage
-	validator protovalidate.Validator
+type ChatOperations interface {
+	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
 }
 
-func Register(server *grpc.Server, send *app.SendMessage, validator protovalidate.Validator) {
-	messagev1.RegisterMessageServiceServer(server, &Server{send: send, validator: validator})
+type Server struct {
+	messagev1.UnimplementedMessageServiceServer
+	operations ChatOperations
+	validator  protovalidate.Validator
+}
+
+func Register(server *grpc.Server, operations ChatOperations, validator protovalidate.Validator) {
+	messagev1.RegisterMessageServiceServer(server, &Server{operations: operations, validator: validator})
 }
 
 func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessageRequest) (*messagev1.SendMessageAck, error) {
@@ -32,7 +35,7 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	clientMsgID, _ := uuid.Parse(request.GetClientMsgId()) // validated as UUIDv7 above
-	ack, err := s.send.Execute(ctx, domain.SendMessage{
+	ack, err := s.operations.SendMessage(ctx, domain.SendMessage{
 		SenderID: request.GetSenderId(), DeviceID: request.GetDeviceId(),
 		ChatID: request.GetChatId(), ClientMsgID: clientMsgID.String(), Content: request.GetContent(),
 	})

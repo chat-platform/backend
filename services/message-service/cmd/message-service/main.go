@@ -8,12 +8,15 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/bufbuild/protovalidate-go"
 	grpcserver "github.com/chat-platform/backend/services/message-service/internal/adapter/inbound/grpc"
 	"github.com/chat-platform/backend/services/message-service/internal/adapter/outbound/postgres"
+	rediscache "github.com/chat-platform/backend/services/message-service/internal/adapter/outbound/redis"
+	chatrepo "github.com/chat-platform/backend/services/message-service/internal/adapter/outbound/repository"
 	"github.com/chat-platform/backend/services/message-service/internal/app"
 	"github.com/chat-platform/backend/services/message-service/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/bufbuild/protovalidate-go"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 )
 
@@ -31,6 +34,9 @@ func main() {
 		log.Fatalf("ping postgres: %v", err)
 	}
 
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	defer redisClient.Close()
+
 	listener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
 		log.Fatalf("listen on %s: %v", cfg.GRPCAddr, err)
@@ -40,7 +46,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("initialize request validator: %v", err)
 	}
-	grpcserver.Register(server, app.NewSendMessage(postgres.NewOutbox(pool)), validator)
+	postgresRepository := postgres.NewChatRepository(pool)
+	routingCache := rediscache.NewRoutingCache(redisClient)
+	routingCache.StartRepairWorker(ctx)
+	chatRepository := chatrepo.NewCachedChatRepository(postgresRepository, routingCache)
+	grpcserver.Register(server, app.NewChatOperations(chatRepository), validator)
 	go func() {
 		<-ctx.Done()
 		server.GracefulStop()
