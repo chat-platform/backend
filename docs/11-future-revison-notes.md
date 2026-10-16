@@ -46,3 +46,19 @@ falling back to outbox for offline senders. Combines low latency with
 durability, at the cost of two paths to reason about.
 
 ---
+
+## 2. WebSocket Gateway Scalability: Go vs. Erlang/OTP
+
+**Current approach:** Go WebSocket Gateway using one goroutine per connection, with per-connection heartbeat handling and Redis-backed connection registration.
+
+**Why:** Go provides lightweight concurrency, efficient networking, and straightforward integration with the existing backend. The current implementation is a reasonable baseline for learning and benchmarking high-concurrency connection management.
+
+**Trigger to revisit:** Before considering the gateway design complete, benchmark it under progressively increasing concurrent connection counts and identify bottlenecks in memory usage, heartbeat traffic, Redis operations, CPU utilization, and connection stability.
+
+**Other options:**
+
+- **Optimized Go gateway.** Improve connection memory usage, heartbeat scheduling, registry refresh frequency, and network I/O based on profiling results. Explore centralized heartbeat scheduling if per-connection tickers become a measurable overhead.
+- **Erlang/OTP gateway.** Build a separate prototype using BEAM processes, message passing, and supervision. Compare connection density, memory usage, failure isolation, and operational complexity against Go under equivalent workloads.
+- **Hybrid architecture.** Retain Go for messaging and business logic while using Erlang/OTP for WebSocket connection management, if benchmarks demonstrate a meaningful advantage.
+
+**Leaning if revisited:** Keep Go as the primary implementation and use it as the baseline. Explore Erlang/OTP as a comparative experiment to understand runtime-level trade-offs at high concurrency, rather than assuming either language is inherently more scalable. Document benchmark conditions, results, bottlenecks, and trade-offs.
