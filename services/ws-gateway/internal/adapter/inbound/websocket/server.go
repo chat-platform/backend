@@ -52,39 +52,59 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		s.logger.Warn(request.Context(), "websocket upgrade failed", "error", err)
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Warn(context.Background(), "could not close websocket connection", "error", err,
+				"remote_addr", request.RemoteAddr)
+		}
+	}()
 	conn.SetReadLimit(maxFrameBytes)
-	_ = conn.SetReadDeadline(time.Now().Add(identityTimeout))
+	if err := conn.SetReadDeadline(time.Now().Add(identityTimeout)); err != nil {
+		s.logger.Error(request.Context(), "could not set websocket identity read deadline", "error", err,
+			"remote_addr", request.RemoteAddr)
+		writeClose(conn, s.logger, request.Context(), websocket.CloseInternalServerErr, "connection setup failed")
+		return
+	}
 
 	identity, err := readIdentity(conn, s.logger, request.Context(), request.RemoteAddr)
 	if err != nil {
-		writeClose(conn, websocket.ClosePolicyViolation, "valid identity frame required")
+		writeClose(conn, s.logger, request.Context(), websocket.ClosePolicyViolation, "valid identity frame required")
 		return
 	}
 	connectionID := uuid.NewString()
 	connection, err := s.operations.Register(request.Context(), identity, connectionID)
 	if err != nil {
-		writeClose(conn, websocket.CloseInternalServerErr, "connection registration failed")
+		writeClose(conn, s.logger, request.Context(), websocket.CloseInternalServerErr, "connection registration failed")
 		return
 	}
 	s.logger.Info(request.Context(), "websocket connection registered",
 		"user_id", identity.UserID, "device_id", identity.DeviceID,
 		"ws_node", connection.NodeID, "conn_id", connection.ConnID)
-	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = s.operations.Unregister(ctx, identity.DeviceID, connection)
+		if err := s.operations.Unregister(ctx, identity.DeviceID, connection); err != nil {
+			// The gateway logs the underlying registry failure with connection context.
+		}
 		s.logger.Info(ctx, "websocket connection closed",
 			"user_id", identity.UserID, "device_id", identity.DeviceID,
 			"ws_node", connection.NodeID, "conn_id", connection.ConnID)
 	}()
+	if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+		s.logger.Error(request.Context(), "could not set websocket read deadline", "error", err,
+			"device_id", identity.DeviceID, "conn_id", connection.ConnID)
+		return
+	}
 
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
 	var writeMu sync.Mutex
 	conn.SetPongHandler(func(string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
+		if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+			s.logger.Error(ctx, "could not extend websocket read deadline", "error", err,
+				"device_id", identity.DeviceID, "conn_id", connection.ConnID)
+			return err
+		}
 		registered, err := s.operations.Refresh(ctx, identity.DeviceID, connection)
 		if err != nil {
 			return err
@@ -113,13 +133,13 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		var envelope wsframe.Envelope
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			s.logger.Warn(ctx, "websocket client sent malformed JSON", "error", err, "device_id", identity.DeviceID)
-			s.writeError(conn, &writeMu, "", "invalid_frame", "frame must be a valid envelope")
+			s.writeError(ctx, conn, &writeMu, "", "invalid_frame", "frame must be a valid envelope")
 			continue
 		}
 		if envelope.Type != wsframe.TypeMessageSend {
 			s.logger.Warn(ctx, "websocket client sent unsupported frame type",
 				"frame_type", envelope.Type, "request_id", envelope.ID, "device_id", identity.DeviceID)
-			s.writeError(conn, &writeMu, envelope.ID, "unsupported_type", "unsupported frame type")
+			s.writeError(ctx, conn, &writeMu, envelope.ID, "unsupported_type", "unsupported frame type")
 			continue
 		}
 		var payload wsframe.MessageSendPayload
@@ -128,14 +148,14 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			strings.TrimSpace(payload.ClientMsgID) == "" || strings.TrimSpace(payload.Content) == "" {
 			s.logger.Warn(ctx, "websocket client sent an invalid message.send frame",
 				"request_id", envelope.ID, "device_id", identity.DeviceID)
-			s.writeError(conn, &writeMu, envelope.ID, "invalid_message", "message.send requires id, chatId, clientMsgId, and content")
+			s.writeError(ctx, conn, &writeMu, envelope.ID, "invalid_message", "message.send requires id, chatId, clientMsgId, and content")
 			continue
 		}
 		ack, err := s.operations.Send(ctx, identity, domain.SendMessage{
 			ChatID: payload.ChatID, ClientMsgID: payload.ClientMsgID, Content: payload.Content,
 		})
 		if err != nil {
-			s.writeError(conn, &writeMu, envelope.ID, "send_failed", "message was not accepted")
+			s.writeError(ctx, conn, &writeMu, envelope.ID, "send_failed", "message was not accepted")
 			continue
 		}
 		s.logger.Info(ctx, "message durably accepted",
@@ -146,7 +166,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			Type: wsframe.TypeMessageAck,
 			ID:   envelope.ID,
 			TS:   ack.TimestampMS,
-			Payload: marshalPayload(wsframe.MessageAckPayload{
+			Payload: marshalPayload(ctx, s.logger, wsframe.MessageAckPayload{
 				ClientMsgID: ack.ClientMsgID,
 				TS:          ack.TimestampMS,
 			}),
@@ -216,8 +236,8 @@ func (s *Server) pingLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 	}
 }
 
-func (s *Server) writeError(conn *websocket.Conn, writeMu *sync.Mutex, id, code, message string) {
-	response := wsframe.Envelope{Type: "error", ID: id, TS: time.Now().UnixMilli(), Payload: marshalPayload(struct {
+func (s *Server) writeError(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, id, code, message string) {
+	response := wsframe.Envelope{Type: "error", ID: id, TS: time.Now().UnixMilli(), Payload: marshalPayload(ctx, s.logger, struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	}{code, message})}
@@ -225,16 +245,22 @@ func (s *Server) writeError(conn *websocket.Conn, writeMu *sync.Mutex, id, code,
 	err := conn.WriteJSON(response)
 	writeMu.Unlock()
 	if err != nil {
-		s.logger.Warn(context.Background(), "could not write websocket error frame", "error", err,
+		s.logger.Warn(ctx, "could not write websocket error frame", "error", err,
 			"error_code", code, "request_id", id)
 	}
 }
 
-func marshalPayload(value any) json.RawMessage {
-	data, _ := json.Marshal(value)
+func marshalPayload(ctx context.Context, logger logging.Logger, value any) json.RawMessage {
+	data, err := json.Marshal(value)
+	if err != nil {
+		logger.Error(ctx, "could not encode websocket response payload", "error", err)
+		return json.RawMessage("null")
+	}
 	return data
 }
 
-func writeClose(conn *websocket.Conn, code int, message string) {
-	_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, message), time.Now().Add(time.Second))
+func writeClose(conn *websocket.Conn, logger logging.Logger, ctx context.Context, code int, message string) {
+	if err := conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, message), time.Now().Add(time.Second)); err != nil {
+		logger.Warn(ctx, "could not send websocket close frame", "error", err, "close_code", code)
+	}
 }

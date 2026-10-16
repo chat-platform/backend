@@ -40,7 +40,13 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 			"client_msg_id", request.GetClientMsgId())
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	clientMsgID, _ := uuid.Parse(request.GetClientMsgId()) // validated as UUIDv7 above
+	clientMsgID, err := uuid.Parse(request.GetClientMsgId()) // validated as UUIDv7 above
+	if err != nil {
+		s.logger.Warn(ctx, "validated client message ID could not be parsed", "error", err,
+			"client_msg_id", request.GetClientMsgId(), "chat_id", request.GetChatId(),
+			"sender_id", request.GetSenderId())
+		return nil, status.Error(codes.InvalidArgument, "client_msg_id must be a valid UUID")
+	}
 	ack, err := s.operations.SendMessage(ctx, domain.SendMessage{
 		SenderID: request.GetSenderId(), DeviceID: request.GetDeviceId(),
 		ChatID: request.GetChatId(), ClientMsgID: clientMsgID.String(), Content: request.GetContent(),
