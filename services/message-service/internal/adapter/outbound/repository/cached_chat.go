@@ -38,12 +38,19 @@ func NewCachedChatRepository(store port.ChatRepository, cache ChatCache, logger 
 
 func (r *CachedChatRepository) IsAuthorizedToSend(ctx context.Context, chatID, userID string) (bool, error) {
 	key := "chat_auth:" + chatID + ":" + userID
-	if value, found, err := r.cache.Get(ctx, key); err == nil && found {
+	value, found, cacheErr := r.cache.Get(ctx, key)
+	if cacheErr != nil {
+		r.logger.Warn(ctx, "could not read chat authorization cache; using repository", "error", cacheErr,
+			"chat_id", chatID, "user_id", userID)
+	} else if found {
 		switch value {
 		case "allow":
 			return true, nil
 		case "deny":
 			return false, nil
+		default:
+			r.logger.Warn(ctx, "chat authorization cache contains an invalid decision", "chat_id", chatID,
+				"user_id", userID, "decision", value)
 		}
 	}
 
@@ -55,19 +62,28 @@ func (r *CachedChatRepository) IsAuthorizedToSend(ctx context.Context, chatID, u
 	if allowed {
 		value, ttl = "allow", allowAuthorizationTTL
 	}
-	_ = r.cache.Set(ctx, key, value, ttl)
+	if err := r.cache.Set(ctx, key, value, ttl); err != nil {
+		r.logger.Warn(ctx, "could not write chat authorization cache", "error", err,
+			"chat_id", chatID, "user_id", userID, "decision", value)
+	}
 	return allowed, nil
 }
 
 func (r *CachedChatRepository) ResolveMessageRecipients(ctx context.Context, chatID string) ([]domain.RecipientDevice, error) {
 	key := "chat_recipients:" + chatID
-	if value, found, err := r.cache.Get(ctx, key); err == nil && found {
+	value, found, cacheErr := r.cache.Get(ctx, key)
+	if cacheErr != nil {
+		r.logger.Warn(ctx, "could not read chat recipient cache; using repository", "error", cacheErr,
+			"chat_id", chatID)
+	} else if found {
 		var recipients []domain.RecipientDevice
 		if err := json.Unmarshal([]byte(value), &recipients); err == nil {
 			if len(recipients) == 0 {
 				r.logger.Warn(ctx, "chat recipient cache contains an empty list", "chat_id", chatID)
 			}
 			return recipients, nil
+		} else {
+			r.logger.Warn(ctx, "chat recipient cache contains invalid JSON", "error", err, "chat_id", chatID)
 		}
 	}
 
@@ -75,8 +91,11 @@ func (r *CachedChatRepository) ResolveMessageRecipients(ctx context.Context, cha
 	if err != nil {
 		return nil, err
 	}
-	if encoded, err := json.Marshal(recipients); err == nil {
-		_ = r.cache.Set(ctx, key, string(encoded), recipientListTTL)
+	encoded, err := json.Marshal(recipients)
+	if err != nil {
+		r.logger.Error(ctx, "could not encode chat recipients for cache", "error", err, "chat_id", chatID)
+	} else if err := r.cache.Set(ctx, key, string(encoded), recipientListTTL); err != nil {
+		r.logger.Warn(ctx, "could not write chat recipient cache", "error", err, "chat_id", chatID)
 	}
 	return recipients, nil
 }
