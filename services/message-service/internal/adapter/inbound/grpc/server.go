@@ -31,9 +31,13 @@ func Register(server *grpc.Server, operations ChatOperations, validator protoval
 
 func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessageRequest) (*messagev1.SendMessageAck, error) {
 	if request == nil {
+		s.logger.Warn(ctx, "message send request is missing")
 		return nil, status.Error(codes.InvalidArgument, "request is required")
 	}
 	if err := s.validator.Validate(request); err != nil {
+		s.logger.Warn(ctx, "message send request failed validation", "error", err,
+			"sender_id", request.GetSenderId(), "chat_id", request.GetChatId(),
+			"client_msg_id", request.GetClientMsgId())
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	clientMsgID, _ := uuid.Parse(request.GetClientMsgId()) // validated as UUIDv7 above
@@ -43,12 +47,18 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidMessage) {
+			s.logger.Warn(ctx, "message send rejected as invalid", "chat_id", request.GetChatId(),
+				"sender_id", request.GetSenderId(), "client_msg_id", request.GetClientMsgId())
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 		if errors.Is(err, domain.ErrChatAccessDenied) {
+			s.logger.Warn(ctx, "message send rejected because sender lacks chat access",
+				"chat_id", request.GetChatId(), "sender_id", request.GetSenderId())
 			return nil, status.Error(codes.PermissionDenied, err.Error())
 		}
 		if errors.Is(err, domain.ErrNoRecipients) {
+			s.logger.Warn(ctx, "message send rejected because chat has no recipient devices",
+				"chat_id", request.GetChatId(), "sender_id", request.GetSenderId())
 			return nil, status.Error(codes.FailedPrecondition, err.Error())
 		}
 		s.logger.Error(ctx, "message send failed",
@@ -59,5 +69,9 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 		)
 		return nil, status.Error(codes.Internal, "could not persist message")
 	}
+	s.logger.Info(ctx, "message durably accepted",
+		"chat_id", request.GetChatId(), "sender_id", request.GetSenderId(),
+		"device_id", request.GetDeviceId(), "client_msg_id", ack.ClientMsgID,
+		"ts_unix_milli", ack.TimestampMS)
 	return &messagev1.SendMessageAck{ClientMsgId: ack.ClientMsgID, TsUnixMilli: ack.TimestampMS}, nil
 }

@@ -51,8 +51,8 @@ func main() {
 	defer grpcConn.Close()
 
 	registry := redisadapter.NewConnectionRegistry(redisClient)
-	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn))
-	operations := app.New(cfg.NodeID, registry, messageService)
+	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn), logger.With("component", "message_service_client"))
+	operations := app.New(cfg.NodeID, registry, messageService, logger.With("component", "gateway"))
 	mux := http.NewServeMux()
 	mux.Handle(cfg.Path, wsadapter.NewServer(operations, logger.With("component", "websocket")))
 	server := &http.Server{
