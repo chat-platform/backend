@@ -1,3 +1,4 @@
+```
 chat_membership (includes group and personal)
 ----------------
 chat_id → chat.chat_id
@@ -195,3 +196,4 @@ chat
         - Explicit DEL on clean disconnect.
         - Unclean disconnect: TTL expires the key; no reaper needed.
         - Device-to-user mapping is in Postgres (device table), not here.
+```
