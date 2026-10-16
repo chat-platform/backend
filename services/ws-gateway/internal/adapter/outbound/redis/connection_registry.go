@@ -67,9 +67,3 @@ func (r *ConnectionRegistry) Unregister(ctx context.Context, deviceID string, co
 }
 
 func registryKey(deviceID string) string { return "ws:conn:" + deviceID }
-
-var _ interface {
-	Register(context.Context, string, domain.Connection) error
-	Refresh(context.Context, string, domain.Connection) (bool, error)
-	Unregister(context.Context, string, domain.Connection) error
-} = (*ConnectionRegistry)(nil)
