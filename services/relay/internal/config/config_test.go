@@ -55,17 +55,18 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 				t.Fatalf("FromEnv() accepted RELAY_WORKERS=%q", value)
 			}
 		})
-
-		t.Run("maps outbox environment settings into outbox group", func(t *testing.T) {
-			t.Setenv("RELAY_BATCH_SIZE", "25")
-			t.Setenv("RELAY_CLAIM_LEASE", "45s")
-			cfg, err := FromEnv(logger)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cfg.Outbox.BatchSize != 25 || cfg.Outbox.ClaimLease != 45*time.Second {
-				t.Fatalf("Outbox=%+v, want batch size 25 and claim lease 45s", cfg.Outbox)
-			}
-		})
 	}
+
+	t.Run("maps outbox environment settings into outbox group", func(t *testing.T) {
+		t.Setenv("RELAY_WORKERS", "2")
+		t.Setenv("RELAY_BATCH_SIZE", "25")
+		t.Setenv("RELAY_CLAIM_LEASE", "45s")
+		cfg, err := FromEnv(logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Outbox.BatchSize != 25 || cfg.Outbox.ClaimLease != 45*time.Second {
+			t.Fatalf("Outbox=%+v, want batch size 25 and claim lease 45s", cfg.Outbox)
+		}
+	})
 }
