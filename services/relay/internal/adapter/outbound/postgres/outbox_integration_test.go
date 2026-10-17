@@ -4,14 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
-	"github.com/chat-platform/backend/services/relay/internal/domain"
-	"github.com/chat-platform/backend/services/relay/internal/port"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/chat-platform/backend/services/relay/internal/domain"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
@@ -50,7 +48,7 @@ func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
 	t.Cleanup(pool.Close)
 	_, err = pool.Exec(ctx, `CREATE TABLE direct_outbox (
 		id BIGSERIAL PRIMARY KEY, device_id UUID NOT NULL, payload TEXT NOT NULL,
-		routed_to TEXT, dispatched_at TIMESTAMPTZ
+		routed_to TEXT, dispatched_at TIMESTAMPTZ, claim_expiry TIMESTAMPTZ
 	)`)
 	if err != nil {
 		t.Fatal(err)
@@ -67,18 +65,27 @@ func insertEvent(t *testing.T, pool *pgxpool.Pool, device, payload string) int64
 	return id
 }
 
-func TestDrainMarksRoutedAndOfflineRowsAndOnlySelectsPending(t *testing.T) {
+func TestClaimBatchAndMarkDispatched(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
 	ids := []int64{insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one"), insertEvent(t, pool, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "two")}
-	count, err := repo.Drain(ctx, 10, func(_ context.Context, e domain.OutboxEvent) (domain.Route, error) {
-		if e.ID == ids[0] {
-			return domain.Route{To: domain.RouteWebSocket}, nil
-		}
-		return domain.Route{}, nil
-	})
-	if err != nil || count != 2 {
-		t.Fatalf("Drain()=(%d,%v), want (2,nil)", count, err)
+	events, err := repo.ClaimBatch(ctx, 10, time.Minute)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("ClaimBatch()=(%d,%v), want (2,nil)", len(events), err)
+	}
+	// ClaimBatch returns only after commit: a separate statement sees the lease.
+	var lease time.Time
+	if err := pool.QueryRow(ctx, `SELECT claim_expiry FROM direct_outbox WHERE id=$1`, ids[0]).Scan(&lease); err != nil {
+		t.Fatal(err)
+	}
+	if !lease.After(time.Now()) {
+		t.Fatalf("claim expiry=%v, want future lease", lease)
+	}
+	if err := repo.MarkDispatched(ctx, ids[0], domain.Route{To: domain.RouteWebSocket}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkDispatched(ctx, ids[1], domain.Route{}); err != nil {
+		t.Fatal(err)
 	}
 	var routed *string
 	var dispatched time.Time
@@ -86,73 +93,62 @@ func TestDrainMarksRoutedAndOfflineRowsAndOnlySelectsPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	if routed == nil || *routed != domain.RouteWebSocket || dispatched.IsZero() {
-		t.Fatalf("online row route=%v dispatched_at=%v", routed, dispatched)
+		t.Fatalf("online route=%v dispatched_at=%v", routed, dispatched)
 	}
 	if err := pool.QueryRow(ctx, `SELECT routed_to,dispatched_at FROM direct_outbox WHERE id=$1`, ids[1]).Scan(&routed, &dispatched); err != nil {
 		t.Fatal(err)
 	}
 	if routed != nil || dispatched.IsZero() {
-		t.Fatalf("offline row route=%v dispatched_at=%v", routed, dispatched)
+		t.Fatalf("offline route=%v dispatched_at=%v", routed, dispatched)
 	}
-	count, err = repo.Drain(ctx, 10, func(context.Context, domain.OutboxEvent) (domain.Route, error) {
-		t.Fatal("already dispatched row was selected")
-		return domain.Route{}, nil
-	})
-	if err != nil || count != 0 {
-		t.Fatalf("second Drain()=(%d,%v), want (0,nil)", count, err)
+	more, err := repo.ClaimBatch(ctx, 10, time.Minute)
+	if err != nil || len(more) != 0 {
+		t.Fatalf("ClaimBatch after dispatch=(%d,%v), want (0,nil)", len(more), err)
 	}
 }
 
-func TestDrainUsesSkipLockedAcrossConcurrentWorkers(t *testing.T) {
+func TestClaimBatchExcludesUnexpiredClaimAndReclaimsExpiredLease(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
-	insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "concurrent")
-	started := make(chan struct{})
-	release := make(chan struct{})
-	firstDone := make(chan error, 1)
-	go func() {
-		count, err := repo.Drain(ctx, 1, func(context.Context, domain.OutboxEvent) (domain.Route, error) {
-			close(started)
-			<-release
-			return domain.Route{To: domain.RouteWebSocket}, nil
-		})
-		if err == nil && count != 1 {
-			err = fmt.Errorf("first worker drained %d rows", count)
-		}
-		firstDone <- err
-	}()
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("first worker did not claim row")
+	id := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "lease")
+	first, err := repo.ClaimBatch(ctx, 1, time.Minute)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first claim=(%d,%v)", len(first), err)
 	}
-	secondCount, err := repo.Drain(ctx, 1, func(context.Context, domain.OutboxEvent) (domain.Route, error) {
-		return domain.Route{To: domain.RouteWebSocket}, nil
-	})
-	close(release)
-	if err != nil || secondCount != 0 {
-		t.Fatalf("second worker Drain()=(%d,%v), want (0,nil)", secondCount, err)
+	second, err := repo.ClaimBatch(ctx, 1, time.Minute)
+	if err != nil || len(second) != 0 {
+		t.Fatalf("unexpired concurrent claim=(%d,%v), want (0,nil)", len(second), err)
 	}
-	if err := <-firstDone; err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET claim_expiry=now()-interval '1 second' WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
+	third, err := repo.ClaimBatch(ctx, 1, time.Minute)
+	if err != nil || len(third) != 1 || third[0].ID != id {
+		t.Fatalf("expired claim=(%+v,%v), want row %d", third, err, id)
+	}
 }
 
-func TestDrainCallbackFailureLeavesRowForRetry(t *testing.T) {
+func TestUnmarkedRowCanBeClaimedAgainAfterLease(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
-	insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "retry")
-	if _, err := repo.Drain(ctx, 1, func(context.Context, domain.OutboxEvent) (domain.Route, error) {
-		return domain.Route{}, fmt.Errorf("redis unavailable")
-	}); err == nil || !strings.Contains(err.Error(), "redis unavailable") {
-		t.Fatalf("Drain() error=%v", err)
+	id := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "retry")
+	if _, err := repo.ClaimBatch(ctx, 1, time.Minute); err != nil {
+		t.Fatal(err)
 	}
-	count, err := repo.Drain(ctx, 1, func(context.Context, domain.OutboxEvent) (domain.Route, error) {
-		return domain.Route{To: domain.RouteWebSocket}, nil
-	})
-	if err != nil || count != 1 {
-		t.Fatalf("retry Drain()=(%d,%v), want (1,nil)", count, err)
+	// A lookup/publish failure does not call MarkDispatched. The row becomes
+	// available after its lease and can be published again (at-least-once).
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET claim_expiry=now()-interval '1 second' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	retry, err := repo.ClaimBatch(ctx, 1, time.Minute)
+	if err != nil || len(retry) != 1 || retry[0].ID != id {
+		t.Fatalf("retry claim=(%+v,%v), want row %d", retry, err, id)
+	}
+	var dispatched *time.Time
+	if err := pool.QueryRow(ctx, `SELECT dispatched_at FROM direct_outbox WHERE id=$1`, id).Scan(&dispatched); err != nil {
+		t.Fatal(err)
+	}
+	if dispatched != nil {
+		t.Fatalf("failed publish row marked dispatched at %v", *dispatched)
 	}
 }
-
-var _ port.OutboxRepository = (*OutboxRepository)(nil)

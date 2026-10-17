@@ -73,6 +73,7 @@ services:
       REDIS_ADDR: redis:6379
       RELAY_POLL_INTERVAL: 250ms
       RELAY_BATCH_SIZE: 100
+      RELAY_CLAIM_LEASE: 30s
     depends_on:
       postgres:
         condition: service_healthy

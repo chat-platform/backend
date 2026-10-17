@@ -39,8 +39,8 @@ func main() {
 	if err := rc.Ping(ctx).Err(); err != nil {
 		fatal(ctx, logger, "ping redis", err)
 	}
-	dispatcher := app.New(postgresadapter.NewOutboxRepository(pool), redisadapter.NewRegistry(rc), redisadapter.NewPublisher(rc), cfg.BatchSize, logger.With("component", "dispatcher"))
-	logger.Info(ctx, "relay started", "batch_size", cfg.BatchSize, "poll_interval", cfg.PollInterval.String())
+	dispatcher := app.New(postgresadapter.NewOutboxRepository(pool), redisadapter.NewRegistry(rc), redisadapter.NewPublisher(rc), cfg.BatchSize, cfg.ClaimLease, logger.With("component", "dispatcher"))
+	logger.Info(ctx, "relay started", "batch_size", cfg.BatchSize, "poll_interval", cfg.PollInterval.String(), "claim_lease", cfg.ClaimLease.String())
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 	for {

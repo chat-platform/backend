@@ -13,6 +13,7 @@ type Config struct {
 	RedisAddr    string
 	BatchSize    int
 	PollInterval time.Duration
+	ClaimLease   time.Duration
 }
 
 func FromEnv(logger logging.Logger) Config {
@@ -32,9 +33,17 @@ func FromEnv(logger logging.Logger) Config {
 			logger.Warn(context.Background(), "invalid relay poll interval; using default", "value", value)
 		}
 	}
+	lease := 30 * time.Second
+	if value := os.Getenv("RELAY_CLAIM_LEASE"); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			lease = parsed
+		} else {
+			logger.Warn(context.Background(), "invalid relay claim lease; using default", "value", value)
+		}
+	}
 	return Config{
 		PostgresDSN: getenv(logger, "POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"),
-		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"), BatchSize: batch, PollInterval: poll,
+		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"), BatchSize: batch, PollInterval: poll, ClaimLease: lease,
 	}
 }
 

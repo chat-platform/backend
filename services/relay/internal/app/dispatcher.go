@@ -6,44 +6,57 @@ import (
 	"github.com/chat-platform/backend/services/relay/internal/domain"
 	"github.com/chat-platform/backend/services/relay/internal/port"
 	"github.com/chat-platform/backend/shared/pkg/logging"
+	"time"
 )
 
 type Dispatcher struct {
-	outbox    port.OutboxRepository
-	registry  port.ConnectionRegistry
-	publisher port.StreamPublisher
-	batchSize int
-	logger    logging.Logger
+	outbox     port.OutboxRepository
+	registry   port.ConnectionRegistry
+	publisher  port.StreamPublisher
+	batchSize  int
+	claimLease time.Duration
+	logger     logging.Logger
 }
 
-func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publisher port.StreamPublisher, batchSize int, logger logging.Logger) *Dispatcher {
+func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publisher port.StreamPublisher, batchSize int, claimLease time.Duration, logger logging.Logger) *Dispatcher {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	return &Dispatcher{outbox: outbox, registry: registry, publisher: publisher, batchSize: batchSize, logger: logger}
+	if claimLease <= 0 {
+		claimLease = 30 * time.Second
+	}
+	return &Dispatcher{outbox: outbox, registry: registry, publisher: publisher, batchSize: batchSize, claimLease: claimLease, logger: logger}
 }
 func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
-	count, err := d.outbox.Drain(ctx, d.batchSize, func(ctx context.Context, event domain.OutboxEvent) (domain.Route, error) {
+	events, err := d.outbox.ClaimBatch(ctx, d.batchSize, d.claimLease)
+	if err != nil {
+		d.logger.Error(ctx, "outbox batch claim failed", "error", err, "batch_size", d.batchSize)
+		return 0, err
+	}
+	count := 0
+	for _, event := range events {
 		connection, online, err := d.registry.Lookup(ctx, event.DeviceID)
 		if err != nil {
 			d.logger.Error(ctx, "device registry lookup failed", "outbox_id", event.ID, "device_id", event.DeviceID, "error", err)
-			return domain.Route{}, fmt.Errorf("lookup device %s: %w", event.DeviceID, err)
+			return count, fmt.Errorf("lookup device %s: %w", event.DeviceID, err)
 		}
+		route := domain.Route{}
 		if !online {
 			d.logger.Info(ctx, "outbox event skipped for offline device", "outbox_id", event.ID, "device_id", event.DeviceID)
-			return domain.Route{}, nil
+		} else {
+			if err := d.publisher.Publish(ctx, connection, event); err != nil {
+				d.logger.Error(ctx, "could not publish websocket delivery", "outbox_id", event.ID, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID, "error", err)
+				return count, fmt.Errorf("publish outbox %d: %w", event.ID, err)
+			}
+			route = domain.Route{To: domain.RouteWebSocket}
+			d.logger.Info(ctx, "outbox event routed to websocket stream", "outbox_id", event.ID, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID)
 		}
-		if err := d.publisher.Publish(ctx, connection, event); err != nil {
-			d.logger.Error(ctx, "could not publish websocket delivery", "outbox_id", event.ID, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID, "error", err)
-			return domain.Route{}, fmt.Errorf("publish outbox %d: %w", event.ID, err)
+		if err := d.outbox.MarkDispatched(ctx, event.ID, route); err != nil {
+			d.logger.Error(ctx, "could not mark outbox dispatched", "outbox_id", event.ID, "device_id", event.DeviceID, "error", err)
+			return count, fmt.Errorf("mark outbox %d dispatched: %w", event.ID, err)
 		}
-		d.logger.Info(ctx, "outbox event routed to websocket stream", "outbox_id", event.ID, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID)
-		return domain.Route{To: domain.RouteWebSocket}, nil
-	})
-	if err != nil {
-		d.logger.Error(ctx, "outbox drain batch failed", "error", err, "batch_size", d.batchSize)
-		return count, err
+		count++
 	}
-	d.logger.Info(ctx, "outbox drain batch completed", "rows_dispatched", count, "batch_size", d.batchSize)
+	d.logger.Info(ctx, "outbox drain batch completed", "rows_claimed", len(events), "rows_dispatched", count, "batch_size", d.batchSize)
 	return count, nil
 }

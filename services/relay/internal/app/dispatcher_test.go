@@ -3,55 +3,65 @@ package app
 import (
 	"context"
 	"errors"
-	"github.com/chat-platform/backend/services/relay/internal/domain"
-	"github.com/chat-platform/backend/services/relay/internal/port"
-	"github.com/chat-platform/backend/shared/pkg/logging"
+	"reflect"
 	"testing"
+	"time"
+
+	"github.com/chat-platform/backend/services/relay/internal/domain"
+	"github.com/chat-platform/backend/shared/pkg/logging"
 )
 
 type testOutbox struct {
-	events []domain.OutboxEvent
-	routes []domain.Route
+	events  []domain.OutboxEvent
+	marked  map[int64]domain.Route
+	markErr error
 }
 
-func (o *testOutbox) Drain(_ context.Context, _ int, route port.RouteFunc) (int, error) {
-	for _, e := range o.events {
-		r, err := route(context.Background(), e)
-		if err != nil {
-			return 0, err
-		}
-		o.routes = append(o.routes, r)
+func (o *testOutbox) ClaimBatch(context.Context, int, time.Duration) ([]domain.OutboxEvent, error) {
+	return o.events, nil
+}
+func (o *testOutbox) MarkDispatched(_ context.Context, id int64, route domain.Route) error {
+	if o.markErr != nil {
+		return o.markErr
 	}
-	return len(o.events), nil
+	if o.marked == nil {
+		o.marked = make(map[int64]domain.Route)
+	}
+	o.marked[id] = route
+	return nil
 }
 
 type testRegistry struct {
-	c      domain.Connection
-	online bool
-	err    error
+	connections map[string]domain.Connection
+	err         error
 }
 
-func (r testRegistry) Lookup(context.Context, string) (domain.Connection, bool, error) {
-	return r.c, r.online, r.err
+func (r testRegistry) Lookup(_ context.Context, id string) (domain.Connection, bool, error) {
+	if r.err != nil {
+		return domain.Connection{}, false, r.err
+	}
+	connection, ok := r.connections[id]
+	return connection, ok, nil
 }
 
 type testPublisher struct {
-	calls int
-	err   error
+	calls  int
+	err    error
+	events []domain.OutboxEvent
 }
 
-func (p *testPublisher) Publish(context.Context, domain.Connection, domain.OutboxEvent) error {
+func (p *testPublisher) Publish(_ context.Context, _ domain.Connection, event domain.OutboxEvent) error {
 	p.calls++
+	p.events = append(p.events, event)
 	return p.err
 }
+
 func TestRunOnceRoutesOnlineAndMarksOffline(t *testing.T) {
-	ctx := context.Background()
 	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 1, DeviceID: "online"}, {ID: 2, DeviceID: "offline"}}}
 	publisher := &testPublisher{}
-	d := New(outbox, testRegistry{c: domain.Connection{NodeID: "ws-1", ConnID: "conn-1"}, online: true}, publisher, 10, quietLogger(t))
-	// A second dispatcher's registry marks all devices offline; verify the offline route is empty.
-	d.registry = registryByDevice{online: domain.Connection{NodeID: "ws-1", ConnID: "conn-1"}}
-	count, err := d.RunOnce(ctx)
+	registry := testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws-1", ConnID: "conn-1"}}}
+	d := New(outbox, registry, publisher, 10, time.Second, quietLogger(t))
+	count, err := d.RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,23 +71,66 @@ func TestRunOnceRoutesOnlineAndMarksOffline(t *testing.T) {
 	if publisher.calls != 1 {
 		t.Fatalf("publish calls=%d, want 1", publisher.calls)
 	}
-	if len(outbox.routes) != 2 || outbox.routes[0].To != domain.RouteWebSocket || outbox.routes[1].To != "" {
-		t.Fatalf("routes=%+v", outbox.routes)
+	if outbox.marked[1].To != domain.RouteWebSocket || outbox.marked[2].To != "" {
+		t.Fatalf("marked routes=%+v", outbox.marked)
 	}
 }
 
-type registryByDevice struct{ online domain.Connection }
-
-func (r registryByDevice) Lookup(_ context.Context, id string) (domain.Connection, bool, error) {
-	return r.online, id == "online", nil
+func TestRunOnceDoesNotMarkWhenLookupOrPublishFails(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		registry  testRegistry
+		publisher *testPublisher
+	}{
+		{name: "lookup", registry: testRegistry{err: errors.New("redis lookup down")}},
+		{name: "publish", registry: testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}, publisher: &testPublisher{err: errors.New("redis publish down")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 7, DeviceID: "online"}}}
+			if tc.publisher == nil {
+				tc.publisher = &testPublisher{}
+			}
+			d := New(outbox, tc.registry, tc.publisher, 1, time.Second, quietLogger(t))
+			if _, err := d.RunOnce(context.Background()); err == nil {
+				t.Fatal("expected failure")
+			}
+			if len(outbox.marked) != 0 {
+				t.Fatalf("failed event marked dispatched: %+v", outbox.marked)
+			}
+		})
+	}
 }
-func TestRunOncePropagatesPublishFailure(t *testing.T) {
-	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 7, DeviceID: "online"}}}
-	d := New(outbox, registryByDevice{online: domain.Connection{NodeID: "ws", ConnID: "c"}}, &testPublisher{err: errors.New("redis down")}, 1, quietLogger(t))
+
+func TestRunOnceReportsMarkFailureAfterPublish(t *testing.T) {
+	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 8, DeviceID: "online"}}, markErr: errors.New("postgres down")}
+	publisher := &testPublisher{}
+	d := New(outbox, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}, publisher, 1, time.Second, quietLogger(t))
 	if _, err := d.RunOnce(context.Background()); err == nil {
-		t.Fatal("expected publish error")
+		t.Fatal("expected mark failure")
+	}
+	if publisher.calls != 1 {
+		t.Fatalf("publish calls=%d, want 1", publisher.calls)
 	}
 }
+
+func TestPublishThenMarkFailureCanRetrySameLogicalMessage(t *testing.T) {
+	event := domain.OutboxEvent{ID: 9, DeviceID: "online", Payload: []byte(`{"senderId":"sender-1","clientMsgId":"client-1"}`)}
+	outbox := &testOutbox{events: []domain.OutboxEvent{event}, markErr: errors.New("temporary postgres failure")}
+	publisher := &testPublisher{}
+	registry := testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}
+	d := New(outbox, registry, publisher, 1, time.Second, quietLogger(t))
+	if _, err := d.RunOnce(context.Background()); err == nil {
+		t.Fatal("expected first dispatch update to fail")
+	}
+	outbox.markErr = nil // lease expires; the same event is claimed again
+	if count, err := d.RunOnce(context.Background()); err != nil || count != 1 {
+		t.Fatalf("retry RunOnce()=(%d,%v), want (1,nil)", count, err)
+	}
+	if len(publisher.events) != 2 || publisher.events[0].ID != publisher.events[1].ID || !reflect.DeepEqual(publisher.events[0].Payload, publisher.events[1].Payload) {
+		t.Fatalf("retry did not publish the same logical event twice: %+v", publisher.events)
+	}
+}
+
 func quietLogger(t *testing.T) logging.Logger {
 	t.Helper()
 	logger, err := logging.New(&discardWriter{}, logging.Config{Level: "error"})
