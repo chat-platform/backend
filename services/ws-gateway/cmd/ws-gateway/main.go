@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	deliveryadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/redis"
 	wsadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/websocket"
 	grpcadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/grpc"
 	redisadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/redis"
@@ -54,7 +55,7 @@ func main() {
 	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn), logger.With("component", "message_service_client"))
 	operations := app.New(cfg.NodeID, registry, messageService, logger.With("component", "gateway"))
 	hub := wsadapter.NewHub()
-	consumer := redisadapter.NewDeliveryConsumer(redisClient, cfg.NodeID, hub, logger.With("component", "delivery_consumer"))
+	consumer := deliveryadapter.NewDeliveryConsumer(redisClient, cfg.NodeID, hub, logger.With("component", "delivery_consumer"))
 	consumerFailed := make(chan error, 1)
 	go func() {
 		if err := consumer.Run(ctx); err != nil && ctx.Err() == nil {

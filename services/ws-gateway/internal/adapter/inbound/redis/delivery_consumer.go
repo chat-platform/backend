@@ -1,4 +1,4 @@
-package redisadapter
+package redisinbound
 
 import (
 	"context"
