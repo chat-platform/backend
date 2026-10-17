@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	deliveryadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/redis"
 	wsadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/websocket"
 	grpcadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/grpc"
 	redisadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/redis"
@@ -53,14 +54,25 @@ func main() {
 	registry := redisadapter.NewConnectionRegistry(redisClient)
 	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn), logger.With("component", "message_service_client"))
 	operations := app.New(cfg.NodeID, registry, messageService, logger.With("component", "gateway"))
+	hub := wsadapter.NewHub()
+	consumer := deliveryadapter.NewDeliveryConsumer(redisClient, cfg.NodeID, hub, logger.With("component", "delivery_consumer"))
+	consumerFailed := make(chan error, 1)
+	go func() {
+		if err := consumer.Run(ctx); err != nil && ctx.Err() == nil {
+			logger.Error(ctx, "websocket delivery consumer stopped unexpectedly", "error", err, "node_id", cfg.NodeID)
+			consumerFailed <- err
+			stop()
+		}
+	}()
 	mux := http.NewServeMux()
-	mux.Handle(cfg.Path, wsadapter.NewServer(operations, logger.With("component", "websocket")))
+	mux.Handle(cfg.Path, wsadapter.NewServer(operations, logger.With("component", "websocket"), hub))
 	server := &http.Server{
 		Addr: cfg.ListenAddr, Handler: mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
 		<-ctx.Done()
+		logger.Info(context.Background(), "ws-gateway shutting down", "node_id", cfg.NodeID)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
@@ -72,6 +84,13 @@ func main() {
 		logger.Error(ctx, "http server failed", "error", err)
 		os.Exit(1)
 	}
+	select {
+	case err := <-consumerFailed:
+		logger.Error(context.Background(), "ws-gateway stopped because delivery consumer failed", "error", err, "node_id", cfg.NodeID)
+		os.Exit(1)
+	default:
+	}
+	logger.Info(context.Background(), "ws-gateway stopped", "node_id", cfg.NodeID)
 }
 
 func fatal(err error) {

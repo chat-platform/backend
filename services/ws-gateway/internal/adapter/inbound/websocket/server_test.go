@@ -55,7 +55,7 @@ func TestConnectionIdentitySendAndAck(t *testing.T) {
 		t.Fatal(err)
 	}
 	operations := &fakeOperations{}
-	httpServer := httptest.NewServer(NewServer(operations, logger))
+	httpServer := httptest.NewServer(NewServer(operations, logger, NewHub()))
 	defer httpServer.Close()
 
 	url := "ws" + strings.TrimPrefix(httpServer.URL, "http")
@@ -104,7 +104,7 @@ func TestInvalidIdentityIsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	operations := &fakeOperations{}
-	httpServer := httptest.NewServer(NewServer(operations, logger))
+	httpServer := httptest.NewServer(NewServer(operations, logger, NewHub()))
 	defer httpServer.Close()
 
 	url := "ws" + strings.TrimPrefix(httpServer.URL, "http")
@@ -132,7 +132,7 @@ func TestMalformedFrameAndSendFailureReturnErrorFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	operations := &fakeOperations{sendErr: errors.New("message service unavailable")}
-	httpServer := httptest.NewServer(NewServer(operations, logger))
+	httpServer := httptest.NewServer(NewServer(operations, logger, NewHub()))
 	defer httpServer.Close()
 
 	url := "ws" + strings.TrimPrefix(httpServer.URL, "http")
@@ -175,7 +175,7 @@ func TestRegistryFailureClosesConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	operations := &fakeOperations{registerErr: errors.New("redis unavailable")}
-	httpServer := httptest.NewServer(NewServer(operations, logger))
+	httpServer := httptest.NewServer(NewServer(operations, logger, NewHub()))
 	defer httpServer.Close()
 
 	url := "ws" + strings.TrimPrefix(httpServer.URL, "http")

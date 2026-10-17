@@ -13,9 +13,10 @@ schema live in `shared/`.
 
 ## Current Status
 
-Phase 1 complete: Message Service persists idempotent direct messages and
-returns acknowledgements over gRPC. Phase 2 WS Gateway implementation is in
-progress; its no-auth stub identity path will forward sends and return acks.
+Phases 1–3 complete: Message Service persists direct messages, WS Gateway
+accepts stub identities and sends, and Relay routes live deliveries through
+Redis Streams to recipient sockets. Authentication, reconnect sync, offline
+recovery, and retry scans remain future work.
 
 ## Architecture
 
@@ -44,13 +45,13 @@ Redis (WS connection registry).
 
 ### Infrastructure
 
-Docker Compose for local Postgres and Redis.
+Docker Compose for local Postgres, Redis, and the three Phase 1–3 services.
 
 ## Components
 
 - [x] Message Service (`services/message-service`, Phase 1)
-- [ ] WS Gateway (`services/ws-gateway`, Phase 2 in progress)
-- [ ] Relay (`services/relay`)
+- [x] WS Gateway (`services/ws-gateway`, Phase 2 + live delivery)
+- [x] Relay (`services/relay`, Phase 3)
 - [ ] Core API (Phase 4)
 - [ ] Notification Service (later)
 
@@ -59,10 +60,37 @@ Docker Compose for local Postgres and Redis.
 From the repo root:
 
 ```bash
-make up          # Postgres + Redis (schema + seeds on first start)
+docker compose up --build -d # Postgres, Redis, Message Service, WS Gateway, Relay
 make proto       # generate gRPC stubs into shared/gen
 make tidy        # sync Go workspace / modules
 ```
+
+Postgres migrations and seeds run only when its data volume is first created.
+The live demo uses `ws://localhost:8080/ws`. Connect two terminals with
+`websocat ws://localhost:8080/ws`, then send the following identity as the
+first frame. Alice:
+
+```json
+{"type":"identity","id":"alice","ts":0,"payload":{"userId":"11111111-1111-4111-8111-111111111111","deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}}
+```
+
+Bob:
+
+```json
+{"type":"identity","id":"bob","ts":0,"payload":{"userId":"22222222-2222-4222-8222-222222222222","deviceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}}
+```
+
+Send this from Alice; Bob receives `message.recv`, and Alice receives
+`message.ack`:
+
+```json
+{"type":"message.send","id":"request-1","ts":0,"payload":{"chatId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","clientMsgId":"018f5a1c-7b2d-7abc-8def-0123456789ab","content":"hello"}}
+```
+
+The delivered payload includes `senderId` and `clientMsgId` to identify the
+original message. Since Core API sync is not implemented yet, an offline
+recipient is skipped by Relay and will not receive that message live after
+reconnect.
 
 The `proto` target requires `protoc`, `protoc-gen-go`, and
 `protoc-gen-go-grpc` on `PATH`. The database migration and dev seed run only
@@ -92,9 +120,9 @@ Document measured results here.
 
 ## Known Limitations
 
-Phase 2 uses unauthenticated stub identity and does not deliver messages to
-recipients. Relay delivery, session validation, and reconnect sync are deferred
-to later phases.
+Stub identity remains unauthenticated. Relay routes only online direct-message
+deliveries; offline routing, retry scans, session validation, and reconnect sync
+are deferred to later phases.
 
 ## Design vs Implementation
 
