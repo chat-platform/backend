@@ -2,16 +2,21 @@ package websocket
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"time"
+
 	"github.com/chat-platform/backend/services/ws-gateway/internal/port"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/gorilla/websocket"
-	"sync"
-	"time"
 )
 
 var ErrConnectionGone = port.ErrConnectionGone
 
-type socketWriter interface{ WriteJSON(any) error }
+type socketWriter interface {
+	WriteJSON(any) error
+	Close() error
+}
 type Hub struct {
 	mu      sync.RWMutex
 	sockets map[string]socketWriter
@@ -37,7 +42,12 @@ func (h *Hub) Deliver(_ context.Context, id string, envelope wsframe.Envelope) e
 	if socket == nil {
 		return ErrConnectionGone
 	}
-	return socket.WriteJSON(envelope)
+	if err := socket.WriteJSON(envelope); err != nil {
+		h.Remove(id, socket)
+		_ = socket.Close()
+		return fmt.Errorf("%w: websocket write failed: %w", ErrConnectionGone, err)
+	}
+	return nil
 }
 
 type safeSocket struct {
@@ -50,6 +60,7 @@ func (s *safeSocket) WriteJSON(value any) error {
 	defer s.mu.Unlock()
 	return s.conn.WriteJSON(value)
 }
+func (s *safeSocket) Close() error { return s.conn.Close() }
 func (s *safeSocket) WriteControl(messageType int, data []byte, deadline time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

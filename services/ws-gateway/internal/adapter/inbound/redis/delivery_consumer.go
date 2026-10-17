@@ -145,7 +145,7 @@ func (c *DeliveryConsumer) handle(ctx context.Context, message redis.XMessage) e
 	}
 	if err := c.deliverer.Deliver(ctx, delivery.connID, delivery.envelope); err != nil {
 		if errors.Is(err, port.ErrConnectionGone) {
-			c.logger.Info(ctx, "websocket delivery dropped because connection is gone", "ws_node", c.nodeID, "conn_id", delivery.connID, "device_id", delivery.deviceID, "outbox_id", delivery.outboxID, "stream_entry_id", message.ID)
+			c.logger.Info(ctx, "websocket delivery dropped because connection is gone", "ws_node", c.nodeID, "conn_id", delivery.connID, "device_id", delivery.deviceID, "outbox_id", delivery.outboxID, "stream_entry_id", message.ID, "delivery_error", err)
 			return c.ack(ctx, message)
 		}
 		c.logger.Error(ctx, "could not write message to websocket", "ws_node", c.nodeID, "conn_id", delivery.connID, "device_id", delivery.deviceID, "outbox_id", delivery.outboxID, "stream_entry_id", message.ID, "error", err)
