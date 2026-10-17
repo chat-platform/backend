@@ -1,5 +1,4 @@
-.PHONY: proto up down tidy\
-	running
+.PHONY: proto up down tidy running
 
 BUF ?= buf
 
@@ -7,7 +6,7 @@ proto:
 	$(BUF) generate
 
 up:
-	docker compose up -d
+	docker compose up --build -d
 
 down:
 	docker compose down
