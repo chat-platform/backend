@@ -10,27 +10,31 @@ import (
 )
 
 type Dispatcher struct {
-	outbox     port.OutboxRepository
-	registry   port.ConnectionRegistry
-	publisher  port.StreamPublisher
-	batchSize  int
-	claimLease time.Duration
-	logger     logging.Logger
+	outbox        port.OutboxRepository
+	registry      port.ConnectionRegistry
+	publisher     port.StreamPublisher
+	outboxOptions OutboxOptions
+	logger        logging.Logger
 }
 
-func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publisher port.StreamPublisher, batchSize int, claimLease time.Duration, logger logging.Logger) *Dispatcher {
-	if batchSize <= 0 {
-		batchSize = 100
+type OutboxOptions struct {
+	BatchSize  int
+	ClaimLease time.Duration
+}
+
+func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publisher port.StreamPublisher, options OutboxOptions, logger logging.Logger) *Dispatcher {
+	if options.BatchSize <= 0 {
+		options.BatchSize = 100
 	}
-	if claimLease <= 0 {
-		claimLease = 30 * time.Second
+	if options.ClaimLease <= 0 {
+		options.ClaimLease = 30 * time.Second
 	}
-	return &Dispatcher{outbox: outbox, registry: registry, publisher: publisher, batchSize: batchSize, claimLease: claimLease, logger: logger}
+	return &Dispatcher{outbox: outbox, registry: registry, publisher: publisher, outboxOptions: options, logger: logger}
 }
 func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
-	events, err := d.outbox.ClaimBatch(ctx, d.batchSize, d.claimLease)
+	events, err := d.outbox.ClaimBatch(ctx, d.outboxOptions.BatchSize, d.outboxOptions.ClaimLease)
 	if err != nil {
-		d.logger.Error(ctx, "outbox batch claim failed", "error", err, "batch_size", d.batchSize)
+		d.logger.Error(ctx, "outbox batch claim failed", "error", err, "batch_size", d.outboxOptions.BatchSize)
 		return 0, err
 	}
 	count := 0
@@ -57,6 +61,6 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
 		}
 		count++
 	}
-	d.logger.Info(ctx, "outbox drain batch completed", "rows_claimed", len(events), "rows_dispatched", count, "batch_size", d.batchSize)
+	d.logger.Info(ctx, "outbox drain batch completed", "rows_claimed", len(events), "rows_dispatched", count, "batch_size", d.outboxOptions.BatchSize)
 	return count, nil
 }

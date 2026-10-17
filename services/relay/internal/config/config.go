@@ -11,12 +11,20 @@ import (
 )
 
 type Config struct {
-	PostgresDSN  string
-	RedisAddr    string
-	BatchSize    int
-	Workers      int
+	PostgresDSN string
+	RedisAddr   string
+	Workers     WorkerSettings
+	Outbox      OutboxSettings
+}
+
+type WorkerSettings struct {
+	Count        int
 	PollInterval time.Duration
-	ClaimLease   time.Duration
+}
+
+type OutboxSettings struct {
+	BatchSize  int
+	ClaimLease time.Duration
 }
 
 func FromEnv(logger logging.Logger) (Config, error) {
@@ -54,8 +62,9 @@ func FromEnv(logger logging.Logger) (Config, error) {
 	}
 	return Config{
 		PostgresDSN: getenv(logger, "POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"),
-		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"), BatchSize: batch,
-		Workers: workers, PollInterval: poll, ClaimLease: lease,
+		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"),
+		Workers:     WorkerSettings{Count: workers, PollInterval: poll},
+		Outbox:      OutboxSettings{BatchSize: batch, ClaimLease: lease},
 	}, nil
 }
 

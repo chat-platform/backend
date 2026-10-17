@@ -60,7 +60,7 @@ func TestRunOnceRoutesOnlineAndMarksOffline(t *testing.T) {
 	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 1, DeviceID: "online"}, {ID: 2, DeviceID: "offline"}}}
 	publisher := &testPublisher{}
 	registry := testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws-1", ConnID: "conn-1"}}}
-	d := New(outbox, registry, publisher, 10, time.Second, quietLogger(t))
+	d := New(outbox, registry, publisher, OutboxOptions{BatchSize: 10, ClaimLease: time.Second}, quietLogger(t))
 	count, err := d.RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestRunOnceDoesNotMarkWhenLookupOrPublishFails(t *testing.T) {
 			if tc.publisher == nil {
 				tc.publisher = &testPublisher{}
 			}
-			d := New(outbox, tc.registry, tc.publisher, 1, time.Second, quietLogger(t))
+			d := New(outbox, tc.registry, tc.publisher, OutboxOptions{BatchSize: 1, ClaimLease: time.Second}, quietLogger(t))
 			if _, err := d.RunOnce(context.Background()); err == nil {
 				t.Fatal("expected failure")
 			}
@@ -104,7 +104,7 @@ func TestRunOnceDoesNotMarkWhenLookupOrPublishFails(t *testing.T) {
 func TestRunOnceReportsMarkFailureAfterPublish(t *testing.T) {
 	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 8, DeviceID: "online"}}, markErr: errors.New("postgres down")}
 	publisher := &testPublisher{}
-	d := New(outbox, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}, publisher, 1, time.Second, quietLogger(t))
+	d := New(outbox, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}, publisher, OutboxOptions{BatchSize: 1, ClaimLease: time.Second}, quietLogger(t))
 	if _, err := d.RunOnce(context.Background()); err == nil {
 		t.Fatal("expected mark failure")
 	}
@@ -118,7 +118,7 @@ func TestPublishThenMarkFailureCanRetrySameLogicalMessage(t *testing.T) {
 	outbox := &testOutbox{events: []domain.OutboxEvent{event}, markErr: errors.New("temporary postgres failure")}
 	publisher := &testPublisher{}
 	registry := testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}
-	d := New(outbox, registry, publisher, 1, time.Second, quietLogger(t))
+	d := New(outbox, registry, publisher, OutboxOptions{BatchSize: 1, ClaimLease: time.Second}, quietLogger(t))
 	if _, err := d.RunOnce(context.Background()); err == nil {
 		t.Fatal("expected first dispatch update to fail")
 	}

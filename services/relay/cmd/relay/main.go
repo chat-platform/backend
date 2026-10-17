@@ -44,18 +44,20 @@ func main() {
 	if err := rc.Ping(ctx).Err(); err != nil {
 		fatal(ctx, logger, "ping redis", err)
 	}
-	dispatcher := app.New(postgresadapter.NewOutboxRepository(pool), redisadapter.NewRegistry(rc), redisadapter.NewPublisher(rc), cfg.BatchSize, cfg.ClaimLease, logger.With("component", "dispatcher"))
-	logger.Info(ctx, "relay started", "workers", cfg.Workers, "batch_size", cfg.BatchSize, "poll_interval", cfg.PollInterval.String(), "claim_lease", cfg.ClaimLease.String())
+	dispatcher := app.New(postgresadapter.NewOutboxRepository(pool), redisadapter.NewRegistry(rc), redisadapter.NewPublisher(rc), app.OutboxOptions{
+		BatchSize: cfg.Outbox.BatchSize, ClaimLease: cfg.Outbox.ClaimLease,
+	}, logger.With("component", "dispatcher"))
+	logger.Info(ctx, "relay started", "workers", cfg.Workers.Count, "batch_size", cfg.Outbox.BatchSize, "poll_interval", cfg.Workers.PollInterval.String(), "claim_lease", cfg.Outbox.ClaimLease.String())
 	var workers sync.WaitGroup
-	workers.Add(cfg.Workers)
-	for workerID := 1; workerID <= cfg.Workers; workerID++ {
+	workers.Add(cfg.Workers.Count)
+	for workerID := 1; workerID <= cfg.Workers.Count; workerID++ {
 		go func(id int) {
 			defer workers.Done()
-			runWorker(ctx, id, cfg.PollInterval, dispatcher, logger)
+			runWorker(ctx, id, cfg.Workers.PollInterval, dispatcher, logger)
 		}(workerID)
 	}
 	<-ctx.Done()
-	logger.Info(context.Background(), "relay stopping", "workers", cfg.Workers)
+	logger.Info(context.Background(), "relay stopping", "workers", cfg.Workers.Count)
 	workers.Wait()
 	logger.Info(context.Background(), "relay stopped")
 }
