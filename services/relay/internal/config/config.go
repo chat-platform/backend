@@ -2,21 +2,32 @@ package config
 
 import (
 	"context"
-	"github.com/chat-platform/backend/shared/pkg/logging"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/chat-platform/backend/shared/pkg/logging"
 )
 
 type Config struct {
 	PostgresDSN  string
 	RedisAddr    string
 	BatchSize    int
+	Workers      int
 	PollInterval time.Duration
 	ClaimLease   time.Duration
 }
 
-func FromEnv(logger logging.Logger) Config {
+func FromEnv(logger logging.Logger) (Config, error) {
+	workers := 2
+	if value, ok := os.LookupEnv("RELAY_WORKERS"); ok && value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 {
+			return Config{}, fmt.Errorf("invalid RELAY_WORKERS %q: must be a positive integer", value)
+		}
+		workers = parsed
+	}
 	batch := 100
 	if value := os.Getenv("RELAY_BATCH_SIZE"); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
@@ -43,8 +54,9 @@ func FromEnv(logger logging.Logger) Config {
 	}
 	return Config{
 		PostgresDSN: getenv(logger, "POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"),
-		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"), BatchSize: batch, PollInterval: poll, ClaimLease: lease,
-	}
+		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"), BatchSize: batch,
+		Workers: workers, PollInterval: poll, ClaimLease: lease,
+	}, nil
 }
 
 func getenv(logger logging.Logger, key, fallback string) string {
