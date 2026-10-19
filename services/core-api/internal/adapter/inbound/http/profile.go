@@ -16,10 +16,10 @@ func (s *Server) profile(c echo.Context) error {
 
 func (s *Server) setName(c echo.Context) error {
 	var body struct {
-		DisplayName string `json:"displayName"`
+		DisplayName string `json:"displayName" validate:"required,min=1,max=80"`
 	}
-	if !decode(c, &body) {
-		return nil
+	if err := decode(c, &body); err != nil {
+		return writeInvalidRequest(c, err)
 	}
 	if err := s.service.SetDisplayName(c.Request().Context(), claimsFrom(c.Request()).UserID, body.DisplayName); err != nil {
 		return writeServiceError(c, err)

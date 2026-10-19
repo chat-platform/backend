@@ -23,6 +23,7 @@ func New(service *app.Service) *Server {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
+	e.Validator = newRequestValidator()
 	s := &Server{
 		service: service,
 		echo:    e,

@@ -3,11 +3,25 @@ package httpadapter
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/chat-platform/backend/services/core-api/internal/app"
+	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
 )
+
+type requestValidator struct {
+	validator *validator.Validate
+}
+
+func newRequestValidator() echo.Validator {
+	return &requestValidator{validator: validator.New()}
+}
+
+func (v *requestValidator) Validate(value any) error {
+	return v.validator.Struct(value)
+}
 
 type errorBody struct {
 	Error struct {
@@ -27,16 +41,23 @@ func writeError(c echo.Context, status int, code, message string) error {
 	return writeJSON(c, status, body)
 }
 
-func decode(c echo.Context, target any) bool {
+func decode(c echo.Context, target any) error {
 	r := c.Request()
 	r.Body = http.MaxBytesReader(c.Response(), r.Body, 16<<10)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(target) != nil {
-		_ = writeError(c, http.StatusBadRequest, "invalid_request", "request body is invalid")
-		return false
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("decode JSON request body: %w", err)
 	}
-	return true
+	if err := c.Validate(target); err != nil {
+		return fmt.Errorf("validate request body: %w", err)
+	}
+	return nil
+}
+
+func writeInvalidRequest(c echo.Context, err error) error {
+	c.Logger().Errorf("invalid request body: %v", err)
+	return writeError(c, http.StatusBadRequest, "invalid_request", "request body is invalid")
 }
 
 func writeServiceError(c echo.Context, err error) error {

@@ -17,10 +17,10 @@ func bearerToken(r *http.Request) (string, bool) {
 
 func (s *Server) requestOTP(c echo.Context) error {
 	var body struct {
-		Phone string `json:"phone"`
+		Phone string `json:"phone" validate:"required,min=6,max=32"`
 	}
-	if !decode(c, &body) {
-		return nil
+	if err := decode(c, &body); err != nil {
+		return writeInvalidRequest(c, err)
 	}
 	if err := s.service.RequestOTP(c.Request().Context(), body.Phone); err != nil {
 		return writeServiceError(c, err)
@@ -30,14 +30,14 @@ func (s *Server) requestOTP(c echo.Context) error {
 
 func (s *Server) verifyOTP(c echo.Context) error {
 	var body struct {
-		Phone      string `json:"phone"`
-		Code       string `json:"code"`
-		Platform   string `json:"platform"`
+		Phone      string `json:"phone" validate:"required,min=6,max=32"`
+		Code       string `json:"code" validate:"required"`
+		Platform   string `json:"platform" validate:"required"`
 		DeviceName string `json:"deviceName"`
 		DeviceID   string `json:"deviceId"`
 	}
-	if !decode(c, &body) {
-		return nil
+	if err := decode(c, &body); err != nil {
+		return writeInvalidRequest(c, err)
 	}
 	result, err := s.service.VerifyOTP(c.Request().Context(), body.Phone, body.Code, body.Platform, body.DeviceName, body.DeviceID)
 	if err != nil {

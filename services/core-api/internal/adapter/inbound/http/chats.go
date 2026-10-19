@@ -8,10 +8,10 @@ import (
 
 func (s *Server) directChat(c echo.Context) error {
 	var body struct {
-		Phone string `json:"phone"`
+		Phone string `json:"phone" validate:"required,min=6,max=32"`
 	}
-	if !decode(c, &body) {
-		return nil
+	if err := decode(c, &body); err != nil {
+		return writeInvalidRequest(c, err)
 	}
 	chatID, err := s.service.DirectChat(c.Request().Context(), claimsFrom(c.Request()).UserID, body.Phone)
 	if err != nil {
