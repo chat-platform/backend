@@ -132,8 +132,7 @@ validation happens client-side.
 - Sends APNs/FCM hints. Never the source of truth for a message.
 - Sends **push-to-sync** hints only: a wake signal plus an opaque chat identifier.
   No message content, no sender name, no plaintext metadata — the server is to be
-  unable to read message content once end-to-end encryption is implemented and
-  must not leak message content through the push channel either.
+  E2EE-blind(if not now, then in later phase) and must not leak through the push channel either.
 - **Coalesces** pushes per (device, chat) within a short window to avoid
   push storms on message bursts and to respect APNs/FCM background-wake
   throttling.
