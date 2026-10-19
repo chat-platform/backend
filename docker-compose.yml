@@ -9,14 +9,53 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./shared/migrations:/docker-entrypoint-initdb.d/migrations:ro
-      - ./shared/seeds:/docker-entrypoint-initdb.d/seeds:ro
-      - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U messenger -d messenger"]
       interval: 2s
       timeout: 5s
       retries: 20
+
+  migration-baseline:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["psql \"$${POSTGRES_DSN}\" -v ON_ERROR_STOP=1 -f /scripts/migration-baseline.sql"]
+    volumes:
+      - ./scripts/migration-baseline.sql:/scripts/migration-baseline.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable"
+      - up
+    volumes:
+      - ./shared/migrations:/migrations:ro
+    depends_on:
+      migration-baseline:
+        condition: service_completed_successfully
+
+  seed:
+    image: postgres:16-alpine
+    profiles: ["manual"]
+    environment:
+      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
+    entrypoint: ["psql"]
+    command:
+      - "-v"
+      - "ON_ERROR_STOP=1"
+      - "-f"
+      - "/seeds/000001_dev.sql"
+      - "postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable"
+    volumes:
+      - ./shared/seeds:/seeds:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   redis:
     image: redis:7-alpine
@@ -40,6 +79,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
@@ -57,6 +98,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       message-service:
         condition: service_started
       redis:
@@ -78,6 +121,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 

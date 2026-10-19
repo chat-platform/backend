@@ -65,7 +65,21 @@ make proto       # generate gRPC stubs into shared/gen
 make tidy        # sync Go workspace / modules
 ```
 
-Postgres migrations and seeds run only when its data volume is first created.
+Compose applies pending Postgres migrations automatically before starting the
+application services. Applied versions are recorded in the database, so
+existing volumes receive new migrations on the next startup. Databases created
+by the earlier init-only setup are recognized and baselined before pending
+migrations run.
+
+Development fixtures are never inserted by `docker compose up`. Run
+the following when you want the local Alice/Bob demo data; the command waits
+for migrations to finish successfully. The seed SQL is intended for a fresh
+development database and may fail if run more than once.
+
+```bash
+docker compose run --rm seed
+```
+
 The live demo uses `ws://localhost:8080/ws`. Connect two terminals with
 `websocat ws://localhost:8080/ws`, then send the following identity as the
 first frame. Alice:
@@ -93,10 +107,9 @@ recipient is skipped by Relay and will not receive that message live after
 reconnect.
 
 The `proto` target requires `protoc`, `protoc-gen-go`, and
-`protoc-gen-go-grpc` on `PATH`. The database migration and dev seed run only
-when Postgres initializes a new data volume; `make down` preserves that volume.
+`protoc-gen-go-grpc` on `PATH`. `make down` preserves the Postgres data volume.
 
-Seeded DIRECT chat (Phase 0 fixtures):
+DIRECT chat fixture inserted by the optional seed command:
 
 | Role  | user_id                                | device_id                              |
 |-------|----------------------------------------|----------------------------------------|
