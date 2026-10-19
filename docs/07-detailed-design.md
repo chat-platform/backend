@@ -149,7 +149,7 @@ loop1:
       UPDATE direct_outbox SET dispatched_at = now(), routed_to = 'WS',
         claim_expiry = NULL WHERE id = row.id AND dispatched_at IS NULL
     else:
-      # Explicit Phase 3 policy: skip offline rows.
+      # Relay policy: skip offline rows.
       UPDATE direct_outbox SET dispatched_at = now(), routed_to = NULL,
         claim_expiry = NULL WHERE id = row.id AND dispatched_at IS NULL
 
@@ -421,7 +421,7 @@ makes push delivery at-least-once under worker crashes.
 
 ### 4.1 Cursor semantics
 
-Phase 4B supports direct-message sync, so each device persists one cursor:
+Direct-message sync uses one persisted cursor per device:
 
 - `direct_cursor` — the highest `direct_outbox.id` the device has applied.
 - Group sync and `group_cursor` are deferred until group outbox support exists.
@@ -454,7 +454,7 @@ persisted cursor.
 
 ### 4.3 Ordering
 
-Phase 4B retains the existing global `direct_outbox.id` sequence. Concurrent
+The design retains the existing global `direct_outbox.id` sequence. Concurrent
 transactions can commit out of ID order, and Relay workers can publish in
 parallel. Therefore applying a higher ID before an unseen lower ID can cause
 the client cursor to skip that lower event; strict no-loss ordering is not

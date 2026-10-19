@@ -85,8 +85,8 @@ created_at
 expires_at
 revoked_at
 
-Phase 4A stores JWT session ids (`sid`) here. JWT claims bind the session to
-one user and device; Redis caches active/revoked state through token expiry.
+JWT session ids (`sid`) are stored here. JWT claims bind the session to one
+user and device; Redis caches active/revoked state through token expiry.
 
 direct_outbox
 -------------

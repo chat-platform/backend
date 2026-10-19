@@ -14,14 +14,14 @@ Security properties, controls, and the threat model this design assumes.
 
 ## 2. Authentication
 
-- OTP flow: request → verify → session + device registration. Phase 4A
-  uses a fixed development OTP (`DEV_OTP_CODE`, default `000000`); it does
+- OTP flow: request → verify → session + device registration. Development
+  uses a fixed OTP (`DEV_OTP_CODE`, default `000000`); it does
   not deliver SMS.
 - **Rate limiting:**
   - **OTP request:** per phone number (e.g. 3/10min), per IP (e.g. 10/hour), per device fingerprint (if available).
   - **OTP verify:** per code (max guesses), per IP (prevent brute force across numbers).
   - **API (post-auth):** per session/user for message sends and other mutations.
-- Phase 4A session model: HS256 JWT with `sid`, user, device, issue, and
+- Session model: HS256 JWT with `sid`, user, device, issue, and
   expiry claims. Session validity is persisted in Postgres and cached in
   Redis. Logout revokes by `sid`, publishes a close event, and removes live
   registry entries. Refresh-token flow remains future work.
@@ -63,7 +63,7 @@ TBD: Rate-limits
   the persisted files, not the running process.
 - Object storage: SSE (server-side encryption).
 
-### E2EE (later phase)
+### E2EE (future work)
 - The server does not store messages; the outbox payload is transient
   transport only.
 - When E2EE lands, the payload carries ciphertext. The server forwards
@@ -99,5 +99,5 @@ TODO: Decide timelimit for the above
 ## 8. Open
 
 - Rate limit thresholds: TBD. See §2
-- E2EE implementation (later phase).
+- E2EE implementation.
 - Abuse-detection signals: which metadata to track.
