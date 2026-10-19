@@ -75,14 +75,13 @@ func (r *OutboxRepository) DeleteExpiredBatch(ctx context.Context, batchSize int
 		return 0, fmt.Errorf("cleanup batch size must be positive")
 	}
 	result, err := r.pool.Exec(ctx, `WITH expired AS (
-		SELECT id FROM direct_outbox
-		WHERE delivered_at IS NOT NULL
-		   OR (delivered_at IS NULL AND created_at < now() - interval '30 days')
-		ORDER BY id
+		SELECT ctid FROM direct_outbox
+		WHERE created_at < now() - interval '30 days'
+		ORDER BY created_at
 		LIMIT $1
 		FOR UPDATE SKIP LOCKED
 	)
-	DELETE FROM direct_outbox AS outbox USING expired WHERE outbox.id = expired.id`, batchSize)
+	DELETE FROM direct_outbox AS outbox USING expired WHERE outbox.ctid = expired.ctid`, batchSize)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired direct outbox rows: %w", err)
 	}
