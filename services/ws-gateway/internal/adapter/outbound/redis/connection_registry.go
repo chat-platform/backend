@@ -70,15 +70,15 @@ func (r *ConnectionRegistry) Unregister(ctx context.Context, deviceID string, co
 	return nil
 }
 
-func (r *ConnectionRegistry) IsSessionActive(ctx context.Context, sessionID string) (bool, error) {
+func (r *ConnectionRegistry) SessionStatus(ctx context.Context, sessionID string) (string, error) {
 	state, err := r.client.Get(ctx, sessiontoken.StatusKeyPrefix+sessionID).Result()
 	if err == redis.Nil {
-		return false, nil
+		return sessiontoken.StatusMissing, nil
 	}
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	return state == "active", nil
+	return state, nil
 }
 
 func registryKey(deviceID string) string { return "ws:conn:" + deviceID }

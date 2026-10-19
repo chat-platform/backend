@@ -141,6 +141,16 @@ func (s *Service) Authenticate(ctx context.Context, token string) (sessiontoken.
 	return claims, nil
 }
 
+// VerifyToken validates the signed token without consulting Redis. It is used
+// by logout so an unavailable cache cannot prevent revocation in Postgres.
+func (s *Service) VerifyToken(token string) (sessiontoken.Claims, error) {
+	claims, err := sessiontoken.Verify(token, s.cfg.Secret, s.cfg.Now())
+	if err != nil {
+		return sessiontoken.Claims{}, ErrUnauthorized
+	}
+	return claims, nil
+}
+
 func (s *Service) Profile(ctx context.Context, userID string) (User, error) {
 	return s.repo.GetProfile(ctx, userID)
 }
@@ -164,11 +174,13 @@ func (s *Service) Logout(ctx context.Context, claims sessiontoken.Claims) error 
 	if remaining < time.Second {
 		remaining = time.Second
 	}
-	if err := s.sessions.SetRevoked(ctx, claims.SessionID, remaining); err != nil {
-		return err
-	}
 	if err := s.repo.RevokeSession(ctx, claims.SessionID, s.cfg.Now()); err != nil {
 		return err
 	}
-	return s.sessions.PublishRevoked(ctx, claims.SessionID)
+	cacheErr := s.sessions.SetRevoked(ctx, claims.SessionID, remaining)
+	publishErr := s.sessions.PublishRevoked(ctx, claims.SessionID)
+	if cacheErr != nil || publishErr != nil {
+		return errors.Join(ErrUnavailable, cacheErr, publishErr)
+	}
+	return nil
 }

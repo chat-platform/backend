@@ -20,7 +20,8 @@ func New(service *app.Service) *Server {
 	s := &Server{service: service, mux: http.NewServeMux()}
 	s.mux.HandleFunc("POST /v1/auth/otp/request", s.requestOTP)
 	s.mux.HandleFunc("POST /v1/auth/otp/verify", s.verifyOTP)
-	s.mux.Handle("POST /v1/auth/logout", s.auth(http.HandlerFunc(s.logout)))
+	s.mux.HandleFunc("POST /internal/v1/session/validate", s.validateSession)
+	s.mux.Handle("POST /v1/auth/logout", s.logoutAuth(http.HandlerFunc(s.logout)))
 	s.mux.Handle("GET /v1/profile/me", s.auth(http.HandlerFunc(s.profile)))
 	s.mux.Handle("PUT /v1/profile/name", s.auth(http.HandlerFunc(s.setName)))
 	s.mux.Handle("POST /v1/chats/direct", s.auth(http.HandlerFunc(s.directChat)))
@@ -98,6 +99,44 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			return
 		}
 		claims, err := s.service.Authenticate(r.Context(), parts[1])
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(contextWithClaims(r, claims)))
+	})
+}
+
+func bearerToken(r *http.Request) (string, bool) {
+	parts := strings.Fields(r.Header.Get("Authorization"))
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return "", false
+	}
+	return parts[1], true
+}
+
+func (s *Server) validateSession(w http.ResponseWriter, r *http.Request) {
+	token, ok := bearerToken(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "valid bearer token required")
+		return
+	}
+	claims, err := s.service.Authenticate(r.Context(), token)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, claims)
+}
+
+func (s *Server) logoutAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, ok := bearerToken(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "valid bearer token required")
+			return
+		}
+		claims, err := s.service.VerifyToken(token)
 		if err != nil {
 			writeServiceError(w, err)
 			return

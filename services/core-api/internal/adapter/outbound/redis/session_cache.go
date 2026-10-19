@@ -9,14 +9,27 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type SessionCache struct{ client *redis.Client }
+type SessionCache struct {
+	client    *redis.Client
+	setActive func(context.Context, string, time.Duration) error
+}
 
-func NewSessionCache(client *redis.Client) *SessionCache { return &SessionCache{client: client} }
+func NewSessionCache(client *redis.Client) *SessionCache {
+	return &SessionCache{
+		client: client,
+		setActive: func(ctx context.Context, sid string, ttl time.Duration) error {
+			return client.Set(ctx, sessiontoken.StatusKeyPrefix+sid, sessiontoken.StatusActive, ttl).Err()
+		},
+	}
+}
 func (c *SessionCache) SetActive(ctx context.Context, sid string, ttl time.Duration) error {
 	if ttl <= 0 {
 		return fmt.Errorf("session already expired")
 	}
-	return c.client.Set(ctx, sessiontoken.StatusKeyPrefix+sid, "active", ttl).Err()
+	if ttl > sessiontoken.MaxActiveStatusTTL {
+		ttl = sessiontoken.MaxActiveStatusTTL
+	}
+	return c.setActive(ctx, sid, ttl)
 }
 func (c *SessionCache) SetRevoked(ctx context.Context, sid string, ttl time.Duration) error {
 	return c.client.Set(ctx, sessiontoken.StatusKeyPrefix+sid, "revoked", ttl).Err()

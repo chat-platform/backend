@@ -74,6 +74,7 @@ services:
       LISTEN_ADDR: :8080
       REDIS_ADDR: redis:6379
       MESSAGE_SERVICE_ADDR: message-service:50051
+      CORE_API_ADDR: core-api:8081
       NODE_ID: ws-1
       JWT_SECRET: local-development-secret-change-before-deployment-000000
     ports:

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	"github.com/chat-platform/backend/shared/pkg/logging"
@@ -22,6 +23,9 @@ type fakeOperations struct {
 	removed     bool
 	registerErr error
 	sendErr     error
+	activeCheck func() bool
+	activeCalls int
+	removedCh   chan struct{}
 }
 
 func (f *fakeOperations) Register(_ context.Context, identity domain.Identity, connID string) (domain.Connection, error) {
@@ -39,13 +43,22 @@ func (f *fakeOperations) Authenticate(_ context.Context, token string) (domain.I
 	}
 	return domain.Identity{UserID: "11111111-1111-4111-8111-111111111111", DeviceID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", SessionID: "ssssssss-ssss-4sss-8sss-ssssssssssss"}, nil
 }
-func (f *fakeOperations) IsSessionActive(context.Context, string) (bool, error) { return true, nil }
+func (f *fakeOperations) IsSessionActive(context.Context, string) (bool, error) {
+	f.activeCalls++
+	if f.activeCheck != nil {
+		return f.activeCheck(), nil
+	}
+	return true, nil
+}
 
 func (f *fakeOperations) Refresh(context.Context, string, domain.Connection) (bool, error) {
 	return true, nil
 }
 func (f *fakeOperations) Unregister(context.Context, string, domain.Connection) error {
 	f.removed = true
+	if f.removedCh != nil {
+		close(f.removedCh)
+	}
 	return nil
 }
 func (f *fakeOperations) Send(_ context.Context, identity domain.Identity, command domain.SendMessage) (domain.MessageAck, error) {
@@ -210,5 +223,53 @@ func TestRegistryFailureClosesConnection(t *testing.T) {
 	_, _, err = conn.ReadMessage()
 	if err == nil {
 		t.Fatal("expected registry failure to close connection")
+	}
+}
+
+func TestHeartbeatRevalidationClosesAndUnregistersRevokedSession(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeChecks := 0
+	operations := &fakeOperations{
+		removedCh: make(chan struct{}),
+		activeCheck: func() bool {
+			activeChecks++
+			return activeChecks == 1 // Initial registration passes; later heartbeat sees revocation.
+		},
+	}
+	server := NewServer(operations, logger, NewHub())
+	server.heartbeatInterval = 10 * time.Millisecond
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	url := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	var authAck wsframe.Envelope
+	if err := conn.ReadJSON(&authAck); err != nil {
+		t.Fatalf("read auth ack: %v", err)
+	}
+	if authAck.Type != wsframe.TypeAuthOK {
+		t.Fatalf("auth ack=%+v", authAck)
+	}
+
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("websocket remained open after heartbeat found revoked session")
+	}
+	select {
+	case <-operations.removedCh:
+	case <-time.After(time.Second):
+		t.Fatal("revoked websocket registry entry was not unregistered")
+	}
+	if activeChecks < 2 {
+		t.Fatalf("session active checks=%d, want heartbeat revalidation", activeChecks)
 	}
 }

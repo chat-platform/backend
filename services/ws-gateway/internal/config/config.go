@@ -11,6 +11,7 @@ type Config struct {
 	ListenAddr         string
 	RedisAddr          string
 	MessageServiceAddr string
+	CoreAPIAddr        string
 	NodeID             string
 	Path               string
 	JWTSecret          string
@@ -21,6 +22,7 @@ func FromEnv(logger logging.Logger) Config {
 		ListenAddr:         getenv(logger, "LISTEN_ADDR", ":8080"),
 		RedisAddr:          getenv(logger, "REDIS_ADDR", "localhost:6379"),
 		MessageServiceAddr: getenv(logger, "MESSAGE_SERVICE_ADDR", "localhost:50051"),
+		CoreAPIAddr:        getenv(logger, "CORE_API_ADDR", "localhost:8081"),
 		NodeID:             getenv(logger, "NODE_ID", "ws-1"),
 		Path:               getenv(logger, "WS_PATH", "/ws"),
 		JWTSecret:          os.Getenv("JWT_SECRET"),

@@ -13,6 +13,7 @@ import (
 	deliveryadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/redis"
 	wsadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/websocket"
 	authadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/auth"
+	coreapiadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/coreapi"
 	grpcadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/grpc"
 	redisadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/redis"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/app"
@@ -57,7 +58,7 @@ func main() {
 		logger.Error(ctx, "JWT_SECRET must contain at least 32 bytes")
 		os.Exit(1)
 	}
-	sessionAuthenticator := authadapter.New([]byte(cfg.JWTSecret), registry)
+	sessionAuthenticator := authadapter.New([]byte(cfg.JWTSecret), registry, coreapiadapter.NewSessionValidator(cfg.CoreAPIAddr))
 	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn), logger.With("component", "message_service_client"))
 	operations := app.New(cfg.NodeID, registry, messageService, logger.With("component", "gateway"), sessionAuthenticator)
 	hub := wsadapter.NewHub()
@@ -73,7 +74,9 @@ func main() {
 	mux := http.NewServeMux()
 	websocketServer := wsadapter.NewServer(operations, logger.With("component", "websocket"), hub)
 	mux.Handle(cfg.Path, websocketServer)
-	revocations := deliveryadapter.NewRevocationConsumer(redisClient)
+	revocations := deliveryadapter.NewRevocationConsumer(redisClient, func(err error) {
+		logger.Warn(ctx, "session revocation subscription will retry", "error", err)
+	})
 	go func() {
 		if err := revocations.Run(ctx, func(eventCtx context.Context, sessionID string) { websocketServer.RevokeSession(eventCtx, sessionID) }); err != nil && ctx.Err() == nil {
 			logger.Error(ctx, "session revocation listener stopped; heartbeat checks remain active", "error", err)

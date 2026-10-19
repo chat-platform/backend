@@ -32,17 +32,19 @@ type Operations interface {
 }
 
 type Server struct {
-	operations Operations
-	hub        *Hub
-	logger     logging.Logger
-	upgrader   websocket.Upgrader
+	operations        Operations
+	hub               *Hub
+	logger            logging.Logger
+	upgrader          websocket.Upgrader
+	heartbeatInterval time.Duration
 }
 
 func NewServer(operations Operations, logger logging.Logger, hub *Hub) *Server {
 	return &Server{
-		operations: operations,
-		hub:        hub,
-		logger:     logger,
+		operations:        operations,
+		hub:               hub,
+		logger:            logger,
+		heartbeatInterval: heartbeatEvery,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: 10 * time.Second,
 		},
@@ -98,7 +100,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			"user_id", identity.UserID, "device_id", identity.DeviceID,
 			"ws_node", connection.NodeID, "conn_id", connection.ConnID)
 	}()
-	active, err := s.operations.IsSessionActive(request.Context(), identity.SessionID)
+	active, err := s.operations.IsSessionActive(request.Context(), token)
 	if err != nil || !active {
 		if err != nil {
 			s.logger.Warn(request.Context(), "could not confirm websocket session after registration", "error", err, "session_id", identity.SessionID)
@@ -136,7 +138,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				"device_id", identity.DeviceID, "conn_id", connection.ConnID)
 			return errors.New("websocket connection no longer owns registry entry")
 		}
-		active, err := s.operations.IsSessionActive(ctx, identity.SessionID)
+		active, err := s.operations.IsSessionActive(ctx, token)
 		if err != nil {
 			return err
 		}
@@ -256,7 +258,7 @@ func (s *Server) RevokeSession(ctx context.Context, sessionID string) {
 }
 
 func (s *Server) pingLoop(ctx context.Context, conn *safeSocket) {
-	ticker := time.NewTicker(heartbeatEvery)
+	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {

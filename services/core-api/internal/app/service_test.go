@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,13 +11,15 @@ import (
 )
 
 type repoFake struct {
-	user      User
-	device    Device
-	session   Session
-	active    bool
-	revoked   bool
-	revokeErr error
-	chatID    string
+	user        User
+	device      Device
+	session     Session
+	active      bool
+	revoked     bool
+	revokeErr   error
+	chatID      string
+	activeCalls int
+	order       *[]string
 }
 
 func (r *repoFake) CompleteOTP(_ context.Context, phone, _, _, deviceID, sid string, expires time.Time) (User, Device, Session, error) {
@@ -38,6 +41,9 @@ func (r *repoFake) GetOrCreateDirectChat(context.Context, string, string) (strin
 	return "chat-1", nil
 }
 func (r *repoFake) RevokeSession(context.Context, string, time.Time) error {
+	if r.order != nil {
+		*r.order = append(*r.order, "postgres")
+	}
 	if r.revokeErr != nil {
 		return r.revokeErr
 	}
@@ -46,24 +52,38 @@ func (r *repoFake) RevokeSession(context.Context, string, time.Time) error {
 	return nil
 }
 func (r *repoFake) SessionActive(context.Context, sessiontoken.Claims, time.Time) (bool, error) {
+	r.activeCalls++
 	return r.active, nil
 }
 
 type cacheFake struct {
-	active, revoked bool
-	publishErr      error
-	setActiveErr    error
-	statusErr       error
+	active, revoked  bool
+	publishErr       error
+	setActiveErr     error
+	statusErr        error
+	setRevokedErr    error
+	setRevokedCalled bool
+	publishCalled    bool
+	setActiveTTL     time.Duration
+	order            *[]string
 }
 
-func (c *cacheFake) SetActive(context.Context, string, time.Duration) error {
+func (c *cacheFake) SetActive(_ context.Context, _ string, ttl time.Duration) error {
+	c.setActiveTTL = ttl
 	if c.setActiveErr != nil {
 		return c.setActiveErr
 	}
 	c.active = true
 	return nil
 }
-func (c *cacheFake) SetRevoked(context.Context, string, time.Duration) error {
+func (c *cacheFake) SetRevoked(_ context.Context, _ string, _ time.Duration) error {
+	c.setRevokedCalled = true
+	if c.order != nil {
+		*c.order = append(*c.order, "redis")
+	}
+	if c.setRevokedErr != nil {
+		return c.setRevokedErr
+	}
 	c.revoked = true
 	c.active = false
 	return nil
@@ -80,7 +100,13 @@ func (c *cacheFake) Status(context.Context, string) (string, error) {
 	}
 	return sessiontoken.StatusMissing, nil
 }
-func (c *cacheFake) PublishRevoked(context.Context, string) error { return c.publishErr }
+func (c *cacheFake) PublishRevoked(context.Context, string) error {
+	c.publishCalled = true
+	if c.order != nil {
+		*c.order = append(*c.order, "publish")
+	}
+	return c.publishErr
+}
 
 func TestVerifyOTPCreatesSessionAndAuthenticateChecksCache(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
@@ -106,6 +132,35 @@ func TestVerifyOTPCreatesSessionAndAuthenticateChecksCache(t *testing.T) {
 	repo.active = true // A revoked cache entry must never be overridden from the database.
 	if _, err := svc.Authenticate(context.Background(), result.Token); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("revoked session error=%v", err)
+	}
+}
+
+func TestAuthenticateChecksPostgresAndPopulatesCacheOnMiss(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	secret := []byte("a sufficiently long test signing secret 123456")
+	repo := &repoFake{active: true}
+	cache := &cacheFake{}
+	svc := New(repo, cache, Config{Secret: secret, Now: func() time.Time { return now }})
+	claims := sessiontoken.Claims{SessionID: "sid", UserID: "user", DeviceID: "device", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	token, err := sessiontoken.Sign(claims, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Authenticate(context.Background(), token); err != nil {
+		t.Fatalf("authenticate valid missing-cache session: %v", err)
+	}
+	if repo.activeCalls != 1 || !cache.active {
+		t.Fatalf("miss was not checked and cached: postgres checks=%d cache=%+v", repo.activeCalls, cache)
+	}
+
+	cache.active = false // Simulate expiry of the short-lived positive entry.
+	repo.active = false  // The session was revoked in Postgres.
+	if _, err := svc.Authenticate(context.Background(), token); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("revoked session after cache expiry error=%v", err)
+	}
+	if repo.activeCalls != 2 || cache.active {
+		t.Fatalf("revoked miss was not denied: postgres checks=%d cache=%+v", repo.activeCalls, cache)
 	}
 }
 
@@ -141,8 +196,9 @@ func TestVerifyOTPRejectsWrongCodeAndCacheFailureRevokesSession(t *testing.T) {
 }
 
 func TestLogoutRevokesAndPublishesSession(t *testing.T) {
-	repo := &repoFake{active: true}
-	cache := &cacheFake{active: true}
+	order := []string{}
+	repo := &repoFake{active: true, order: &order}
+	cache := &cacheFake{active: true, order: &order}
 	now := time.Unix(1_800_000_000, 0)
 	svc := New(repo, cache, Config{OTPCode: "000000", Secret: []byte("a sufficiently long test signing secret 123456"), SessionTTL: time.Hour, Now: func() time.Time { return now }})
 	claims := sessiontoken.Claims{SessionID: "sid", UserID: "user", DeviceID: "device", ExpiresAt: now.Add(time.Hour).Unix()}
@@ -151,6 +207,43 @@ func TestLogoutRevokesAndPublishesSession(t *testing.T) {
 	}
 	if !repo.revoked || !cache.revoked || cache.active {
 		t.Fatalf("logout did not revoke everywhere: repo=%+v cache=%+v", repo, cache)
+	}
+	if got := strings.Join(order, ","); got != "postgres,redis,publish" {
+		t.Fatalf("logout operation order=%q", got)
+	}
+}
+
+func TestLogoutPostgresFailureDoesNotMutateRedis(t *testing.T) {
+	repo := &repoFake{revokeErr: errors.New("postgres down")}
+	cache := &cacheFake{active: true}
+	svc := New(repo, cache, Config{Now: time.Now})
+	err := svc.Logout(context.Background(), sessiontoken.Claims{SessionID: "sid", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+	if err == nil || cache.setRevokedCalled || cache.publishCalled {
+		t.Fatalf("logout after Postgres failure err=%v cache=%+v", err, cache)
+	}
+}
+
+func TestLogoutRedisFailureStillPublishesAfterPostgresRevocation(t *testing.T) {
+	order := []string{}
+	repo := &repoFake{active: true, order: &order}
+	cache := &cacheFake{active: true, setRevokedErr: errors.New("redis down"), order: &order}
+	svc := New(repo, cache, Config{Now: time.Now})
+	err := svc.Logout(context.Background(), sessiontoken.Claims{SessionID: "sid", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+	if !errors.Is(err, ErrUnavailable) || !repo.revoked || !cache.publishCalled || !cache.active {
+		t.Fatalf("logout Redis failure err=%v repo=%+v cache=%+v", err, repo, cache)
+	}
+	if got := strings.Join(order, ","); got != "postgres,redis,publish" {
+		t.Fatalf("logout operation order=%q", got)
+	}
+}
+
+func TestLogoutPublishFailureLeavesPostgresAndCacheRevoked(t *testing.T) {
+	repo := &repoFake{active: true}
+	cache := &cacheFake{active: true, publishErr: errors.New("publish failed")}
+	svc := New(repo, cache, Config{Now: time.Now})
+	err := svc.Logout(context.Background(), sessiontoken.Claims{SessionID: "sid", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+	if !errors.Is(err, ErrUnavailable) || !repo.revoked || !cache.revoked || cache.active {
+		t.Fatalf("logout publish failure err=%v repo=%+v cache=%+v", err, repo, cache)
 	}
 }
 

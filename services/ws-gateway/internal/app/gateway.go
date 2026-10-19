@@ -32,11 +32,11 @@ func (g *Gateway) Authenticate(ctx context.Context, token string) (domain.Identi
 	}
 	return g.sessions.Authenticate(ctx, token)
 }
-func (g *Gateway) IsSessionActive(ctx context.Context, sessionID string) (bool, error) {
+func (g *Gateway) IsSessionActive(ctx context.Context, token string) (bool, error) {
 	if g.sessions == nil {
 		return false, domain.ErrInvalidIdentity
 	}
-	return g.sessions.IsSessionActive(ctx, sessionID)
+	return g.sessions.IsSessionActive(ctx, token)
 }
 
 func (g *Gateway) Register(ctx context.Context, identity domain.Identity, connID string) (domain.Connection, error) {
