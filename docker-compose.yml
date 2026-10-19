@@ -28,5 +28,58 @@ services:
       timeout: 5s
       retries: 20
 
+  message-service:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: message-service
+    environment:
+      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
+      REDIS_ADDR: redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  ws-gateway:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: ws-gateway
+    environment:
+      LISTEN_ADDR: :8080
+      REDIS_ADDR: redis:6379
+      MESSAGE_SERVICE_ADDR: message-service:50051
+      NODE_ID: ws-1
+    ports:
+      - "8080:8080"
+    depends_on:
+      message-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  relay:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: relay
+    environment:
+      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
+      REDIS_ADDR: redis:6379
+      RELAY_POLL_INTERVAL: 250ms
+      RELAY_BATCH_SIZE: 100
+      RELAY_WORKERS: 2
+      RELAY_CLAIM_LEASE: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:

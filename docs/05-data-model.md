@@ -103,12 +103,16 @@ payload                -- the wire payload (content included)
 created_at
 routed_to              -- ENUM: WS, NOTIF
 dispatched_at
+claim_expiry           -- lease until which a Relay worker owns this claim
 delivered_at
 
 -- UNIQUE (sender_id, client_msg_id, device_id)
 -- Idempotency: on retry, the insert conflicts, and Message Service
 -- returns the same ack without re-inserting.
 -- Granularity: one row per (message, recipient device) in a DIRECT chat.
+-- Relay may claim when claim_expiry is NULL or <= now(); the lease expires
+-- automatically and does not identify an owner. Concurrent duplicate work
+-- after expiry is allowed; consumers deduplicate by (sender_id, client_msg_id).
 -- Carries the full payload; no join needed at dispatch.
 -- Events addressed to a single user's devices:
 --   - NEW_MESSAGE / EDIT / DELETE / REACTION in a DIRECT chat

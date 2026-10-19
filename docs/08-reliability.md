@@ -20,7 +20,7 @@ What the system promises, and under what conditions.
 | Property | Guarantee | Mechanism |
 |---|---|---|
 | Message durability | Once acked, never lost | Postgres commit before ack |
-| Message delivery | At-least-once to each target device | Outbox + relay re-dispatch |
+| Message delivery | At-least-once to each online target device | Outbox + expiry-only Relay claims + retry after lease expiry |
 | Message ordering | Per-device, per-table, by `direct_outbox.id` / `group_outbox.id` | Sync query `ORDER BY id` |
 | Receipt delivery | At-least-once | Outbox dispatch; client dedup on the first receipt |
 | Push notification | Best-effort | Not source of truth; sync catches up |
@@ -29,10 +29,21 @@ What the system promises, and under what conditions.
 Not promised:
 
 - **Exactly-once delivery.** Not achievable without coordination cost
-  that isn't justified. At-least-once + client-side dedup on `outbox.id`
+  that isn't justified. At-least-once + client-side dedup on
+  `(senderId, clientMsgId)`
   gives the same *observable* behavior.
 - **Ordering across devices.** Each device has its own cursor; there is
   no global order.
+
+Relay claims undispatched rows by setting `claim_expiry` in a short
+`FOR UPDATE SKIP LOCKED` transaction, then looks up the registry and
+publishes outside the transaction. There is no claim token or owner field.
+Lookup/publish failures leave the row undispatched until its lease expires.
+If publishing succeeds but marking dispatched fails, a later retry can
+publish a duplicate; consumers deduplicate by `(senderId, clientMsgId)`.
+An expired lease can also allow concurrent duplicate processing. Offline
+devices are explicitly skipped and marked dispatched with no route; they
+are recovered through sync rather than live delivery.
 - **Delivery to revoked/offline devices past retention.** Undelivered
   messages expire after the retention window (`02` §1.9, `07` §4.5) as a
   storage optimization — a device offline that long is treated as

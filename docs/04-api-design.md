@@ -131,7 +131,7 @@ connect → auth (session token) → auth_ok → heartbeat → events
 |---|---|---|---|
 | `message.send` | C → S | `{ chatId, clientMsgId, content }` | Idempotent via `clientMsgId`. Attempt only; no durability yet. |
 | `message.ack` | S → C | `{ clientMsgId, messageId, ts }` | Server has durably accepted the message. Correlates to `message.send` via `clientMsgId`. |
-| `message.recv` | S → C | `{ chatId, messageId, senderId, content, ts }` | Server pushed to recipient. WS is lossy/Client may not be online, so not a delivery guarantee  |
+| `message.recv` | S → C | `{ chatId, senderId, clientMsgId, content, ts }` | Server pushed to recipient. `senderId` + `clientMsgId` identify and correlate the original client message. WS is lossy/client may not be online, so not a delivery guarantee. |
 | `receipt.delivered` | S → C | `{ chatId, messageId, userId, ts }` | Recipient's device confirmed receipt. |
 | `receipt.read` | both | `{ chatId, upToMessageId, ts }` | Recipient has read this message. (opened the chat)|
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |

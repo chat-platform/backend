@@ -136,32 +136,25 @@ these:
 loop1:
   BEGIN
     rows_direct = SELECT * FROM direct_outbox
-           WHERE dispatched_at IS NULL
-           ORDER BY id
-           LIMIT batch_size
-           FOR UPDATE SKIP LOCKED
-
-    for each row in rows_direct:
-        ws_node = registry.lookup(row.device_id)
-        if ws_node:
-            XADD ws:deliver:{ws_node} * <row.payload>
-            routed_to = 'WS'
-        else:
-            XADD notif:stream * <row.payload>
-            routed_to = 'NOTIF'
-
-    UPDATE direct_outbox
-    SET dispatched_at = now(), routed_to = <WS|NOTIF>
-    WHERE id IN (...)
-
-    if rows_direct is empty:
-        sleep(idle_interval)      # slow down
-    else:
-        if len(rows_direct) < batch_size:
-            sleep(short_interval) # batch wasn't full; maybe more coming
-        else:
-            continue
+      WHERE dispatched_at IS NULL
+        AND (claim_expiry IS NULL OR claim_expiry <= now())
+      ORDER BY id LIMIT batch_size FOR UPDATE SKIP LOCKED
+    UPDATE selected rows SET claim_expiry = now() + claim_lease
   COMMIT
+
+  for each claimed row (outside the transaction):
+    connection = registry.lookup(row.device_id)
+    if online:
+      XADD ws:deliver:{connection.node_id} * <row.payload>
+      UPDATE direct_outbox SET dispatched_at = now(), routed_to = 'WS',
+        claim_expiry = NULL WHERE id = row.id AND dispatched_at IS NULL
+    else:
+      # Explicit Phase 3 policy: skip offline rows.
+      UPDATE direct_outbox SET dispatched_at = now(), routed_to = NULL,
+        claim_expiry = NULL WHERE id = row.id AND dispatched_at IS NULL
+
+  # Lookup, publish, or dispatch-update failures leave the row undispatched.
+  # Its lease expires and a later poll can claim it again.
 ```
 ```
 loop2:
@@ -270,8 +263,8 @@ Key points:
   longer ago than this are outside the window; they're either
   abandoned or handled by another mechanism.
 - **`delivered_at IS NULL`** — the row wasn't acked by the client.
-- **Idempotent re-dispatch.** The client dedupes on `outbox.id`. A
-  retry that arrives after the message was actually delivered is a
+- **Idempotent re-dispatch.** The client dedupes logical messages on
+  `(senderId, clientMsgId)`. A retry that arrives after the message was actually delivered is a
   no-op.
 
 Retry is a correctness mechanism, not just a latency optimization: the
