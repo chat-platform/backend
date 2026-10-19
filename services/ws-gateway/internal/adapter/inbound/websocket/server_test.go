@@ -17,15 +17,19 @@ import (
 )
 
 type fakeOperations struct {
-	identity    domain.Identity
-	command     domain.SendMessage
-	registered  bool
-	removed     bool
-	registerErr error
-	sendErr     error
-	activeCheck func() bool
-	activeCalls int
-	removedCh   chan struct{}
+	identity        domain.Identity
+	connection      domain.Connection
+	command         domain.SendMessage
+	registered      bool
+	removed         bool
+	registerErr     error
+	sendErr         error
+	activeCheck     func() bool
+	activeCalls     int
+	removedCh       chan struct{}
+	delivered       []int64
+	deliveredCh     chan struct{}
+	deliveredDevice string
 }
 
 func (f *fakeOperations) Register(_ context.Context, identity domain.Identity, connID string) (domain.Connection, error) {
@@ -34,7 +38,8 @@ func (f *fakeOperations) Register(_ context.Context, identity domain.Identity, c
 	if f.registerErr != nil {
 		return domain.Connection{}, f.registerErr
 	}
-	return domain.Connection{NodeID: "test-node", ConnID: connID, SessionID: identity.SessionID}, nil
+	f.connection = domain.Connection{NodeID: "test-node", ConnID: connID, SessionID: identity.SessionID}
+	return f.connection, nil
 }
 
 func (f *fakeOperations) Authenticate(_ context.Context, token string) (domain.Identity, error) {
@@ -68,6 +73,14 @@ func (f *fakeOperations) Send(_ context.Context, identity domain.Identity, comma
 		return domain.MessageAck{}, f.sendErr
 	}
 	return domain.MessageAck{ClientMsgID: command.ClientMsgID, TimestampMS: 1770000000123}, nil
+}
+func (f *fakeOperations) MarkDelivered(_ context.Context, identity domain.Identity, outboxID int64) error {
+	f.delivered = append(f.delivered, outboxID)
+	f.deliveredDevice = identity.DeviceID
+	if f.deliveredCh != nil {
+		close(f.deliveredCh)
+	}
+	return nil
 }
 
 func TestConnectionAuthSendAndAck(t *testing.T) {
@@ -223,6 +236,88 @@ func TestRegistryFailureClosesConnection(t *testing.T) {
 	_, _, err = conn.ReadMessage()
 	if err == nil {
 		t.Fatal("expected registry failure to close connection")
+	}
+}
+
+func TestDeliveryReceiptIsForwardedToMessageService(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := &fakeOperations{deliveredCh: make(chan struct{})}
+	server := httptest.NewServer(NewServer(operations, logger, NewHub()))
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	var authAck wsframe.Envelope
+	if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
+		t.Fatalf("auth ack=(%+v,%v)", authAck, err)
+	}
+	receipt, _ := json.Marshal(wsframe.DeliveryReceiptPayload{OutboxID: 42})
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeReceiptDelivered, Payload: receipt}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-operations.deliveredCh:
+	case <-time.After(time.Second):
+		t.Fatal("delivery receipt was not forwarded")
+	}
+	if len(operations.delivered) != 1 || operations.delivered[0] != 42 || operations.deliveredDevice != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
+		t.Fatalf("delivery receipts=%v device=%q", operations.delivered, operations.deliveredDevice)
+	}
+}
+
+func TestSyncReadyFlushesBufferedDeliveryToClient(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := &fakeOperations{}
+	hub := NewHub()
+	server := httptest.NewServer(NewServer(operations, logger, hub))
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	var authAck wsframe.Envelope
+	if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
+		t.Fatalf("auth ack=(%+v,%v)", authAck, err)
+	}
+	payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxID: 17, Content: "during sync"})
+	if err := hub.Deliver(context.Background(), operations.connection.ConnID, wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: payload}); err != nil {
+		t.Fatal(err)
+	}
+	entry := hub.entry(operations.connection.ConnID)
+	entry.mu.Lock()
+	if entry.ready || len(entry.buffer) != 1 {
+		entry.mu.Unlock()
+		t.Fatalf("handoff state ready=%v buffered=%d, want not ready with one frame", entry.ready, len(entry.buffer))
+	}
+	entry.mu.Unlock()
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeSyncReady}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var delivered wsframe.Envelope
+	if err := conn.ReadJSON(&delivered); err != nil {
+		t.Fatal(err)
+	}
+	var got wsframe.MessageRecvPayload
+	if delivered.Type != wsframe.TypeMessageRecv || json.Unmarshal(delivered.Payload, &got) != nil || got.OutboxID != 17 {
+		t.Fatalf("delivered frame=%+v payload=%+v", delivered, got)
 	}
 }
 

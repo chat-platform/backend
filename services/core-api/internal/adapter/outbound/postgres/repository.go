@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -139,6 +140,36 @@ func (r *Repository) SessionActive(ctx context.Context, claims sessiontoken.Clai
 		return false, fmt.Errorf("check session validity: %w", err)
 	}
 	return active, nil
+}
+
+func (r *Repository) ListDirectEvents(ctx context.Context, deviceID string, cursor int64, limit int) ([]app.SyncEvent, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, event_type, payload
+		FROM direct_outbox
+		WHERE device_id = $1 AND id > $2
+		ORDER BY id
+		LIMIT $3`, deviceID, cursor, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query direct sync events: %w", err)
+	}
+	defer rows.Close()
+	events := make([]app.SyncEvent, 0, limit)
+	for rows.Next() {
+		var event app.SyncEvent
+		var payload string
+		if err := rows.Scan(&event.OutboxID, &event.EventType, &payload); err != nil {
+			return nil, fmt.Errorf("scan direct sync event: %w", err)
+		}
+		if !json.Valid([]byte(payload)) {
+			return nil, fmt.Errorf("direct outbox event %d has invalid JSON payload", event.OutboxID)
+		}
+		event.Payload = json.RawMessage(payload)
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read direct sync events: %w", err)
+	}
+	return events, nil
 }
 
 var _ app.Repository = (*Repository)(nil)

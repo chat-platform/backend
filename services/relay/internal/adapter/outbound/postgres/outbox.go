@@ -69,3 +69,22 @@ func (r *OutboxRepository) MarkDispatched(ctx context.Context, id int64, route d
 	}
 	return nil
 }
+
+func (r *OutboxRepository) DeleteExpiredBatch(ctx context.Context, batchSize int) (int64, error) {
+	if batchSize <= 0 {
+		return 0, fmt.Errorf("cleanup batch size must be positive")
+	}
+	result, err := r.pool.Exec(ctx, `WITH expired AS (
+		SELECT id FROM direct_outbox
+		WHERE delivered_at IS NOT NULL
+		   OR (delivered_at IS NULL AND created_at < now() - interval '30 days')
+		ORDER BY id
+		LIMIT $1
+		FOR UPDATE SKIP LOCKED
+	)
+	DELETE FROM direct_outbox AS outbox USING expired WHERE outbox.id = expired.id`, batchSize)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired direct outbox rows: %w", err)
+	}
+	return result.RowsAffected(), nil
+}

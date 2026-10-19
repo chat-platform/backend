@@ -35,3 +35,14 @@ func (s *messageServiceClient) SendMessage(ctx context.Context, command domain.S
 	}
 	return domain.MessageAck{ClientMsgID: response.GetClientMsgId(), TimestampMS: response.GetTsUnixMilli()}, nil
 }
+
+func (s *messageServiceClient) MarkDelivered(ctx context.Context, deviceID string, outboxID int64) error {
+	_, err := s.client.MarkDelivered(ctx, &messagev1.MarkDeliveredRequest{DeviceId: deviceID, OutboxId: outboxID})
+	if err != nil {
+		if code := status.Code(err); code == codes.Unavailable || code == codes.DeadlineExceeded {
+			s.logger.Error(ctx, "message service delivery receipt RPC could not be completed", "error", err, "device_id", deviceID, "outbox_id", outboxID)
+		}
+		return err
+	}
+	return nil
+}

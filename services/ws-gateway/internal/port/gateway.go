@@ -8,6 +8,7 @@ import (
 
 type MessageService interface {
 	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
+	MarkDelivered(context.Context, string, int64) error
 }
 
 type ConnectionRegistry interface {

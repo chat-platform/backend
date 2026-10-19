@@ -315,8 +315,9 @@ server-side read state — the client aggregates.
 
 ### 3.1 Delivery receipt
 
-When a device receives `message.recv`, it sends `receipt.delivered {
-messageId }`. Server:
+After applying an event and durably persisting its cursor, a device sends
+`receipt.delivered { outboxId }`. The Gateway passes the authenticated
+device ID and outbox ID to Message Service. Server:
 
 1. Marks the corresponding outbox row (in direct_outbox or
    group_outbox) as delivered:
@@ -420,111 +421,69 @@ makes push delivery at-least-once under worker crashes.
 
 ### 4.1 Cursor semantics
 
-Each device has **two cursors**, one per outbox table:
+Phase 4B supports direct-message sync, so each device persists one cursor:
 
 - `direct_cursor` — the highest `direct_outbox.id` the device has applied.
-- `group_cursor` — the highest `group_outbox.id` the device has applied.
+- Group sync and `group_cursor` are deferred until group outbox support exists.
 
-Both are stored client-side. They are sent on `/v1/sync` as `?since_direct=<direct_cursor>&since_group=<group_cursor>`.
-
-The two tables have **separate sequences**, so `id` is not comparable
-across them. `direct_outbox.id = 5` and `group_outbox.id = 5` are
-distinct events.
-
-Within each table, the sync query filters by `device_id` and `id >
-cursor`, so each cursor is effectively per-device, per-table.
+`direct_cursor` is stored client-side and sent as
+`/v1/sync?since_direct=<direct_cursor>&limit=<n>`. The default page size
+is 100; the server caps it at 500.
 
 ### 4.2 The sync query
 
-Sync runs two queries, one per table:
+Sync runs this query for the authenticated device:
 
 ```
-SELECT * FROM direct_outbox
+SELECT id, event_type, payload FROM direct_outbox
 WHERE device_id = ?
   AND id > ?
 ORDER BY id
 LIMIT page_size
-
-SELECT group_outbox.*, group_event.payload
-FROM group_outbox
-JOIN group_event ON group_event.event_id = group_outbox.event_id
-WHERE group_outbox.device_id = ?
-  AND group_outbox.id > ?
-ORDER BY group_outbox.id
-LIMIT page_size
 ```
 
-Backing indexes: `direct_outbox (device_id, id)` and
-`group_outbox (device_id, id)`.
+The existing `direct_outbox (device_id, id)` index supports this query.
 
-The client pages each table independently until both are exhausted, then
-transitions to live. During the sync, the WS Gateway buffers delivery
-frames for this device (see §4.4) — the client is not receiving live
-events yet, so nothing races the sync.
+The client pages direct events until `hasMore` is false, then transitions
+to live. During sync, the WS Gateway buffers live delivery frames for the
+connection (see §4.4).
 
-The client tracks, per table:
-- `since` — the cursor it sends.
-- `last_seen` — the highest `id` it has applied so far.
-
-On each page, `last_seen` advances to the max `id` in that page. If the
-client crashes mid-sync, it resumes with `since=last_seen`. Pages are
-applied in order within each table; a gap between pages is not expected
-because the query is `ORDER BY id` and monotonic per table.
+The client advances and persists `direct_cursor` only after durably
+applying each event. If it crashes mid-sync, it resumes from its last
+persisted cursor.
 
 ### 4.3 Ordering
 
-Within each table, `id` preserves insertion order. For NEW_MESSAGE events, insertion order 
-is send order (Message Service writes them in a single TX per message,
-but across messages the order is whatever Postgres assigned). For
-EDIT and DELETE, the same. So the client sees events in the order the
-server processed them, per table.
-
-**Cross-table ordering is not defined — by design.** `direct_outbox.id` and
-`group_outbox.id` are separate sequences; a direct event and a group
-event have no relative order. This is acceptable: events are applied
-per-chat, and a chat is either DIRECT or GROUP, never both. So within a
-chat, ordering is preserved (one table, one sequence). Across chats,
-ordering doesn't matter.
-
-TODO: cross-check with the edit constraint in `02` — edits originate
-from the sending device. If device A edits a message and device B reads
-it via sync, does B see the edit before or after the original? Answer:
-after, because the edit has a higher `id` in the same outbox table. Good.
+Phase 4B retains the existing global `direct_outbox.id` sequence. Concurrent
+transactions can commit out of ID order, and Relay workers can publish in
+parallel. Therefore applying a higher ID before an unseen lower ID can cause
+the client cursor to skip that lower event; strict no-loss ordering is not
+guaranteed.
 
 ### 4.4 Sync vs live handoff
 
 Sequence on reconnect:
 
-1. Client opens WS, authenticates.
-2. WS Gateway registers the connection, but does **not** yet stream
-   live events for this device.
-3. Client calls `GET /v1/sync?since=<cursor>` over HTTP.
-4. Client applies events, advances cursor.
-5. Client signals "ready" over WS.
-6. WS Gateway flushes any events that landed in `ws:deliver:{node}`
-   during the sync window.
-7. Live streaming continues.
+1. Client opens WS and authenticates; Gateway registers the socket and buffers live deliveries.
+2. Client pages `/v1/sync?since_direct=<cursor>&limit=<n>` over HTTP.
+3. Client applies each event, persists its cursor, and sends `receipt.delivered { outboxId }`.
+4. After all pages are exhausted, client sends `sync.ready` over WS.
+5. Gateway flushes buffered events by outbox ID, then streams live deliveries.
 
-The buffering in step 6 prevents the "subscribe before backfill drops
-events" problem. 
-Buffer lives in WS Gateway memory, not Redis. If the Gateway crashes
-mid-sync, the client's socket dies, so the standard reconnect flow runs
-again — connect, auth, sync, ready. No special recovery path; the
-buffer is discarded and the client re-syncs from the outbox. Durability
-is not required because the buffer is a latency optimization, not a
-correctness mechanism.
+The bounded buffer lives in WS Gateway memory, not Redis. It holds up to
+1,000 events or 10 MiB. If either limit is exceeded, Gateway closes the
+socket with a retryable code; the client reconnects and syncs from its
+last persisted cursor. If Gateway crashes mid-sync, the buffer is
+discarded and the client follows the same reconnect flow.
 
 ### 4.5 Cursor too old
 
-If `since` predates the retention window (see `02` §1.9, 30 days), some
-outbox rows are gone. Both tables use the same retention; each cursor is
-checked independently. The server returns whatever rows still exist and
-lets the client continue from there.
+If `since_direct` predates retention, expired undelivered rows may be
+gone. The server returns remaining rows and lets the client continue from
+the last ID it received. Delivered rows are removed by Relay's daily
+cleanup; undelivered rows are deleted after 30 days.
 
-The client applies the returned events, sets `last_seen` to the highest
-`id` received per table, and resumes live. Events older than the retention window
-are simply not delivered. No "resync from scratch" signal — the client
-does not wipe local state.
+No full-resync signal is returned and the client does not wipe local state.
 
 ---
 
@@ -697,11 +656,13 @@ the client.
 ### 10.1 Deduplication
 
 Events may arrive more than once (at-least-once delivery, retry scan).
-The client skips any event whose row `id` is ≤ its cursor for that
-table:
+The client skips any event whose row `id` is ≤ its direct cursor:
 
-- `direct_cursor` — highest `direct_outbox.id` applied.
-- `group_cursor` — highest `group_outbox.id` applied.
+- `direct_cursor` — highest `direct_outbox.id` durably applied.
+
+The client persists the event and cursor before sending
+`receipt.delivered { outboxId }`; Relay may then remove the row during its
+next daily cleanup run.
 
 ### 10.2 First-receipt-wins
 

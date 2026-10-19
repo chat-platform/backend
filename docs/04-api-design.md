@@ -94,7 +94,7 @@ Conventions:
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/sync?since=<cursor>` | Backfill missed events. |
+| `GET` | `/v1/sync?since_direct=<id>&limit=<n>` | Backfill direct events for the authenticated device. |
 | `GET` | `/v1/chats` | List chats. |
 
 Notes:
@@ -104,6 +104,10 @@ Notes:
 - `/profile/picture` stores a media ID from `/v1/media`; the binary
   itself goes through the media endpoint.
 - `/sync` is the catch-up path when WS frames are missed. (eg: when Phone was not online, etc)
+- The sync response contains `events` (`outboxId`, `eventType`, `payload`),
+  `nextCursor`, and `hasMore`. `since_direct` defaults to 0; `limit` defaults
+  to 100 and is capped at 500. The cursor is a global outbox ID filtered by
+  the authenticated device, not a contiguous per-device sequence.
 
 ## 4. WebSocket API
 <!-- define ws APIs here -->
@@ -143,18 +147,24 @@ its active sockets.
 |---|---|---|---|
 | `message.send` | C → S | `{ chatId, clientMsgId, content }` | Idempotent via `clientMsgId`. Attempt only; no durability yet. |
 | `message.ack` | S → C | `{ clientMsgId, messageId, ts }` | Server has durably accepted the message. Correlates to `message.send` via `clientMsgId`. |
-| `message.recv` | S → C | `{ chatId, senderId, clientMsgId, content, ts }` | Server pushed to recipient. `senderId` + `clientMsgId` identify and correlate the original client message. WS is lossy/client may not be online, so not a delivery guarantee. |
-| `receipt.delivered` | S → C | `{ chatId, messageId, userId, ts }` | Recipient's device confirmed receipt. |
+| `message.recv` | S → C | `{ outboxId, chatId, senderId, clientMsgId, content, ts }` | `outboxId` is the direct sync cursor and dedup key. |
+| `receipt.delivered` | C → S | `{ outboxId }` | Client confirms it durably applied the event and persisted its cursor. |
+| `sync.ready` | C → S | `{}` | Sent after HTTP sync completes; Gateway flushes buffered events and resumes live delivery. |
 | `receipt.read` | both | `{ chatId, upToMessageId, ts }` | Recipient has read this message. (opened the chat)|
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |
 | `presence` | S → C | `{ userId, status, lastSeen }` | Pushed on change. |
 | `group.*` | S → C | `{ groupId, ... }` | Member added, admin promoted, etc. |
 
 Reconnect sync is not a WS event — it goes over HTTP (`/v1/sync`).
+The client opens and authenticates its WebSocket, pages `/v1/sync` from its
+persisted `direct_cursor`, applies and persists each event before sending
+`receipt.delivered`, then sends `sync.ready` after all pages are exhausted.
+The Gateway buffers live frames until `sync.ready`.
 
 Reliability:
 
-- WS is treated as lossy; anything important is recoverable via `/sync`.
+- WS is treated as lossy; `/sync` recovers missed events within retention,
+  subject to the documented global-ID concurrency ordering limitation.
 - Client sends carry `clientMsgId`; server deduplicates on it.
 - Server persists the message, then acks the sender, then fans out.
 
@@ -201,7 +211,7 @@ WebSocket lost
     ↓
 Reconnect + auth
     ↓
-HTTP: GET /v1/sync?since=<cursor>
+HTTP: GET /v1/sync?since_direct=<cursor>&limit=<n>
     ↓
 Apply missed events
     ↓

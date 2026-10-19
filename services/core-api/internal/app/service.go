@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -25,6 +26,18 @@ type Session struct {
 	ExpiresAt    time.Time
 }
 
+type SyncEvent struct {
+	OutboxID  int64           `json:"outboxId"`
+	EventType string          `json:"eventType"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+type SyncPage struct {
+	Events     []SyncEvent `json:"events"`
+	NextCursor int64       `json:"nextCursor"`
+	HasMore    bool        `json:"hasMore"`
+}
+
 type Repository interface {
 	CompleteOTP(context.Context, string, string, string, string, string, time.Time) (User, Device, Session, error)
 	GetProfile(context.Context, string) (User, error)
@@ -32,6 +45,7 @@ type Repository interface {
 	GetOrCreateDirectChat(context.Context, string, string) (string, error)
 	RevokeSession(context.Context, string, time.Time) error
 	SessionActive(context.Context, sessiontoken.Claims, time.Time) (bool, error)
+	ListDirectEvents(context.Context, string, int64, int) ([]SyncEvent, error)
 }
 
 type SessionCache interface {
@@ -168,6 +182,26 @@ func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string,
 	}
 	return s.repo.GetOrCreateDirectChat(ctx, userID, phone)
 }
+
+func (s *Service) Sync(ctx context.Context, claims sessiontoken.Claims, cursor int64, limit int) (SyncPage, error) {
+	if cursor < 0 || limit < 1 || limit > 500 {
+		return SyncPage{}, ErrInvalidRequest
+	}
+	events, err := s.repo.ListDirectEvents(ctx, claims.DeviceID, cursor, limit+1)
+	if err != nil {
+		return SyncPage{}, ErrUnavailable
+	}
+	page := SyncPage{Events: events, NextCursor: cursor}
+	if len(events) > limit {
+		page.HasMore = true
+		page.Events = events[:limit]
+	}
+	if len(page.Events) > 0 {
+		page.NextCursor = page.Events[len(page.Events)-1].OutboxID
+	}
+	return page, nil
+}
+
 func (s *Service) Logout(ctx context.Context, claims sessiontoken.Claims) error {
 	expiresAt := time.Unix(claims.ExpiresAt, 0)
 	remaining := expiresAt.Sub(s.cfg.Now())

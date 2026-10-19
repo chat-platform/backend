@@ -130,6 +130,7 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return decodedDelivery{}, err
 	}
+	payload.OutboxID = outboxID
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return decodedDelivery{}, err

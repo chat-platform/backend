@@ -45,3 +45,10 @@ func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMes
 	}
 	return s.chatRepository.EnqueueMessageEvent(ctx, command, recipients)
 }
+
+func (s *ChatOperations) MarkDelivered(ctx context.Context, deviceID string, outboxID int64) error {
+	if deviceID == "" || outboxID <= 0 {
+		return domain.ErrInvalidMessage
+	}
+	return s.chatRepository.MarkDelivered(ctx, deviceID, outboxID)
+}

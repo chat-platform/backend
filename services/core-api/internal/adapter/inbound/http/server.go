@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/chat-platform/backend/services/core-api/internal/app"
@@ -22,6 +23,7 @@ func New(service *app.Service) *Server {
 	s.mux.HandleFunc("POST /v1/auth/otp/verify", s.verifyOTP)
 	s.mux.HandleFunc("POST /internal/v1/session/validate", s.validateSession)
 	s.mux.Handle("POST /v1/auth/logout", s.logoutAuth(http.HandlerFunc(s.logout)))
+	s.mux.Handle("GET /v1/sync", s.auth(http.HandlerFunc(s.syncEvents)))
 	s.mux.Handle("GET /v1/profile/me", s.auth(http.HandlerFunc(s.profile)))
 	s.mux.Handle("PUT /v1/profile/name", s.auth(http.HandlerFunc(s.setName)))
 	s.mux.Handle("POST /v1/chats/direct", s.auth(http.HandlerFunc(s.directChat)))
@@ -161,6 +163,38 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (s *Server) syncEvents(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	cursor := int64(0)
+	if raw := query.Get("since_direct"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "since_direct must be a non-negative integer")
+			return
+		}
+		cursor = parsed
+	}
+	limit := 100
+	if raw := query.Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
+			return
+		}
+		limit = parsed
+		if limit > 500 {
+			limit = 500
+		}
+	}
+	page, err := s.service.Sync(r.Context(), claimsFrom(r), cursor, limit)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
 func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	user, err := s.service.Profile(r.Context(), claimsFrom(r).UserID)
 	if err != nil {

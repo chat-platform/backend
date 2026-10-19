@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -20,6 +21,10 @@ type repoFake struct {
 	chatID      string
 	activeCalls int
 	order       *[]string
+	syncEvents  []SyncEvent
+	syncDevice  string
+	syncCursor  int64
+	syncLimit   int
 }
 
 func (r *repoFake) CompleteOTP(_ context.Context, phone, _, _, deviceID, sid string, expires time.Time) (User, Device, Session, error) {
@@ -54,6 +59,47 @@ func (r *repoFake) RevokeSession(context.Context, string, time.Time) error {
 func (r *repoFake) SessionActive(context.Context, sessiontoken.Claims, time.Time) (bool, error) {
 	r.activeCalls++
 	return r.active, nil
+}
+func (r *repoFake) ListDirectEvents(_ context.Context, deviceID string, cursor int64, limit int) ([]SyncEvent, error) {
+	r.syncDevice, r.syncCursor, r.syncLimit = deviceID, cursor, limit
+	var events []SyncEvent
+	for _, event := range r.syncEvents {
+		if event.OutboxID > cursor {
+			events = append(events, event)
+		}
+	}
+	if len(events) > limit {
+		events = events[:limit]
+	}
+	return events, nil
+}
+
+func TestSyncUsesDeviceCursorAndPagesWithOneLookahead(t *testing.T) {
+	repo := &repoFake{syncEvents: []SyncEvent{
+		{OutboxID: 4, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"text":"four"}`)},
+		{OutboxID: 8, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"text":"eight"}`)},
+		{OutboxID: 9, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"text":"nine"}`)},
+	}}
+	claims := sessiontoken.Claims{DeviceID: "device-a"}
+	page, err := New(repo, &cacheFake{}, Config{}).Sync(context.Background(), claims, 4, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.syncDevice != "device-a" || repo.syncCursor != 4 || repo.syncLimit != 2 {
+		t.Fatalf("repository query device=%q cursor=%d limit=%d", repo.syncDevice, repo.syncCursor, repo.syncLimit)
+	}
+	if len(page.Events) != 1 || page.Events[0].OutboxID != 8 || page.NextCursor != 8 || !page.HasMore {
+		t.Fatalf("unexpected page: %+v", page)
+	}
+}
+
+func TestSyncRejectsInvalidCursorAndLimit(t *testing.T) {
+	service := New(&repoFake{}, &cacheFake{}, Config{})
+	for _, tc := range []struct{ cursor int64; limit int }{{-1, 10}, {0, 0}, {0, 501}} {
+		if _, err := service.Sync(context.Background(), sessiontoken.Claims{DeviceID: "d"}, tc.cursor, tc.limit); err != ErrInvalidRequest {
+			t.Fatalf("Sync(%d,%d) err=%v, want ErrInvalidRequest", tc.cursor, tc.limit, err)
+		}
+	}
 }
 
 type cacheFake struct {
