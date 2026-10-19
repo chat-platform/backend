@@ -12,6 +12,7 @@ import (
 
 	deliveryadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/redis"
 	wsadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/websocket"
+	authadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/auth"
 	grpcadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/grpc"
 	redisadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/redis"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/app"
@@ -52,8 +53,13 @@ func main() {
 	defer grpcConn.Close()
 
 	registry := redisadapter.NewConnectionRegistry(redisClient)
+	if len(cfg.JWTSecret) < 32 {
+		logger.Error(ctx, "JWT_SECRET must contain at least 32 bytes")
+		os.Exit(1)
+	}
+	sessionAuthenticator := authadapter.New([]byte(cfg.JWTSecret), registry)
 	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn), logger.With("component", "message_service_client"))
-	operations := app.New(cfg.NodeID, registry, messageService, logger.With("component", "gateway"))
+	operations := app.New(cfg.NodeID, registry, messageService, logger.With("component", "gateway"), sessionAuthenticator)
 	hub := wsadapter.NewHub()
 	consumer := deliveryadapter.NewDeliveryConsumer(redisClient, cfg.NodeID, hub, logger.With("component", "delivery_consumer"))
 	consumerFailed := make(chan error, 1)
@@ -65,7 +71,14 @@ func main() {
 		}
 	}()
 	mux := http.NewServeMux()
-	mux.Handle(cfg.Path, wsadapter.NewServer(operations, logger.With("component", "websocket"), hub))
+	websocketServer := wsadapter.NewServer(operations, logger.With("component", "websocket"), hub)
+	mux.Handle(cfg.Path, websocketServer)
+	revocations := deliveryadapter.NewRevocationConsumer(redisClient)
+	go func() {
+		if err := revocations.Run(ctx, func(eventCtx context.Context, sessionID string) { websocketServer.RevokeSession(eventCtx, sessionID) }); err != nil && ctx.Err() == nil {
+			logger.Error(ctx, "session revocation listener stopped; heartbeat checks remain active", "error", err)
+		}
+	}()
 	server := &http.Server{
 		Addr: cfg.ListenAddr, Handler: mux,
 		ReadHeaderTimeout: 5 * time.Second,

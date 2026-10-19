@@ -11,15 +11,15 @@ type Envelope struct {
 }
 
 const (
-	TypeIdentity    = "identity"
+	TypeAuth        = "auth"
+	TypeAuthOK      = "auth_ok"
 	TypeMessageSend = "message.send"
 	TypeMessageAck  = "message.ack"
 	TypeMessageRecv = "message.recv"
 )
 
-type IdentityPayload struct {
-	UserID   string `json:"userId"`
-	DeviceID string `json:"deviceId"`
+type AuthPayload struct {
+	Token string `json:"token"`
 }
 
 type MessageSendPayload struct {

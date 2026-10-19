@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
+	"github.com/chat-platform/backend/shared/pkg/sessiontoken"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -17,7 +18,8 @@ local current = redis.call('GET', KEYS[1])
 if not current then return 0 end
 local decoded = cjson.decode(current)
 if decoded.conn_id ~= ARGV[1] or decoded.ws_node ~= ARGV[2] then return 0 end
-redis.call('EXPIRE', KEYS[1], ARGV[3])
+if decoded.session_id ~= ARGV[3] then return 0 end
+redis.call('EXPIRE', KEYS[1], ARGV[4])
 return 1
 `)
 
@@ -26,6 +28,7 @@ local current = redis.call('GET', KEYS[1])
 if not current then return 0 end
 local decoded = cjson.decode(current)
 if decoded.conn_id ~= ARGV[1] or decoded.ws_node ~= ARGV[2] then return 0 end
+if decoded.session_id ~= ARGV[3] then return 0 end
 return redis.call('DEL', KEYS[1])
 `)
 
@@ -39,9 +42,10 @@ func NewConnectionRegistry(client *redis.Client) *ConnectionRegistry {
 
 func (r *ConnectionRegistry) Register(ctx context.Context, deviceID string, connection domain.Connection) error {
 	value, err := json.Marshal(struct {
-		NodeID string `json:"ws_node"`
-		ConnID string `json:"conn_id"`
-	}{connection.NodeID, connection.ConnID})
+		NodeID    string `json:"ws_node"`
+		ConnID    string `json:"conn_id"`
+		SessionID string `json:"session_id"`
+	}{connection.NodeID, connection.ConnID, connection.SessionID})
 	if err != nil {
 		return fmt.Errorf("encode registry value: %w", err)
 	}
@@ -52,7 +56,7 @@ func (r *ConnectionRegistry) Register(ctx context.Context, deviceID string, conn
 }
 
 func (r *ConnectionRegistry) Refresh(ctx context.Context, deviceID string, connection domain.Connection) (bool, error) {
-	count, err := refreshScript.Run(ctx, r.client, []string{registryKey(deviceID)}, connection.ConnID, connection.NodeID, int(registryTTL.Seconds())).Int()
+	count, err := refreshScript.Run(ctx, r.client, []string{registryKey(deviceID)}, connection.ConnID, connection.NodeID, connection.SessionID, int(registryTTL.Seconds())).Int()
 	if err != nil {
 		return false, fmt.Errorf("refresh device registry: %w", err)
 	}
@@ -60,10 +64,21 @@ func (r *ConnectionRegistry) Refresh(ctx context.Context, deviceID string, conne
 }
 
 func (r *ConnectionRegistry) Unregister(ctx context.Context, deviceID string, connection domain.Connection) error {
-	if _, err := unregisterScript.Run(ctx, r.client, []string{registryKey(deviceID)}, connection.ConnID, connection.NodeID).Result(); err != nil {
+	if _, err := unregisterScript.Run(ctx, r.client, []string{registryKey(deviceID)}, connection.ConnID, connection.NodeID, connection.SessionID).Result(); err != nil {
 		return fmt.Errorf("remove device registry: %w", err)
 	}
 	return nil
+}
+
+func (r *ConnectionRegistry) IsSessionActive(ctx context.Context, sessionID string) (bool, error) {
+	state, err := r.client.Get(ctx, sessiontoken.StatusKeyPrefix+sessionID).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return state == "active", nil
 }
 
 func registryKey(deviceID string) string { return "ws:conn:" + deviceID }

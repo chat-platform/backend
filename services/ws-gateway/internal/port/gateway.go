@@ -15,3 +15,8 @@ type ConnectionRegistry interface {
 	Refresh(context.Context, string, domain.Connection) (bool, error)
 	Unregister(context.Context, string, domain.Connection) error
 }
+
+type SessionAuthenticator interface {
+	Authenticate(context.Context, string) (domain.Identity, error)
+	IsSessionActive(context.Context, string) (bool, error)
+}

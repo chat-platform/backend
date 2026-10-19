@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/port"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/gorilla/websocket"
@@ -18,22 +19,55 @@ type socketWriter interface {
 	Close() error
 }
 type Hub struct {
-	mu      sync.RWMutex
-	sockets map[string]socketWriter
+	mu       sync.RWMutex
+	sockets  map[string]socketWriter
+	metadata map[string]socketMetadata
 }
 
-func NewHub() *Hub { return &Hub{sockets: make(map[string]socketWriter)} }
+type socketMetadata struct {
+	sessionID, deviceID string
+	connection          domain.Connection
+}
+type ActiveSocket struct {
+	ID, DeviceID string
+	Connection   domain.Connection
+	Socket       socketWriter
+}
+
+func NewHub() *Hub {
+	return &Hub{sockets: make(map[string]socketWriter), metadata: make(map[string]socketMetadata)}
+}
 func (h *Hub) Register(id string, socket socketWriter) {
+	h.RegisterAuthenticated(id, "", "", domain.Connection{}, socket)
+}
+func (h *Hub) RegisterAuthenticated(id, sessionID, deviceID string, connection domain.Connection, socket socketWriter) {
 	h.mu.Lock()
 	h.sockets[id] = socket
+	h.metadata[id] = socketMetadata{sessionID: sessionID, deviceID: deviceID, connection: connection}
 	h.mu.Unlock()
 }
 func (h *Hub) Remove(id string, socket socketWriter) {
 	h.mu.Lock()
 	if h.sockets[id] == socket {
 		delete(h.sockets, id)
+		delete(h.metadata, id)
 	}
 	h.mu.Unlock()
+}
+func (h *Hub) CloseSession(sessionID string) []ActiveSocket {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var active []ActiveSocket
+	for id, metadata := range h.metadata {
+		if metadata.sessionID != sessionID {
+			continue
+		}
+		socket := h.sockets[id]
+		delete(h.sockets, id)
+		delete(h.metadata, id)
+		active = append(active, ActiveSocket{ID: id, DeviceID: metadata.deviceID, Connection: metadata.connection, Socket: socket})
+	}
+	return active
 }
 func (h *Hub) Deliver(_ context.Context, id string, envelope wsframe.Envelope) error {
 	h.mu.RLock()

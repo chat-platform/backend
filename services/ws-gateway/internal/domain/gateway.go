@@ -8,8 +8,9 @@ var (
 )
 
 type Identity struct {
-	UserID   string
-	DeviceID string
+	UserID    string
+	DeviceID  string
+	SessionID string
 }
 
 type SendMessage struct {
@@ -26,6 +27,7 @@ type MessageAck struct {
 }
 
 type Connection struct {
-	NodeID string
-	ConnID string
+	NodeID    string
+	ConnID    string
+	SessionID string
 }

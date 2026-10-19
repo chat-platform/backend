@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 )
 
@@ -52,6 +53,26 @@ func TestHubRemoveDoesNotRemoveReplacement(t *testing.T) {
 	}
 	if newSocket.value == nil {
 		t.Fatal("replacement socket was removed")
+	}
+}
+
+func TestHubCloseSessionReturnsOnlyMatchingConnections(t *testing.T) {
+	h := NewHub()
+	closed, retained := &captureSocket{}, &captureSocket{}
+	h.RegisterAuthenticated("conn-a", "session-a", "device-a", domain.Connection{NodeID: "node", ConnID: "conn-a", SessionID: "session-a"}, closed)
+	h.RegisterAuthenticated("conn-b", "session-b", "device-b", domain.Connection{NodeID: "node", ConnID: "conn-b", SessionID: "session-b"}, retained)
+	active := h.CloseSession("session-a")
+	if len(active) != 1 || active[0].ID != "conn-a" || active[0].DeviceID != "device-a" {
+		t.Fatalf("closed connections=%+v", active)
+	}
+	if err := h.Deliver(context.Background(), "conn-a", wsframe.Envelope{}); !errors.Is(err, ErrConnectionGone) {
+		t.Fatalf("revoked connection still registered: %v", err)
+	}
+	if err := h.Deliver(context.Background(), "conn-b", wsframe.Envelope{}); err != nil {
+		t.Fatalf("unrelated connection removed: %v", err)
+	}
+	if retained.value == nil {
+		t.Fatal("unrelated socket did not receive delivery")
 	}
 }
 

@@ -43,6 +43,27 @@ services:
       redis:
         condition: service_healthy
 
+  core-api:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: core-api
+    environment:
+      LISTEN_ADDR: :8081
+      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
+      REDIS_ADDR: redis:6379
+      DEV_OTP_CODE: "000000"
+      JWT_SECRET: local-development-secret-change-before-deployment-000000
+      SESSION_TTL: 24h
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   ws-gateway:
     build:
       context: .
@@ -54,10 +75,13 @@ services:
       REDIS_ADDR: redis:6379
       MESSAGE_SERVICE_ADDR: message-service:50051
       NODE_ID: ws-1
+      JWT_SECRET: local-development-secret-change-before-deployment-000000
     ports:
       - "8080:8080"
     depends_on:
       message-service:
+        condition: service_started
+      core-api:
         condition: service_started
       redis:
         condition: service_healthy

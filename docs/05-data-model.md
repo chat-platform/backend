@@ -82,14 +82,11 @@ session
 session_id
 device_id → device.device_id
 created_at
-refresh_last_used_at
-refresh_expires_at
+expires_at
 revoked_at
 
-note: no refresh token/its hash here, 
-    instead in refresh token, there shall be sessionId. 
-    Each refresh token be for each session.
-    If required immediate session revoke, lets introduce jti here later
+Phase 4A stores JWT session ids (`sid`) here. JWT claims bind the session to
+one user and device; Redis caches active/revoked state through token expiry.
 
 direct_outbox
 -------------

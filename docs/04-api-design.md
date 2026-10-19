@@ -46,7 +46,7 @@ Conventions:
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/v1/auth/otp/request` | Start OTP flow. |
-| `POST` | `/v1/auth/otp/verify` | Verify OTP; returns session token; registers device. |
+| `POST` | `/v1/auth/otp/verify` | Verify OTP; returns JWT session token and registers device. |
 | `POST` | `/v1/auth/logout` | Invalidate session. |
 
 ### Profile
@@ -55,6 +55,12 @@ Conventions:
 |---|---|---|
 | `GET` | `/v1/profile/me` | Own profile. |
 | `PUT` | `/v1/profile/name` | Display name. |
+
+### Chats
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/v1/chats/direct` | Create or return a DIRECT chat for a peer phone number. |
 | `PUT` | `/v1/profile/picture` | Profile picture (media ID).  | <!-- Need to change this to direct upload -->
 | `GET` | `/v1/users/lookup?phone=...` | Lookup by phone (rate-limited). |
 
@@ -103,11 +109,17 @@ Notes:
 <!-- define ws APIs here -->
 ### Lifecycle
 
-```text
-connect → auth (session token) → auth_ok → heartbeat → events
+```json
+{"type":"auth","id":"auth-1","ts":0,"payload":{"token":"<session-token>"}}
 ```
 
-- First frame must carry the session token from `/auth/otp/verify`.
+The server replies with `auth_ok` after token and session validation succeeds.
+
+The Gateway verifies the HS256 JWT and checks that its `sid` is active in
+Redis before registering the socket. Logout revokes the session and closes
+its active sockets.
+
+- First frame must be an `auth` frame carrying the session token from `/auth/otp/verify`.
 - Server pings periodically; missing pongs mark the socket dead.
 - Each device opens its own socket. A user is online if any socket
   is live.

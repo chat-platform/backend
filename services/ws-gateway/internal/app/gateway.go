@@ -15,19 +15,37 @@ type Gateway struct {
 	registry port.ConnectionRegistry
 	messages port.MessageService
 	logger   logging.Logger
+	sessions port.SessionAuthenticator
 }
 
-func New(nodeID string, registry port.ConnectionRegistry, messages port.MessageService, logger logging.Logger) *Gateway {
-	return &Gateway{nodeID: nodeID, registry: registry, messages: messages, logger: logger}
+func New(nodeID string, registry port.ConnectionRegistry, messages port.MessageService, logger logging.Logger, sessions ...port.SessionAuthenticator) *Gateway {
+	g := &Gateway{nodeID: nodeID, registry: registry, messages: messages, logger: logger}
+	if len(sessions) > 0 {
+		g.sessions = sessions[0]
+	}
+	return g
+}
+
+func (g *Gateway) Authenticate(ctx context.Context, token string) (domain.Identity, error) {
+	if g.sessions == nil {
+		return domain.Identity{}, domain.ErrInvalidIdentity
+	}
+	return g.sessions.Authenticate(ctx, token)
+}
+func (g *Gateway) IsSessionActive(ctx context.Context, sessionID string) (bool, error) {
+	if g.sessions == nil {
+		return false, domain.ErrInvalidIdentity
+	}
+	return g.sessions.IsSessionActive(ctx, sessionID)
 }
 
 func (g *Gateway) Register(ctx context.Context, identity domain.Identity, connID string) (domain.Connection, error) {
-	if strings.TrimSpace(identity.UserID) == "" || strings.TrimSpace(identity.DeviceID) == "" || strings.TrimSpace(connID) == "" {
+	if strings.TrimSpace(identity.UserID) == "" || strings.TrimSpace(identity.DeviceID) == "" || strings.TrimSpace(identity.SessionID) == "" || strings.TrimSpace(connID) == "" {
 		g.logger.Warn(ctx, "websocket connection registration rejected for invalid identity",
 			"user_id", identity.UserID, "device_id", identity.DeviceID, "conn_id", connID)
 		return domain.Connection{}, domain.ErrInvalidIdentity
 	}
-	connection := domain.Connection{NodeID: g.nodeID, ConnID: connID}
+	connection := domain.Connection{NodeID: g.nodeID, ConnID: connID, SessionID: identity.SessionID}
 	if err := g.registry.Register(ctx, identity.DeviceID, connection); err != nil {
 		g.logger.Error(ctx, "could not register websocket connection", "error", err,
 			"user_id", identity.UserID, "device_id", identity.DeviceID,

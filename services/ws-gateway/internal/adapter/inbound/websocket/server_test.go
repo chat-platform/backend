@@ -30,8 +30,16 @@ func (f *fakeOperations) Register(_ context.Context, identity domain.Identity, c
 	if f.registerErr != nil {
 		return domain.Connection{}, f.registerErr
 	}
-	return domain.Connection{NodeID: "test-node", ConnID: connID}, nil
+	return domain.Connection{NodeID: "test-node", ConnID: connID, SessionID: identity.SessionID}, nil
 }
+
+func (f *fakeOperations) Authenticate(_ context.Context, token string) (domain.Identity, error) {
+	if token != "valid-test-token" {
+		return domain.Identity{}, domain.ErrInvalidIdentity
+	}
+	return domain.Identity{UserID: "11111111-1111-4111-8111-111111111111", DeviceID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", SessionID: "ssssssss-ssss-4sss-8sss-ssssssssssss"}, nil
+}
+func (f *fakeOperations) IsSessionActive(context.Context, string) (bool, error) { return true, nil }
 
 func (f *fakeOperations) Refresh(context.Context, string, domain.Connection) (bool, error) {
 	return true, nil
@@ -49,7 +57,7 @@ func (f *fakeOperations) Send(_ context.Context, identity domain.Identity, comma
 	return domain.MessageAck{ClientMsgID: command.ClientMsgID, TimestampMS: 1770000000123}, nil
 }
 
-func TestConnectionIdentitySendAndAck(t *testing.T) {
+func TestConnectionAuthSendAndAck(t *testing.T) {
 	logger, err := logging.New(io.Discard, logging.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -65,9 +73,16 @@ func TestConnectionIdentitySendAndAck(t *testing.T) {
 	}
 	defer conn.Close()
 
-	identity := wsframe.Envelope{Type: wsframe.TypeIdentity, Payload: json.RawMessage(`{"userId":"11111111-1111-4111-8111-111111111111","deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}`)}
+	identity := wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}
 	if err := conn.WriteJSON(identity); err != nil {
 		t.Fatal(err)
+	}
+	var authAck wsframe.Envelope
+	if err := conn.ReadJSON(&authAck); err != nil {
+		t.Fatal(err)
+	}
+	if authAck.Type != wsframe.TypeAuthOK {
+		t.Fatalf("unexpected auth response: %+v", authAck)
 	}
 	send := wsframe.Envelope{Type: wsframe.TypeMessageSend, ID: "request-1", Payload: json.RawMessage(`{"chatId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","clientMsgId":"0199d628-39d0-7000-8000-000000000001","content":"hello"}`)}
 	if err := conn.WriteJSON(send); err != nil {
@@ -87,7 +102,7 @@ func TestConnectionIdentitySendAndAck(t *testing.T) {
 	if payload.ClientMsgID != "0199d628-39d0-7000-8000-000000000001" || payload.TS != ack.TS {
 		t.Fatalf("unexpected ack payload: %+v", payload)
 	}
-	if operations.identity.UserID != "11111111-1111-4111-8111-111111111111" || operations.identity.DeviceID != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
+	if operations.identity.UserID != "11111111-1111-4111-8111-111111111111" || operations.identity.DeviceID != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" || operations.identity.SessionID != "ssssssss-ssss-4sss-8sss-ssssssssssss" {
 		t.Fatalf("identity was not forwarded: %+v", operations.identity)
 	}
 	if !operations.registered {
@@ -98,7 +113,7 @@ func TestConnectionIdentitySendAndAck(t *testing.T) {
 	}
 }
 
-func TestInvalidIdentityIsRejected(t *testing.T) {
+func TestInvalidTokenIsRejected(t *testing.T) {
 	logger, err := logging.New(io.Discard, logging.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +128,7 @@ func TestInvalidIdentityIsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	invalid := wsframe.Envelope{Type: wsframe.TypeIdentity, Payload: json.RawMessage(`{"userId":"not-a-uuid","deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}`)}
+	invalid := wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"invalid-token"}`)}
 	if err := conn.WriteJSON(invalid); err != nil {
 		t.Fatal(err)
 	}
@@ -141,9 +156,13 @@ func TestMalformedFrameAndSendFailureReturnErrorFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	identity := wsframe.Envelope{Type: wsframe.TypeIdentity, Payload: json.RawMessage(`{"userId":"11111111-1111-4111-8111-111111111111","deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}`)}
+	identity := wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}
 	if err := conn.WriteJSON(identity); err != nil {
 		t.Fatal(err)
+	}
+	var authAck wsframe.Envelope
+	if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
+		t.Fatalf("auth acknowledgement=(%+v,%v)", authAck, err)
 	}
 	if err := conn.WriteMessage(websocket.TextMessage, []byte("{")); err != nil {
 		t.Fatal(err)
@@ -184,7 +203,7 @@ func TestRegistryFailureClosesConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	identity := wsframe.Envelope{Type: wsframe.TypeIdentity, Payload: json.RawMessage(`{"userId":"11111111-1111-4111-8111-111111111111","deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}`)}
+	identity := wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}
 	if err := conn.WriteJSON(identity); err != nil {
 		t.Fatal(err)
 	}
