@@ -74,7 +74,7 @@ func (f *fakeOperations) Send(_ context.Context, identity domain.Identity, comma
 	}
 	return domain.MessageAck{ClientMsgID: command.ClientMsgID, TimestampMS: 1770000000123}, nil
 }
-func (f *fakeOperations) MarkDelivered(_ context.Context, identity domain.Identity, outboxID int64) error {
+func (f *fakeOperations) MarkDelivered(_ context.Context, identity domain.Identity, outboxType string, outboxID int64) error {
 	f.delivered = append(f.delivered, outboxID)
 	f.deliveredDevice = identity.DeviceID
 	if f.deliveredCh != nil {
@@ -259,7 +259,7 @@ func TestDeliveryReceiptIsForwardedToMessageService(t *testing.T) {
 	if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
 		t.Fatalf("auth ack=(%+v,%v)", authAck, err)
 	}
-	receipt, _ := json.Marshal(wsframe.DeliveryReceiptPayload{OutboxID: 42})
+	receipt, _ := json.Marshal(wsframe.DeliveryReceiptPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 42})
 	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeReceiptDelivered, Payload: receipt}); err != nil {
 		t.Fatal(err)
 	}

@@ -147,8 +147,8 @@ its active sockets.
 |---|---|---|---|
 | `message.send` | C → S | `{ chatId, clientMsgId, content }` | Idempotent via `clientMsgId`. Attempt only; no durability yet. |
 | `message.ack` | S → C | `{ clientMsgId, messageId, ts }` | Server has durably accepted the message. Correlates to `message.send` via `clientMsgId`. |
-| `message.recv` | S → C | `{ outboxId, chatId, senderId, clientMsgId, content, ts }` | `outboxId` is the direct sync cursor and dedup key. |
-| `receipt.delivered` | C → S | `{ outboxId }` | Client confirms it durably applied the event and persisted its cursor. |
+| `message.recv` | S → C | `{ outboxType, outboxId, chatId, senderId, clientMsgId, content, ts }` | `outboxType` identifies the outbox table; `outboxId` is its cursor and dedup key. |
+| `receipt.delivered` | C → S | `{ outboxType, outboxId }` | Client confirms it durably applied the event and persisted its cursor. |
 | `sync.ready` | C → S | `{}` | Sent after HTTP sync completes; Gateway flushes buffered events and resumes live delivery. |
 | `receipt.read` | both | `{ chatId, upToMessageId, ts }` | Recipient has read this message. (opened the chat)|
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |

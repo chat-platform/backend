@@ -16,7 +16,7 @@ import (
 
 type ChatOperations interface {
 	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
-	MarkDelivered(context.Context, string, int64) error
+	MarkDelivered(context.Context, string, string, int64) error
 }
 
 type Server struct {
@@ -90,7 +90,7 @@ func (s *Server) MarkDelivered(ctx context.Context, request *messagev1.MarkDeliv
 	if err := s.validator.Validate(request); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	if err := s.operations.MarkDelivered(ctx, request.GetDeviceId(), request.GetOutboxId()); err != nil {
+	if err := s.operations.MarkDelivered(ctx, request.GetDeviceId(), request.GetOutboxType(), request.GetOutboxId()); err != nil {
 		if errors.Is(err, domain.ErrInvalidMessage) {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}

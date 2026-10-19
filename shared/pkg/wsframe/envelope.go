@@ -20,6 +20,13 @@ const (
 	TypeReceiptDelivered = "receipt.delivered"
 )
 
+type OutboxType string
+
+const (
+	OutboxTypeDirect OutboxType = "direct"
+	OutboxTypeGroup  OutboxType = "group"
+)
+
 type AuthPayload struct {
 	Token string `json:"token"`
 }
@@ -36,14 +43,16 @@ type MessageAckPayload struct {
 }
 
 type MessageRecvPayload struct {
-	ChatID      string `json:"chatId"`
-	OutboxID    int64  `json:"outboxId"`
-	SenderID    string `json:"senderId"`
-	ClientMsgID string `json:"clientMsgId"`
-	Content     string `json:"content"`
-	TS          int64  `json:"ts"`
+	ChatID      string     `json:"chatId"`
+	OutboxType  OutboxType `json:"outboxType"`
+	OutboxID    int64      `json:"outboxId"`
+	SenderID    string     `json:"senderId"`
+	ClientMsgID string     `json:"clientMsgId"`
+	Content     string     `json:"content"`
+	TS          int64      `json:"ts"`
 }
 
 type DeliveryReceiptPayload struct {
-	OutboxID int64 `json:"outboxId"`
+	OutboxType OutboxType `json:"outboxType"`
+	OutboxID   int64      `json:"outboxId"`
 }

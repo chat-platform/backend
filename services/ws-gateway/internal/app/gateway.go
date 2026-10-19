@@ -85,9 +85,9 @@ func (g *Gateway) Send(ctx context.Context, identity domain.Identity, command do
 	return g.messages.SendMessage(ctx, command)
 }
 
-func (g *Gateway) MarkDelivered(ctx context.Context, identity domain.Identity, outboxID int64) error {
+func (g *Gateway) MarkDelivered(ctx context.Context, identity domain.Identity, outboxType string, outboxID int64) error {
 	if outboxID <= 0 {
 		return domain.ErrInvalidMessage
 	}
-	return g.messages.MarkDelivered(ctx, identity.DeviceID, outboxID)
+	return g.messages.MarkDelivered(ctx, identity.DeviceID, outboxType, outboxID)
 }

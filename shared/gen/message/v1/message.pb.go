@@ -155,6 +155,7 @@ type MarkDeliveredRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	OutboxId      int64                  `protobuf:"varint,2,opt,name=outbox_id,json=outboxId,proto3" json:"outbox_id,omitempty"`
+	OutboxType    string                 `protobuf:"bytes,3,opt,name=outbox_type,json=outboxType,proto3" json:"outbox_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -201,6 +202,13 @@ func (x *MarkDeliveredRequest) GetOutboxId() int64 {
 		return x.OutboxId
 	}
 	return 0
+}
+
+func (x *MarkDeliveredRequest) GetOutboxType() string {
+	if x != nil {
+		return x.OutboxType
+	}
+	return ""
 }
 
 type MarkDeliveredResponse struct {
@@ -257,11 +265,13 @@ const file_message_v1_message_proto_rawDesc = "" +
 	"\x10\x012\x06.*\\S.*R\acontent\"X\n" +
 	"\x0eSendMessageAck\x12\"\n" +
 	"\rclient_msg_id\x18\x01 \x01(\tR\vclientMsgId\x12\"\n" +
-	"\rts_unix_milli\x18\x02 \x01(\x03R\vtsUnixMilli\"j\n" +
+	"\rts_unix_milli\x18\x02 \x01(\x03R\vtsUnixMilli\"\xa4\x01\n" +
 	"\x14MarkDeliveredRequest\x12,\n" +
 	"\tdevice_id\x18\x01 \x01(\tB\x0f\xbaH\fr\n" +
 	"\x10\x012\x06.*\\S.*R\bdeviceId\x12$\n" +
-	"\toutbox_id\x18\x02 \x01(\x03B\a\xbaH\x04\"\x02 \x00R\boutboxId\"\x17\n" +
+	"\toutbox_id\x18\x02 \x01(\x03B\a\xbaH\x04\"\x02 \x00R\boutboxId\x128\n" +
+	"\voutbox_type\x18\x03 \x01(\tB\x17\xbaH\x14r\x122\x10^(direct|group)$R\n" +
+	"outboxType\"\x17\n" +
 	"\x15MarkDeliveredResponse2\xb1\x01\n" +
 	"\x0eMessageService\x12I\n" +
 	"\vSendMessage\x12\x1e.message.v1.SendMessageRequest\x1a\x1a.message.v1.SendMessageAck\x12T\n" +

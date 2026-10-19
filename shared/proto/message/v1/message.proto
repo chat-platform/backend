@@ -33,6 +33,7 @@ message SendMessageAck {
 message MarkDeliveredRequest {
   string device_id = 1 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
   int64 outbox_id = 2 [(buf.validate.field).int64.gt = 0];
+  string outbox_type = 3 [(buf.validate.field).string = {pattern: "^(direct|group)$"}];
 }
 
 message MarkDeliveredResponse {}

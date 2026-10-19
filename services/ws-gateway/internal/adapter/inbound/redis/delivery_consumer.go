@@ -108,7 +108,7 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 	if err != nil {
 		return decodedDelivery{}, err
 	}
-	if typ != "direct" {
+	if typ != string(wsframe.OutboxTypeDirect) {
 		return decodedDelivery{}, fmt.Errorf("unsupported outbox type %q", typ)
 	}
 	if outboxID <= 0 {
@@ -131,6 +131,7 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 		return decodedDelivery{}, err
 	}
 	payload.OutboxID = outboxID
+	payload.OutboxType = wsframe.OutboxType(typ)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return decodedDelivery{}, err

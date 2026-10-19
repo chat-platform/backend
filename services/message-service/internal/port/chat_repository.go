@@ -10,5 +10,5 @@ type ChatRepository interface {
 	IsAuthorizedToSend(context.Context, string, string) (bool, error)
 	ResolveMessageRecipients(context.Context, string) ([]domain.RecipientDevice, error)
 	EnqueueMessageEvent(context.Context, domain.SendMessage, []domain.RecipientDevice) (domain.MessageAck, error)
-	MarkDelivered(context.Context, string, int64) error
+	MarkDelivered(context.Context, string, string, int64) error
 }

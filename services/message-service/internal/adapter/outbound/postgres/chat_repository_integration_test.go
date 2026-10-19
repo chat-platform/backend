@@ -54,17 +54,17 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := NewChatRepository(pool, logger)
-	if err := repo.MarkDelivered(ctx, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 7); err != nil {
+	if err := repo.MarkDelivered(ctx, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "direct", 7); err != nil {
 		t.Fatalf("wrong-device receipt should be an idempotent no-op: %v", err)
 	}
 	var delivered bool
 	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM direct_outbox WHERE id=7`).Scan(&delivered); err != nil || delivered {
 		t.Fatalf("wrong-device receipt changed row: delivered=(%v,%v)", delivered, err)
 	}
-	if err := repo.MarkDelivered(ctx, device, 7); err != nil {
+	if err := repo.MarkDelivered(ctx, device, "direct", 7); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkDelivered(ctx, device, 7); err != nil {
+	if err := repo.MarkDelivered(ctx, device, "direct", 7); err != nil {
 		t.Fatalf("duplicate receipt should be idempotent: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM direct_outbox WHERE id=7`).Scan(&delivered); err != nil || !delivered {

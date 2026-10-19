@@ -29,7 +29,7 @@ type Operations interface {
 	Refresh(context.Context, string, domain.Connection) (bool, error)
 	Unregister(context.Context, string, domain.Connection) error
 	Send(context.Context, domain.Identity, domain.SendMessage) (domain.MessageAck, error)
-	MarkDelivered(context.Context, domain.Identity, int64) error
+	MarkDelivered(context.Context, domain.Identity, string, int64) error
 }
 
 type Server struct {
@@ -178,11 +178,12 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		}
 		if envelope.Type == wsframe.TypeReceiptDelivered {
 			var receipt wsframe.DeliveryReceiptPayload
-			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &receipt) != nil || receipt.OutboxID <= 0 {
-				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.delivered requires a positive outboxId")
+			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &receipt) != nil || receipt.OutboxID <= 0 ||
+				(receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) {
+				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.delivered requires a valid outboxType and positive outboxId")
 				continue
 			}
-			if err := s.operations.MarkDelivered(ctx, identity, receipt.OutboxID); err != nil {
+			if err := s.operations.MarkDelivered(ctx, identity, string(receipt.OutboxType), receipt.OutboxID); err != nil {
 				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "delivery receipt could not be recorded")
 				continue
 			}
