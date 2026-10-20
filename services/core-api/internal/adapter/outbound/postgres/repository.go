@@ -160,9 +160,6 @@ func (r *Repository) ListDirectEvents(ctx context.Context, deviceID string, curs
 		if err := rows.Scan(&event.OutboxID, &event.EventType, &payload); err != nil {
 			return nil, fmt.Errorf("scan direct sync event: %w", err)
 		}
-		if !json.Valid([]byte(payload)) {
-			return nil, fmt.Errorf("direct outbox event %d has invalid JSON payload", event.OutboxID)
-		}
 		event.Payload = json.RawMessage(payload)
 		events = append(events, event)
 	}
