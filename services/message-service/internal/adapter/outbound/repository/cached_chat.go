@@ -104,6 +104,10 @@ func (r *CachedChatRepository) EnqueueMessageEvent(ctx context.Context, message 
 	return r.store.EnqueueMessageEvent(ctx, message, recipients)
 }
 
+func (r *CachedChatRepository) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {
+	return r.store.MarkDelivered(ctx, deviceID, outboxType, outboxID)
+}
+
 // InvalidateChatAuthorization removes the cached authorization decision for a user in a chat.
 func (r *CachedChatRepository) InvalidateChatAuthorization(ctx context.Context, chatID, userID string) error {
 	return r.cache.InvalidateChatAuthorization(ctx, chatID, userID)

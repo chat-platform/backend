@@ -14,17 +14,12 @@ Security properties, controls, and the threat model this design assumes.
 
 ## 2. Authentication
 
-- OTP flow: request → verify → session + device registration. Phase 4A
-  uses a fixed development OTP (`DEV_OTP_CODE`, default `000000`); it does
-  not deliver SMS.
+- OTP flow: request → verify → session + device registration.
 - **Rate limiting:**
   - **OTP request:** per phone number (e.g. 3/10min), per IP (e.g. 10/hour), per device fingerprint (if available).
   - **OTP verify:** per code (max guesses), per IP (prevent brute force across numbers).
   - **API (post-auth):** per session/user for message sends and other mutations.
-- Phase 4A session model: HS256 JWT with `sid`, user, device, issue, and
-  expiry claims. Session validity is persisted in Postgres and cached in
-  Redis. Logout revokes by `sid`, publishes a close event, and removes live
-  registry entries. Refresh-token flow remains future work.
+- Session model: access token (short-lived) + refresh token (per session, revocable).
 - Device revocation: session revoked, registry entry deleted.
 
 Rate limiting is enforced **in the services**, not the LB. The LB

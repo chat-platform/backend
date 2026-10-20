@@ -11,11 +11,20 @@ type Envelope struct {
 }
 
 const (
-	TypeAuth        = "auth"
-	TypeAuthOK      = "auth_ok"
-	TypeMessageSend = "message.send"
-	TypeMessageAck  = "message.ack"
-	TypeMessageRecv = "message.recv"
+	TypeAuth             = "auth"
+	TypeAuthOK           = "auth_ok"
+	TypeMessageSend      = "message.send"
+	TypeMessageAck       = "message.ack"
+	TypeMessageRecv      = "message.recv"
+	TypeSyncReady        = "sync.ready"
+	TypeReceiptDelivered = "receipt.delivered"
+)
+
+type OutboxType string
+
+const (
+	OutboxTypeDirect OutboxType = "direct"
+	OutboxTypeGroup  OutboxType = "group"
 )
 
 type AuthPayload struct {
@@ -34,9 +43,16 @@ type MessageAckPayload struct {
 }
 
 type MessageRecvPayload struct {
-	ChatID      string `json:"chatId"`
-	SenderID    string `json:"senderId"`
-	ClientMsgID string `json:"clientMsgId"`
-	Content     string `json:"content"`
-	TS          int64  `json:"ts"`
+	ChatID      string     `json:"chatId"`
+	OutboxType  OutboxType `json:"outboxType"`
+	OutboxID    int64      `json:"outboxId"`
+	SenderID    string     `json:"senderId"`
+	ClientMsgID string     `json:"clientMsgId"`
+	Content     string     `json:"content"`
+	TS          int64      `json:"ts"`
+}
+
+type DeliveryReceiptPayload struct {
+	OutboxType OutboxType `json:"outboxType"`
+	OutboxID   int64      `json:"outboxId"`
 }

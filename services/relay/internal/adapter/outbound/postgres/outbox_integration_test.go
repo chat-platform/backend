@@ -48,12 +48,47 @@ func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
 	t.Cleanup(pool.Close)
 	_, err = pool.Exec(ctx, `CREATE TABLE direct_outbox (
 		id BIGSERIAL PRIMARY KEY, device_id UUID NOT NULL, payload TEXT NOT NULL,
-		routed_to TEXT, dispatched_at TIMESTAMPTZ, claim_expiry TIMESTAMPTZ
+		routed_to TEXT, dispatched_at TIMESTAMPTZ, claim_expiry TIMESTAMPTZ,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(), delivered_at TIMESTAMPTZ
 	)`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return NewOutboxRepository(pool), pool
+}
+
+func TestDeleteExpiredBatchPurgesDeliveredAndThirtyDayUndeliveredRows(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `INSERT INTO direct_outbox(device_id,payload,created_at,delivered_at) VALUES
+		('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','delivered',now(),now()),
+		('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','expired',now()-interval '31 days',NULL),
+		('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','pending',now()-interval '2 days',NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deleted int64
+	for {
+		count, err := repo.DeleteExpiredBatch(ctx, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deleted += count
+		if count == 0 {
+			break
+		}
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted=%d, want delivered and expired rows", deleted)
+	}
+	var remaining int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox`).Scan(&remaining); err != nil || remaining != 1 {
+		t.Fatalf("remaining rows=(%d,%v), want 1", remaining, err)
+	}
+	var payload string
+	if err := pool.QueryRow(ctx, `SELECT payload FROM direct_outbox`).Scan(&payload); err != nil || payload != "pending" {
+		t.Fatalf("remaining payload=(%q,%v), want pending", payload, err)
+	}
 }
 
 func insertEvent(t *testing.T, pool *pgxpool.Pool, device, payload string) int64 {

@@ -2,10 +2,11 @@ package redisinbound
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/chat-platform/backend/shared/pkg/sessiontoken"
+	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,17 +23,17 @@ type RevocationConsumer struct {
 	retryMax    time.Duration
 }
 
-func NewRevocationConsumer(client *redis.Client, reportError func(error)) *RevocationConsumer {
+func NewRevocationConsumer(client *redis.Client, nodeID string, reportError func(error)) *RevocationConsumer {
 	return &RevocationConsumer{
 		subscribe: func(ctx context.Context) revocationSubscription {
-			return client.Subscribe(ctx, sessiontoken.RevocationChannel)
+			return client.Subscribe(ctx, "ws:revoke:"+nodeID)
 		},
 		reportError: reportError,
 		retryMin:    100 * time.Millisecond,
 		retryMax:    5 * time.Second,
 	}
 }
-func (c *RevocationConsumer) Run(ctx context.Context, onRevoked func(context.Context, string)) error {
+func (c *RevocationConsumer) Run(ctx context.Context, onRevoked func(context.Context, domain.Connection)) error {
 	delay := c.retryMin
 	if delay <= 0 {
 		delay = 100 * time.Millisecond
@@ -63,7 +64,7 @@ func (c *RevocationConsumer) Run(ctx context.Context, onRevoked func(context.Con
 	}
 }
 
-func (c *RevocationConsumer) runSubscription(ctx context.Context, onRevoked func(context.Context, string)) error {
+func (c *RevocationConsumer) runSubscription(ctx context.Context, onRevoked func(context.Context, domain.Connection)) error {
 	pubsub := c.subscribe(ctx)
 	defer pubsub.Close()
 	if _, err := pubsub.Receive(ctx); err != nil {
@@ -71,7 +72,15 @@ func (c *RevocationConsumer) runSubscription(ctx context.Context, onRevoked func
 	}
 	for message := range pubsub.Channel() {
 		if message.Payload != "" {
-			onRevoked(ctx, message.Payload)
+			var event struct {
+				NodeID    string `json:"node_id"`
+				ConnID    string `json:"conn_id"`
+				SessionID string `json:"session_id"`
+			}
+			if json.Unmarshal([]byte(message.Payload), &event) == nil && event.NodeID != "" && event.ConnID != "" && event.SessionID != "" {
+				connection := domain.Connection{NodeID: event.NodeID, ConnID: event.ConnID, SessionID: event.SessionID}
+				onRevoked(ctx, connection)
+			}
 		}
 	}
 	if ctx.Err() != nil {

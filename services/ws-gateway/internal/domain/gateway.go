@@ -26,6 +26,10 @@ type MessageAck struct {
 	TimestampMS int64
 }
 
+type DeliveryReceipt struct {
+	OutboxID int64
+}
+
 type Connection struct {
 	NodeID    string
 	ConnID    string

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -34,7 +35,7 @@ func TestRevocationConsumerRetriesFailedAndClosedSubscriptions(t *testing.T) {
 	var attempts atomic.Int32
 	var reports atomic.Int32
 	messages := make(chan *redis.Message, 1)
-	messages <- &redis.Message{Payload: "revoked-session"}
+	messages <- &redis.Message{Payload: `{"node_id":"node-1","conn_id":"conn-1","session_id":"revoked-session"}`}
 	close(messages)
 	consumer := &RevocationConsumer{
 		retryMin:    time.Millisecond,
@@ -54,16 +55,16 @@ func TestRevocationConsumerRetriesFailedAndClosedSubscriptions(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	received := make(chan string, 1)
+	received := make(chan domain.Connection, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- consumer.Run(ctx, func(_ context.Context, sessionID string) { received <- sessionID })
+		done <- consumer.Run(ctx, func(_ context.Context, connection domain.Connection) { received <- connection })
 	}()
 
 	select {
 	case got := <-received:
-		if got != "revoked-session" {
-			t.Fatalf("revocation payload=%q", got)
+		if got.NodeID != "node-1" || got.ConnID != "conn-1" || got.SessionID != "revoked-session" {
+			t.Fatalf("revocation payload=%+v", got)
 		}
 	case <-ctx.Done():
 		t.Fatal("revocation event was not received")

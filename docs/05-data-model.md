@@ -85,12 +85,12 @@ created_at
 expires_at
 revoked_at
 
-Phase 4A stores JWT session ids (`sid`) here. JWT claims bind the session to
-one user and device; Redis caches active/revoked state through token expiry.
+JWT session ids (`sid`) are stored here. JWT claims bind the session to one
+user and device; Redis caches active/revoked state through token expiry.
 
 direct_outbox
 -------------
-id             PK      -- per-device cursor
+id             PK      -- global sequence; per-device cursor after filtering by device_id
 sender_id              -- FK → user.user_id
 client_msg_id   UUID      -- Client-generated UUIDv7; sender-scoped idempotency key
 recipient_id           -- FK → user.user_id
@@ -186,6 +186,11 @@ chat
 - Get events after cursor
 - Mark event dispatched
 - Mark event delivered
+
+Direct sync filters by `device_id` and `id > direct_cursor`; IDs are global,
+not a contiguous per-device sequence. Concurrent commits and parallel Relay
+delivery can cause out-of-order events, so this cursor model does not provide
+a strict no-loss ordering guarantee.
 
 # Other
 ## Redis - WS registruy

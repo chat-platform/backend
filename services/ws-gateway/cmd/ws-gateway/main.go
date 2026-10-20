@@ -18,6 +18,7 @@ import (
 	redisadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/outbound/redis"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/app"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
+	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/redis/go-redis/v9"
@@ -74,11 +75,13 @@ func main() {
 	mux := http.NewServeMux()
 	websocketServer := wsadapter.NewServer(operations, logger.With("component", "websocket"), hub)
 	mux.Handle(cfg.Path, websocketServer)
-	revocations := deliveryadapter.NewRevocationConsumer(redisClient, func(err error) {
+	revocations := deliveryadapter.NewRevocationConsumer(redisClient, cfg.NodeID, func(err error) {
 		logger.Warn(ctx, "session revocation subscription will retry", "error", err)
 	})
 	go func() {
-		if err := revocations.Run(ctx, func(eventCtx context.Context, sessionID string) { websocketServer.RevokeSession(eventCtx, sessionID) }); err != nil && ctx.Err() == nil {
+		if err := revocations.Run(ctx, func(eventCtx context.Context, connection domain.Connection) {
+			websocketServer.RevokeConnection(eventCtx, connection)
+		}); err != nil && ctx.Err() == nil {
 			logger.Error(ctx, "session revocation listener stopped; heartbeat checks remain active", "error", err)
 		}
 	}()

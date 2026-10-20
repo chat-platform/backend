@@ -29,6 +29,7 @@ type Operations interface {
 	Refresh(context.Context, string, domain.Connection) (bool, error)
 	Unregister(context.Context, string, domain.Connection) error
 	Send(context.Context, domain.Identity, domain.SendMessage) (domain.MessageAck, error)
+	MarkDelivered(context.Context, domain.Identity, string, int64) error
 }
 
 type Server struct {
@@ -167,6 +168,27 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			s.writeError(ctx, socket, "", "invalid_frame", "frame must be a valid envelope")
 			continue
 		}
+		if envelope.Type == wsframe.TypeSyncReady {
+			if err := s.hub.Ready(connection.ConnID); err != nil {
+				s.logger.Warn(ctx, "could not complete websocket sync handoff", "error", err, "device_id", identity.DeviceID, "conn_id", connection.ConnID)
+				writeClose(conn, s.logger, ctx, websocket.CloseTryAgainLater, "sync handoff failed; reconnect and sync")
+				return
+			}
+			continue
+		}
+		if envelope.Type == wsframe.TypeReceiptDelivered {
+			var receipt wsframe.DeliveryReceiptPayload
+			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &receipt) != nil || receipt.OutboxID <= 0 ||
+				(receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) {
+				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.delivered requires a valid outboxType and positive outboxId")
+				continue
+			}
+			if err := s.operations.MarkDelivered(ctx, identity, string(receipt.OutboxType), receipt.OutboxID); err != nil {
+				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "delivery receipt could not be recorded")
+				continue
+			}
+			continue
+		}
 		if envelope.Type != wsframe.TypeMessageSend {
 			s.logger.Warn(ctx, "websocket client sent unsupported frame type",
 				"frame_type", envelope.Type, "request_id", envelope.ID, "device_id", identity.DeviceID)
@@ -244,16 +266,18 @@ func readAuthToken(conn *websocket.Conn, logger logging.Logger, ctx context.Cont
 	return payload.Token, nil
 }
 
-func (s *Server) RevokeSession(ctx context.Context, sessionID string) {
-	for _, active := range s.hub.CloseSession(sessionID) {
-		if err := active.Socket.Close(); err != nil {
-			s.logger.Warn(ctx, "could not close revoked websocket", "error", err, "session_id", sessionID, "conn_id", active.ID)
-		}
-		unregisterCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		if err := s.operations.Unregister(unregisterCtx, active.DeviceID, active.Connection); err != nil {
-			s.logger.Warn(unregisterCtx, "could not remove revoked websocket registry entry", "error", err, "session_id", sessionID, "device_id", active.DeviceID)
-		}
-		cancel()
+func (s *Server) RevokeConnection(ctx context.Context, connection domain.Connection) {
+	active := s.hub.CloseConnection(connection)
+	if active == nil {
+		return
+	}
+	if err := active.Socket.Close(); err != nil {
+		s.logger.Warn(ctx, "could not close revoked websocket", "error", err, "session_id", connection.SessionID, "conn_id", active.ID)
+	}
+	unregisterCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := s.operations.Unregister(unregisterCtx, active.DeviceID, active.Connection); err != nil {
+		s.logger.Warn(unregisterCtx, "could not remove revoked websocket registry entry", "error", err, "session_id", connection.SessionID, "device_id", active.DeviceID)
 	}
 }
 

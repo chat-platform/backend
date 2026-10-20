@@ -149,7 +149,7 @@ loop1:
       UPDATE direct_outbox SET dispatched_at = now(), routed_to = 'WS',
         claim_expiry = NULL WHERE id = row.id AND dispatched_at IS NULL
     else:
-      # Explicit Phase 3 policy: skip offline rows.
+      # Relay policy: skip offline rows.
       UPDATE direct_outbox SET dispatched_at = now(), routed_to = NULL,
         claim_expiry = NULL WHERE id = row.id AND dispatched_at IS NULL
 
@@ -315,8 +315,9 @@ server-side read state — the client aggregates.
 
 ### 3.1 Delivery receipt
 
-When a device receives `message.recv`, it sends `receipt.delivered {
-messageId }`. Server:
+After applying an event and durably persisting its cursor, a device sends
+`receipt.delivered { outboxId }`. The Gateway passes the authenticated
+device ID and outbox ID to Message Service. Server:
 
 1. Marks the corresponding outbox row (in direct_outbox or
    group_outbox) as delivered:
@@ -495,24 +496,17 @@ after, because the edit has a higher `id` in the same outbox table. Good.
 
 Sequence on reconnect:
 
-1. Client opens WS, authenticates.
-2. WS Gateway registers the connection, but does **not** yet stream
-   live events for this device.
-3. Client calls `GET /v1/sync?since=<cursor>` over HTTP.
-4. Client applies events, advances cursor.
-5. Client signals "ready" over WS.
-6. WS Gateway flushes any events that landed in `ws:deliver:{node}`
-   during the sync window.
-7. Live streaming continues.
+1. Client opens WS and authenticates; Gateway registers the socket and buffers live deliveries.
+2. Client pages `/v1/sync?since_direct=<cursor>&limit=<n>` over HTTP.
+3. Client applies each event, persists its cursor, and sends `receipt.delivered { outboxId }`.
+4. After all pages are exhausted, client sends `sync.ready` over WS.
+5. Gateway flushes buffered events by outbox ID, then streams live deliveries.
 
-The buffering in step 6 prevents the "subscribe before backfill drops
-events" problem. 
-Buffer lives in WS Gateway memory, not Redis. If the Gateway crashes
-mid-sync, the client's socket dies, so the standard reconnect flow runs
-again — connect, auth, sync, ready. No special recovery path; the
-buffer is discarded and the client re-syncs from the outbox. Durability
-is not required because the buffer is a latency optimization, not a
-correctness mechanism.
+The bounded buffer lives in WS Gateway memory, not Redis. It holds up to
+1,000 events or 10 MiB. If either limit is exceeded, Gateway closes the
+socket with a retryable code; the client reconnects and syncs from its
+last persisted cursor. If Gateway crashes mid-sync, the buffer is
+discarded and the client follows the same reconnect flow.
 
 ### 4.5 Cursor too old
 

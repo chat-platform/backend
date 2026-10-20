@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -25,6 +26,18 @@ type Session struct {
 	ExpiresAt    time.Time
 }
 
+type SyncEvent struct {
+	OutboxID  int64           `json:"outboxId"`
+	EventType string          `json:"eventType"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+type SyncPage struct {
+	Events     []SyncEvent `json:"events"`
+	NextCursor int64       `json:"nextCursor"`
+	HasMore    bool        `json:"hasMore"`
+}
+
 type Repository interface {
 	CompleteOTP(context.Context, string, string, string, string, string, time.Time) (User, Device, Session, error)
 	GetProfile(context.Context, string) (User, error)
@@ -32,13 +45,14 @@ type Repository interface {
 	GetOrCreateDirectChat(context.Context, string, string) (string, error)
 	RevokeSession(context.Context, string, time.Time) error
 	SessionActive(context.Context, sessiontoken.Claims, time.Time) (bool, error)
+	ListDirectEvents(context.Context, string, int64, int) ([]SyncEvent, error)
 }
 
 type SessionCache interface {
 	SetActive(context.Context, string, time.Duration) error
 	SetRevoked(context.Context, string, time.Duration) error
 	Status(context.Context, string) (string, error)
-	PublishRevoked(context.Context, string) error
+	RevokeConnection(context.Context, string, string) error
 }
 
 type Config struct {
@@ -63,9 +77,6 @@ func New(repo Repository, sessions SessionCache, cfg Config) *Service {
 
 func (s *Service) RequestOTP(_ context.Context, phone string) error {
 	phone = strings.TrimSpace(phone)
-	if len(phone) < 6 || len(phone) > 32 {
-		return ErrInvalidRequest
-	}
 	return nil // Development OTP is fixed; no external delivery is performed.
 }
 
@@ -78,7 +89,7 @@ type AuthResult struct {
 
 func (s *Service) VerifyOTP(ctx context.Context, phone, code, platform, deviceName, deviceID string) (AuthResult, error) {
 	phone = strings.TrimSpace(phone)
-	if len(phone) < 6 || len(phone) > 32 || s.cfg.OTPCode == "" || len(code) != len(s.cfg.OTPCode) || subtle.ConstantTimeCompare([]byte(code), []byte(s.cfg.OTPCode)) != 1 {
+	if s.cfg.OTPCode == "" || len(code) != len(s.cfg.OTPCode) || subtle.ConstantTimeCompare([]byte(code), []byte(s.cfg.OTPCode)) != 1 {
 		return AuthResult{}, ErrUnauthorized
 	}
 	platform = strings.ToUpper(strings.TrimSpace(platform))
@@ -156,18 +167,32 @@ func (s *Service) Profile(ctx context.Context, userID string) (User, error) {
 }
 func (s *Service) SetDisplayName(ctx context.Context, userID, name string) error {
 	name = strings.TrimSpace(name)
-	if name == "" || len(name) > 80 {
-		return ErrInvalidRequest
-	}
 	return s.repo.SetDisplayName(ctx, userID, name)
 }
 func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string, error) {
 	phone = strings.TrimSpace(phone)
-	if len(phone) < 6 || len(phone) > 32 {
-		return "", ErrInvalidRequest
-	}
 	return s.repo.GetOrCreateDirectChat(ctx, userID, phone)
 }
+
+func (s *Service) Sync(ctx context.Context, claims sessiontoken.Claims, cursor int64, limit int) (SyncPage, error) {
+	if cursor < 0 || limit < 1 || limit > 500 {
+		return SyncPage{}, ErrInvalidRequest
+	}
+	events, err := s.repo.ListDirectEvents(ctx, claims.DeviceID, cursor, limit+1)
+	if err != nil {
+		return SyncPage{}, ErrUnavailable
+	}
+	page := SyncPage{Events: events, NextCursor: cursor}
+	if len(events) > limit {
+		page.HasMore = true
+		page.Events = events[:limit]
+	}
+	if len(page.Events) > 0 {
+		page.NextCursor = page.Events[len(page.Events)-1].OutboxID
+	}
+	return page, nil
+}
+
 func (s *Service) Logout(ctx context.Context, claims sessiontoken.Claims) error {
 	expiresAt := time.Unix(claims.ExpiresAt, 0)
 	remaining := expiresAt.Sub(s.cfg.Now())
@@ -178,9 +203,9 @@ func (s *Service) Logout(ctx context.Context, claims sessiontoken.Claims) error 
 		return err
 	}
 	cacheErr := s.sessions.SetRevoked(ctx, claims.SessionID, remaining)
-	publishErr := s.sessions.PublishRevoked(ctx, claims.SessionID)
-	if cacheErr != nil || publishErr != nil {
-		return errors.Join(ErrUnavailable, cacheErr, publishErr)
+	notifyErr := s.sessions.RevokeConnection(ctx, claims.DeviceID, claims.SessionID)
+	if cacheErr != nil || notifyErr != nil {
+		return errors.Join(ErrUnavailable, cacheErr, notifyErr)
 	}
 	return nil
 }

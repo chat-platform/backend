@@ -13,8 +13,8 @@ schema live in `shared/`.
 
 ## Current Status
 
-Phases 1–3 and Phase 4A are complete. Phase 4B will add reconnect sync and
-offline recovery.
+Phases 1–3 and Phase 4A are complete. Phase 4B provides direct-message
+reconnect sync and offline recovery.
 
 ## Architecture
 
@@ -52,7 +52,7 @@ and Relay.
 - [x] WS Gateway (`services/ws-gateway`, Phase 2 + live delivery)
 - [x] Relay (`services/relay`, Phase 3)
 - [x] Core API (Phase 4A: Auth & Identity)
-- [ ] Reconnect & Sync (Phase 4B)
+- [x] Reconnect & Sync (Phase 4B, direct messages)
 - [ ] Notification Service (later)
 
 ## Development
@@ -71,6 +71,13 @@ For an existing local volume, apply the new session schema once with:
 ```sh
 docker compose exec -T postgres psql -U messenger -d messenger \
   -f /docker-entrypoint-initdb.d/migrations/000003_core_api_sessions.up.sql
+```
+
+Apply the Phase 4B cleanup indexes to an existing volume with:
+
+```sh
+docker compose exec -T postgres psql -U messenger -d messenger \
+  -f /docker-entrypoint-initdb.d/migrations/000004_direct_outbox_sync_retention.up.sql
 ```
 
 Core API listens on `http://localhost:8081`. Request and verify a development
@@ -104,9 +111,12 @@ Send this from Alice; Bob receives `message.recv`, and Alice receives
 {"type":"message.send","id":"request-1","ts":0,"payload":{"chatId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","clientMsgId":"018f5a1c-7b2d-7abc-8def-0123456789ab","content":"hello"}}
 ```
 
-The delivered payload includes `senderId` and `clientMsgId` to identify the
-original message. Phase 4B sync is not implemented yet; offline delivery
-recovery remains deferred.
+The delivered payload includes `outboxId`, `senderId`, and `clientMsgId`.
+Persist each applied event and its `outboxId` cursor before sending
+`receipt.delivered`. On reconnect, open and authenticate the WebSocket, fetch
+all pages from `GET /v1/sync?since_direct=<cursor>`, then send `sync.ready`.
+The Gateway buffers live deliveries until that frame. Group sync remains
+deferred.
 
 The `proto` target requires `protoc`, `protoc-gen-go`, and
 `protoc-gen-go-grpc` on `PATH`. The database migration and dev seed run only
@@ -144,9 +154,10 @@ Document measured results here.
 
 ## Known Limitations
 
-Relay routes only online direct-message deliveries; offline routing, retry
-scans, and reconnect sync are deferred. The development OTP is not suitable
-for production authentication.
+Relay routes only online direct-message deliveries. Offline recovery uses
+the direct outbox sync endpoint. The current global outbox ID cursor and
+parallel Relay delivery do not guarantee strict no-loss event ordering.
+The development OTP is not suitable for production authentication.
 
 ## Design vs Implementation
 

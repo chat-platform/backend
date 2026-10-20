@@ -185,4 +185,15 @@ func (r *ChatRepository) findExistingMessageAck(
 	}, nil
 }
 
+func (r *ChatRepository) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {
+	if outboxType != "direct" {
+		return domain.ErrInvalidMessage
+	}
+	_, err := r.pool.Exec(ctx, `UPDATE direct_outbox SET delivered_at = COALESCE(delivered_at, now()) WHERE id = $1 AND device_id = $2`, outboxID, deviceID)
+	if err != nil {
+		return fmt.Errorf("mark direct outbox event delivered: %w", err)
+	}
+	return nil
+}
+
 var _ port.ChatRepository = (*ChatRepository)(nil)
