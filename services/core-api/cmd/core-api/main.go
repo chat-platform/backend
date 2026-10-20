@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,12 +13,14 @@ import (
 	"syscall"
 	"time"
 
+	grpcadapter "github.com/chat-platform/backend/services/core-api/internal/adapter/inbound/grpc"
 	httpadapter "github.com/chat-platform/backend/services/core-api/internal/adapter/inbound/http"
 	postgresadapter "github.com/chat-platform/backend/services/core-api/internal/adapter/outbound/postgres"
 	redisadapter "github.com/chat-platform/backend/services/core-api/internal/adapter/outbound/redis"
 	"github.com/chat-platform/backend/services/core-api/internal/app"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
 )
 
 func main() {
@@ -47,15 +50,35 @@ func main() {
 	service := app.New(postgresadapter.New(pool), redisadapter.NewSessionCache(redisClient), app.Config{
 		OTPCode: env("DEV_OTP_CODE", "000000"), Secret: secret, SessionTTL: ttl,
 	})
-	server := &http.Server{Addr: env("LISTEN_ADDR", ":8081"), Handler: httpadapter.New(service), ReadHeaderTimeout: 5 * time.Second}
+	httpServer := &http.Server{Addr: env("LISTEN_ADDR", ":8081"), Handler: httpadapter.New(service), ReadHeaderTimeout: 5 * time.Second}
+	grpcListener, err := net.Listen("tcp", env("GRPC_ADDR", ":50052"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	grpcServer := grpc.NewServer()
+	grpcadapter.RegisterSession(grpcServer, service)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
+		_ = httpServer.Shutdown(shutdownCtx)
+		stopped := make(chan struct{})
+		go func() { grpcServer.GracefulStop(); close(stopped) }()
+		select {
+		case <-stopped:
+		case <-shutdownCtx.Done():
+			grpcServer.Stop()
+		}
 	}()
-	fmt.Printf("core-api listening on %s\n", server.Addr)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	go func() {
+		fmt.Printf("core-api gRPC listening on %s\n", grpcListener.Addr())
+		if err := grpcServer.Serve(grpcListener); err != nil && ctx.Err() == nil {
+			log.Printf("core-api gRPC server failed: %v", err)
+			stop()
+		}
+	}()
+	fmt.Printf("core-api HTTP listening on %s\n", httpServer.Addr)
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }

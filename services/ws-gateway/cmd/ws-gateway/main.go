@@ -20,6 +20,7 @@ import (
 	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
+	sessionv1 "github.com/chat-platform/backend/shared/gen/session/v1"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -53,13 +54,19 @@ func main() {
 		os.Exit(1)
 	}
 	defer grpcConn.Close()
+	coreAPIConn, err := grpc.NewClient(cfg.CoreAPIAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		logger.Error(ctx, "could not create Core API gRPC client", "error", err)
+		os.Exit(1)
+	}
+	defer coreAPIConn.Close()
 
 	registry := redisadapter.NewConnectionRegistry(redisClient)
 	if len(cfg.JWTSecret) < 32 {
 		logger.Error(ctx, "JWT_SECRET must contain at least 32 bytes")
 		os.Exit(1)
 	}
-	sessionAuthenticator := authadapter.New([]byte(cfg.JWTSecret), registry, coreapiadapter.NewSessionValidator(cfg.CoreAPIAddr))
+	sessionAuthenticator := authadapter.New([]byte(cfg.JWTSecret), registry, coreapiadapter.NewSessionValidator(sessionv1.NewSessionServiceClient(coreAPIConn)))
 	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn), logger.With("component", "message_service_client"))
 	operations := app.New(cfg.NodeID, registry, messageService, logger.With("component", "gateway"), sessionAuthenticator)
 	hub := wsadapter.NewHub()

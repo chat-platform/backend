@@ -2,52 +2,41 @@ package coreapi
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"strings"
+	"errors"
 	"time"
 
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
+	sessionv1 "github.com/chat-platform/backend/shared/gen/session/v1"
 	"github.com/chat-platform/backend/shared/pkg/sessiontoken"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type SessionValidator struct {
-	baseURL string
-	client  *http.Client
+	client sessionv1.SessionServiceClient
 }
 
-func NewSessionValidator(address string) *SessionValidator {
-	address = strings.TrimRight(address, "/")
-	if !strings.HasPrefix(address, "http://") && !strings.HasPrefix(address, "https://") {
-		address = "http://" + address
-	}
-	return &SessionValidator{
-		baseURL: address,
-		client:  &http.Client{Timeout: 3 * time.Second},
-	}
+func NewSessionValidator(client sessionv1.SessionServiceClient) *SessionValidator {
+	return &SessionValidator{client: client}
 }
 
 func (v *SessionValidator) ValidateSession(ctx context.Context, token string) (sessiontoken.Claims, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, v.baseURL+"/internal/v1/session/validate", nil)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
+	response, err := v.client.ValidateSession(ctx, &sessionv1.ValidateSessionRequest{})
 	if err != nil {
-		return sessiontoken.Claims{}, fmt.Errorf("create Core API session validation request: %w", err)
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	response, err := v.client.Do(request)
-	if err != nil {
-		return sessiontoken.Claims{}, fmt.Errorf("validate session with Core API: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		if code := status.Code(err); code == codes.Unauthenticated || code == codes.PermissionDenied {
 			return sessiontoken.Claims{}, domain.ErrInvalidIdentity
 		}
-		return sessiontoken.Claims{}, fmt.Errorf("Core API session validation returned %s", response.Status)
+		return sessiontoken.Claims{}, err
 	}
-	var claims sessiontoken.Claims
-	if err := json.NewDecoder(response.Body).Decode(&claims); err != nil {
-		return sessiontoken.Claims{}, fmt.Errorf("decode Core API session validation response: %w", err)
+	if response == nil {
+		return sessiontoken.Claims{}, errors.New("Core API returned an empty session validation response")
 	}
-	return claims, nil
+	return sessiontoken.Claims{
+		SessionID: response.GetSessionId(), UserID: response.GetUserId(), DeviceID: response.GetDeviceId(),
+		IssuedAt: response.GetIssuedAt(), ExpiresAt: response.GetExpiresAt(),
+	}, nil
 }

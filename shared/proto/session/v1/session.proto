@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package session.v1;
+
+option go_package = "github.com/chat-platform/backend/shared/gen/session/v1;sessionv1";
+
+service SessionService {
+  rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
+}
+
+message ValidateSessionRequest {}
+
+message ValidateSessionResponse {
+  string session_id = 1;
+  string user_id = 2;
+  string device_id = 3;
+  int64 issued_at = 4;
+  int64 expires_at = 5;
+}
