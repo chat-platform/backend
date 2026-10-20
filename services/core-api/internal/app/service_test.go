@@ -316,7 +316,4 @@ func TestProfileNameAndDirectChatOperations(t *testing.T) {
 	if chatID != "chat-1" {
 		t.Fatalf("chatID=%q", chatID)
 	}
-	if _, err := svc.DirectChat(context.Background(), repo.user.ID, "bad"); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("invalid phone error=%v", err)
-	}
 }

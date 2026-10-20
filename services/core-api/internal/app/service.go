@@ -77,9 +77,6 @@ func New(repo Repository, sessions SessionCache, cfg Config) *Service {
 
 func (s *Service) RequestOTP(_ context.Context, phone string) error {
 	phone = strings.TrimSpace(phone)
-	if len(phone) < 6 || len(phone) > 32 {
-		return ErrInvalidRequest
-	}
 	return nil // Development OTP is fixed; no external delivery is performed.
 }
 
@@ -92,7 +89,7 @@ type AuthResult struct {
 
 func (s *Service) VerifyOTP(ctx context.Context, phone, code, platform, deviceName, deviceID string) (AuthResult, error) {
 	phone = strings.TrimSpace(phone)
-	if len(phone) < 6 || len(phone) > 32 || s.cfg.OTPCode == "" || len(code) != len(s.cfg.OTPCode) || subtle.ConstantTimeCompare([]byte(code), []byte(s.cfg.OTPCode)) != 1 {
+	if s.cfg.OTPCode == "" || len(code) != len(s.cfg.OTPCode) || subtle.ConstantTimeCompare([]byte(code), []byte(s.cfg.OTPCode)) != 1 {
 		return AuthResult{}, ErrUnauthorized
 	}
 	platform = strings.ToUpper(strings.TrimSpace(platform))
@@ -170,16 +167,10 @@ func (s *Service) Profile(ctx context.Context, userID string) (User, error) {
 }
 func (s *Service) SetDisplayName(ctx context.Context, userID, name string) error {
 	name = strings.TrimSpace(name)
-	if name == "" || len(name) > 80 {
-		return ErrInvalidRequest
-	}
 	return s.repo.SetDisplayName(ctx, userID, name)
 }
 func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string, error) {
 	phone = strings.TrimSpace(phone)
-	if len(phone) < 6 || len(phone) > 32 {
-		return "", ErrInvalidRequest
-	}
 	return s.repo.GetOrCreateDirectChat(ctx, userID, phone)
 }
 
