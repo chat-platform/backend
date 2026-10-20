@@ -1,7 +1,9 @@
 package httpadapter
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -33,6 +35,10 @@ func (s *Server) createGroup(c echo.Context) error {
 	if err := decode(c, &body); err != nil {
 		return writeInvalidRequest(c, err)
 	}
+	body.Name = strings.TrimSpace(body.Name)
+	if body.Name == "" {
+		return writeInvalidRequest(c, errors.New("group name must not be blank"))
+	}
 	chatID, err := s.service.CreateGroup(c.Request().Context(), claimsFrom(c.Request()).UserID, body.Name, body.MemberUserIDs)
 	if err != nil {
 		return writeServiceError(c, err)
@@ -44,6 +50,13 @@ func (s *Server) updateGroup(c echo.Context) error {
 	var body updateGroupRequest
 	if err := decode(c, &body); err != nil {
 		return writeInvalidRequest(c, err)
+	}
+	if body.Name != nil {
+		trimmed := strings.TrimSpace(*body.Name)
+		if trimmed == "" {
+			return writeInvalidRequest(c, errors.New("group name must not be blank"))
+		}
+		body.Name = &trimmed
 	}
 	if err := s.service.UpdateGroup(c.Request().Context(), claimsFrom(c.Request()).UserID, c.Param("id"), body.Name, body.ProfilePic); err != nil {
 		return writeServiceError(c, err)

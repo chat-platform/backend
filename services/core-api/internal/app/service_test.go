@@ -101,21 +101,17 @@ func TestSyncUsesDeviceCursorAndPagesWithOneLookahead(t *testing.T) {
 	}
 }
 
-func TestCreateGroupValidatesNameAndDistinctMembers(t *testing.T) {
+func TestCreateGroupValidatesDistinctMembers(t *testing.T) {
 	service := New(&repoFake{}, &cacheFake{}, Config{})
 	creator := "11111111-1111-4111-8111-111111111111"
 	member := "22222222-2222-4222-8222-222222222222"
-	for _, tc := range []struct {
-		name    string
-		members []string
-	}{
-		{name: "  ", members: []string{member}},
-		{name: "group", members: []string{member, member}},
-		{name: "group", members: []string{creator}},
-		{name: "group", members: []string{"not-a-uuid"}},
+	for _, members := range [][]string{
+		{member, member},
+		{creator},
+		{"not-a-uuid"},
 	} {
-		if _, err := service.CreateGroup(context.Background(), creator, tc.name, tc.members); !errors.Is(err, ErrInvalidRequest) {
-			t.Fatalf("name=%q members=%v error=%v, want invalid request", tc.name, tc.members, err)
+		if _, err := service.CreateGroup(context.Background(), creator, "group", members); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("members=%v error=%v, want invalid request", members, err)
 		}
 	}
 	if _, err := service.CreateGroup(context.Background(), creator, " group ", []string{member}); err != nil {

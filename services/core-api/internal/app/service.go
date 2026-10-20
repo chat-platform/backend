@@ -195,7 +195,7 @@ func (s *Service) GroupChats(ctx context.Context, userID string) ([]GroupChat, e
 
 func (s *Service) CreateGroup(ctx context.Context, creatorID, name string, memberIDs []string) (string, error) {
 	name = strings.TrimSpace(name)
-	if name == "" || len(name) > 80 || !validUUID(creatorID) {
+	if !validUUID(creatorID) {
 		return "", ErrInvalidRequest
 	}
 	if err := validateUniqueUserIDs(memberIDs, creatorID); err != nil {
@@ -210,9 +210,6 @@ func (s *Service) UpdateGroup(ctx context.Context, actorID, groupID string, name
 	}
 	if name != nil {
 		trimmed := strings.TrimSpace(*name)
-		if trimmed == "" || len(trimmed) > 80 {
-			return ErrInvalidRequest
-		}
 		name = &trimmed
 	}
 	if profilePic != nil {

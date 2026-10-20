@@ -146,4 +146,7 @@ func TestGroupManagementMapsPermissionErrorsAndRejectsInvalidBodies(t *testing.T
 	if got := callGroupAPI(server, token, http.MethodPost, "/v1/groups", `{"name":"","memberUserIds":[]}`).Code; got != http.StatusBadRequest {
 		t.Fatalf("invalid body status=%d, want 400", got)
 	}
+	if got := callGroupAPI(server, token, http.MethodPatch, "/v1/groups/"+groupTestID, `{"name":"   "}`).Code; got != http.StatusBadRequest {
+		t.Fatalf("blank metadata name status=%d, want 400", got)
+	}
 }
