@@ -58,8 +58,8 @@ type sessionCacheStub struct {
 	statusCalls     int
 	active, revoked bool
 	setRevokedErr   error
-	publishErr      error
-	publishCalled   bool
+	revokeErr       error
+	revokeCalled    bool
 }
 
 func (c *sessionCacheStub) SetActive(context.Context, string, time.Duration) error {
@@ -85,9 +85,9 @@ func (c *sessionCacheStub) Status(context.Context, string) (string, error) {
 	}
 	return sessiontoken.StatusMissing, nil
 }
-func (c *sessionCacheStub) PublishRevoked(context.Context, string) error {
-	c.publishCalled = true
-	return c.publishErr
+func (c *sessionCacheStub) RevokeConnection(context.Context, string, string) error {
+	c.revokeCalled = true
+	return c.revokeErr
 }
 
 func TestValidateSessionChecksPostgresOnCacheMissAndReturnsClaims(t *testing.T) {
@@ -136,7 +136,7 @@ func TestLogoutDoesNotRequireRedisAuthentication(t *testing.T) {
 	New(service).ServeHTTP(recorder, request)
 	response := recorder.Result()
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusNoContent || !repo.revoked || cache.statusCalls != 0 || !cache.publishCalled {
+	if response.StatusCode != http.StatusNoContent || !repo.revoked || cache.statusCalls != 0 || !cache.revokeCalled {
 		t.Fatalf("status=%d repo=%+v cache=%+v", response.StatusCode, repo, cache)
 	}
 }

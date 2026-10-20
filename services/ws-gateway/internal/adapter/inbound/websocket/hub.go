@@ -84,18 +84,15 @@ func (h *Hub) Remove(id string, socket socketWriter) {
 	h.mu.Unlock()
 }
 
-func (h *Hub) CloseSession(sessionID string) []ActiveSocket {
+func (h *Hub) CloseConnection(connection domain.Connection) *ActiveSocket {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	var active []ActiveSocket
-	for id, entry := range h.entries {
-		if entry.sessionID != sessionID {
-			continue
-		}
-		delete(h.entries, id)
-		active = append(active, ActiveSocket{ID: id, DeviceID: entry.deviceID, Connection: entry.connection, Socket: entry.socket})
+	entry := h.entries[connection.ConnID]
+	if entry == nil || entry.sessionID != connection.SessionID || entry.connection.NodeID != connection.NodeID {
+		return nil
 	}
-	return active
+	delete(h.entries, connection.ConnID)
+	return &ActiveSocket{ID: connection.ConnID, DeviceID: entry.deviceID, Connection: entry.connection, Socket: entry.socket}
 }
 
 func (h *Hub) Deliver(_ context.Context, id string, envelope wsframe.Envelope) error {

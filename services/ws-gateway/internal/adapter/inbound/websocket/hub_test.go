@@ -69,26 +69,27 @@ func TestHubRemoveDoesNotRemoveReplacement(t *testing.T) {
 	}
 }
 
-func TestHubCloseSessionReturnsOnlyMatchingConnections(t *testing.T) {
+func TestHubCloseConnectionIgnoresStaleReplacementEvent(t *testing.T) {
 	h := NewHub()
-	closed, retained := &captureSocket{}, &captureSocket{}
-	h.RegisterAuthenticated("conn-a", "session-a", "device-a", domain.Connection{NodeID: "node", ConnID: "conn-a", SessionID: "session-a"}, closed)
-	h.RegisterAuthenticated("conn-b", "session-b", "device-b", domain.Connection{NodeID: "node", ConnID: "conn-b", SessionID: "session-b"}, retained)
-	if err := h.Ready("conn-b"); err != nil {
+	oldSocket, currentSocket := &captureSocket{}, &captureSocket{}
+	old := domain.Connection{NodeID: "node", ConnID: "conn-a", SessionID: "session-a"}
+	current := domain.Connection{NodeID: "node", ConnID: "conn-b", SessionID: "session-a"}
+	h.RegisterAuthenticated(old.ConnID, old.SessionID, "device-a", old, oldSocket)
+	h.RegisterAuthenticated(current.ConnID, current.SessionID, "device-a", current, currentSocket)
+	if got := h.CloseConnection(old); got == nil || got.ID != old.ConnID {
+		t.Fatalf("targeted revoke result=%+v", got)
+	}
+	if got := h.CloseConnection(old); got != nil {
+		t.Fatalf("duplicate/stale revoke matched: %+v", got)
+	}
+	if err := h.Ready(current.ConnID); err != nil {
 		t.Fatal(err)
 	}
-	active := h.CloseSession("session-a")
-	if len(active) != 1 || active[0].ID != "conn-a" || active[0].DeviceID != "device-a" {
-		t.Fatalf("closed connections=%+v", active)
+	if err := h.Deliver(context.Background(), current.ConnID, wsframe.Envelope{ID: "current"}); err != nil || currentSocket.value == nil {
+		t.Fatalf("replacement connection affected: value=%v err=%v", currentSocket.value, err)
 	}
-	if err := h.Deliver(context.Background(), "conn-a", wsframe.Envelope{}); !errors.Is(err, ErrConnectionGone) {
+	if err := h.Deliver(context.Background(), old.ConnID, wsframe.Envelope{}); !errors.Is(err, ErrConnectionGone) {
 		t.Fatalf("revoked connection still registered: %v", err)
-	}
-	if err := h.Deliver(context.Background(), "conn-b", wsframe.Envelope{}); err != nil {
-		t.Fatalf("unrelated connection removed: %v", err)
-	}
-	if retained.value == nil {
-		t.Fatal("unrelated socket did not receive delivery")
 	}
 }
 

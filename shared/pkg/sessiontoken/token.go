@@ -17,7 +17,9 @@ var ErrInvalidToken = errors.New("invalid session token")
 // The versioned prefix makes pre-TTL-cap session status entries miss after
 // rollout, so they are revalidated against Postgres before being cached again.
 const StatusKeyPrefix = "session:status:v2:"
-const RevocationChannel = "session:revoked"
+
+func GatewayRevocationChannel(nodeID string) string { return "ws:revoke:" + nodeID }
+
 const MaxActiveStatusTTL = 30 * time.Second
 const (
 	StatusActive  = "active"

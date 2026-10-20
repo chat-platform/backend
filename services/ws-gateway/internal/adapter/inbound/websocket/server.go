@@ -266,16 +266,18 @@ func readAuthToken(conn *websocket.Conn, logger logging.Logger, ctx context.Cont
 	return payload.Token, nil
 }
 
-func (s *Server) RevokeSession(ctx context.Context, sessionID string) {
-	for _, active := range s.hub.CloseSession(sessionID) {
-		if err := active.Socket.Close(); err != nil {
-			s.logger.Warn(ctx, "could not close revoked websocket", "error", err, "session_id", sessionID, "conn_id", active.ID)
-		}
-		unregisterCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		if err := s.operations.Unregister(unregisterCtx, active.DeviceID, active.Connection); err != nil {
-			s.logger.Warn(unregisterCtx, "could not remove revoked websocket registry entry", "error", err, "session_id", sessionID, "device_id", active.DeviceID)
-		}
-		cancel()
+func (s *Server) RevokeConnection(ctx context.Context, connection domain.Connection) {
+	active := s.hub.CloseConnection(connection)
+	if active == nil {
+		return
+	}
+	if err := active.Socket.Close(); err != nil {
+		s.logger.Warn(ctx, "could not close revoked websocket", "error", err, "session_id", connection.SessionID, "conn_id", active.ID)
+	}
+	unregisterCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := s.operations.Unregister(unregisterCtx, active.DeviceID, active.Connection); err != nil {
+		s.logger.Warn(unregisterCtx, "could not remove revoked websocket registry entry", "error", err, "session_id", connection.SessionID, "device_id", active.DeviceID)
 	}
 }
 

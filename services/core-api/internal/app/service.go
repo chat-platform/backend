@@ -52,7 +52,7 @@ type SessionCache interface {
 	SetActive(context.Context, string, time.Duration) error
 	SetRevoked(context.Context, string, time.Duration) error
 	Status(context.Context, string) (string, error)
-	PublishRevoked(context.Context, string) error
+	RevokeConnection(context.Context, string, string) error
 }
 
 type Config struct {
@@ -212,9 +212,9 @@ func (s *Service) Logout(ctx context.Context, claims sessiontoken.Claims) error 
 		return err
 	}
 	cacheErr := s.sessions.SetRevoked(ctx, claims.SessionID, remaining)
-	publishErr := s.sessions.PublishRevoked(ctx, claims.SessionID)
-	if cacheErr != nil || publishErr != nil {
-		return errors.Join(ErrUnavailable, cacheErr, publishErr)
+	notifyErr := s.sessions.RevokeConnection(ctx, claims.DeviceID, claims.SessionID)
+	if cacheErr != nil || notifyErr != nil {
+		return errors.Join(ErrUnavailable, cacheErr, notifyErr)
 	}
 	return nil
 }
