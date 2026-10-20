@@ -15,17 +15,17 @@ import (
 )
 
 type sessionRepoStub struct {
-	active      bool
-	revoked     bool
-	claims      sessiontoken.Claims
-	revokeErr   error
-	events      []app.SyncEvent
-	groupEvents []app.SyncEvent
-	syncDevice  string
-	syncCursor  int64
-	syncLimit   int
-	groupCursor int64
-	groupLimit  int
+	active           bool
+	revoked          bool
+	claims           sessiontoken.Claims
+	revokeErr        error
+	events           []app.SyncEvent
+	groupEvents      []app.SyncEvent
+	syncDevice       string
+	directSyncCursor int64
+	directSyncLimit  int
+	groupSyncCursor  int64
+	groupSyncLimit   int
 }
 
 func (r *sessionRepoStub) CompleteOTP(context.Context, string, string, string, string, string, time.Time) (app.User, app.Device, app.Session, error) {
@@ -69,12 +69,12 @@ func (r *sessionRepoStub) SessionActive(_ context.Context, claims sessiontoken.C
 	return r.active, nil
 }
 func (r *sessionRepoStub) ListDirectEvents(_ context.Context, deviceID string, cursor int64, limit int) ([]app.SyncEvent, error) {
-	r.syncDevice, r.syncCursor, r.syncLimit = deviceID, cursor, limit
+	r.syncDevice, r.directSyncCursor, r.directSyncLimit = deviceID, cursor, limit
 	return r.events, nil
 }
 
 func (r *sessionRepoStub) ListGroupEvents(_ context.Context, _ string, cursor int64, limit int) ([]app.SyncEvent, error) {
-	r.groupCursor, r.groupLimit = cursor, limit
+	r.groupSyncCursor, r.groupSyncLimit = cursor, limit
 	return r.groupEvents, nil
 }
 
@@ -195,8 +195,8 @@ func TestSyncRequiresBearerAndUsesAuthenticatedDevice(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if repo.syncDevice != claims.DeviceID || repo.syncCursor != 5 || repo.syncLimit != 2 || repo.groupCursor != 7 || repo.groupLimit != 2 {
-		t.Fatalf("repo sync request device=%q direct_cursor=%d group_cursor=%d direct_limit=%d group_limit=%d", repo.syncDevice, repo.syncCursor, repo.groupCursor, repo.syncLimit, repo.groupLimit)
+	if repo.syncDevice != claims.DeviceID || repo.directSyncCursor != 5 || repo.directSyncLimit != 2 || repo.groupSyncCursor != 7 || repo.groupSyncLimit != 2 {
+		t.Fatalf("repo sync request device=%q direct_cursor=%d group_cursor=%d direct_limit=%d group_limit=%d", repo.syncDevice, repo.directSyncCursor, repo.groupSyncCursor, repo.directSyncLimit, repo.groupSyncLimit)
 	}
 	if len(page.Direct.Events) != 1 || page.Direct.NextCursor != 12 || page.Direct.HasMore || len(page.Group.Events) != 1 || page.Group.NextCursor != 9 {
 		t.Fatalf("unexpected sync page: %+v", page)
