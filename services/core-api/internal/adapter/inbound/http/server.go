@@ -14,10 +14,12 @@ type Server struct {
 
 func New(service *app.Service) *Server {
 	const (
-		GET  = http.MethodGet
-		HEAD = http.MethodHead
-		POST = http.MethodPost
-		PUT  = http.MethodPut
+		GET    = http.MethodGet
+		HEAD   = http.MethodHead
+		POST   = http.MethodPost
+		PUT    = http.MethodPut
+		PATCH  = http.MethodPatch
+		DELETE = http.MethodDelete
 	)
 
 	e := echo.New()
@@ -42,6 +44,13 @@ func New(service *app.Service) *Server {
 	v1.Add(HEAD, "/profile/me", s.profile)
 	v1.Add(PUT, "/profile/name", s.setName)
 	v1.Add(POST, "/chats/direct", s.directChat)
+	v1.Add(GET, "/chats/groups", s.groupChats)
+	v1.Add(POST, "/groups", s.createGroup)
+	v1.Add(PATCH, "/groups/:id", s.updateGroup)
+	v1.Add(POST, "/groups/:id/members", s.addGroupMembers)
+	v1.Add(DELETE, "/groups/:id/members/:userId", s.removeGroupMember)
+	v1.Add(POST, "/groups/:id/admins", s.addGroupAdmins)
+	v1.Add(DELETE, "/groups/:id/admins/:userId", s.removeGroupAdmin)
 	return s
 }
 

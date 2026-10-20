@@ -45,6 +45,14 @@ func (r *repoFake) SetDisplayName(_ context.Context, _ string, name string) erro
 func (r *repoFake) GetOrCreateDirectChat(context.Context, string, string) (string, error) {
 	return "chat-1", nil
 }
+func (r *repoFake) ListGroupChats(context.Context, string) ([]GroupChat, error) { return nil, nil }
+func (r *repoFake) CreateGroup(context.Context, string, string, []string) (string, error) {
+	return "group-1", nil
+}
+func (r *repoFake) UpdateGroup(context.Context, string, string, *string, *string) error  { return nil }
+func (r *repoFake) AddGroupMembers(context.Context, string, string, []string) error      { return nil }
+func (r *repoFake) RemoveGroupMember(context.Context, string, string, string) error      { return nil }
+func (r *repoFake) SetGroupAdmins(context.Context, string, string, []string, bool) error { return nil }
 func (r *repoFake) RevokeSession(context.Context, string, time.Time) error {
 	if r.order != nil {
 		*r.order = append(*r.order, "postgres")
@@ -90,6 +98,24 @@ func TestSyncUsesDeviceCursorAndPagesWithOneLookahead(t *testing.T) {
 	}
 	if len(page.Events) != 1 || page.Events[0].OutboxID != 8 || page.NextCursor != 8 || !page.HasMore {
 		t.Fatalf("unexpected page: %+v", page)
+	}
+}
+
+func TestCreateGroupValidatesDistinctMembers(t *testing.T) {
+	service := New(&repoFake{}, &cacheFake{}, Config{})
+	creator := "11111111-1111-4111-8111-111111111111"
+	member := "22222222-2222-4222-8222-222222222222"
+	for _, members := range [][]string{
+		{member, member},
+		{creator},
+		{"not-a-uuid"},
+	} {
+		if _, err := service.CreateGroup(context.Background(), creator, "group", members); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("members=%v error=%v, want invalid request", members, err)
+		}
+	}
+	if _, err := service.CreateGroup(context.Background(), creator, " group ", []string{member}); err != nil {
+		t.Fatalf("valid group rejected: %v", err)
 	}
 }
 

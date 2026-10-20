@@ -1,8 +1,8 @@
 go 1.26.0
 
 use (
-	./services/message-service
 	./services/core-api
+	./services/message-service
 	./services/relay
 	./services/ws-gateway
 	./shared/gen

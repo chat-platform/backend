@@ -35,6 +35,24 @@ func (r *sessionRepoStub) SetDisplayName(context.Context, string, string) error 
 func (r *sessionRepoStub) GetOrCreateDirectChat(context.Context, string, string) (string, error) {
 	return "", nil
 }
+func (r *sessionRepoStub) ListGroupChats(context.Context, string) ([]app.GroupChat, error) {
+	return nil, nil
+}
+func (r *sessionRepoStub) CreateGroup(context.Context, string, string, []string) (string, error) {
+	return "group-id", nil
+}
+func (r *sessionRepoStub) UpdateGroup(context.Context, string, string, *string, *string) error {
+	return nil
+}
+func (r *sessionRepoStub) AddGroupMembers(context.Context, string, string, []string) error {
+	return nil
+}
+func (r *sessionRepoStub) RemoveGroupMember(context.Context, string, string, string) error {
+	return nil
+}
+func (r *sessionRepoStub) SetGroupAdmins(context.Context, string, string, []string, bool) error {
+	return nil
+}
 func (r *sessionRepoStub) RevokeSession(context.Context, string, time.Time) error {
 	if r.revokeErr != nil {
 		return r.revokeErr

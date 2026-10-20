@@ -17,6 +17,8 @@ var (
 	ErrUnauthorized   = errors.New("unauthorized")
 	ErrNotFound       = errors.New("not found")
 	ErrUnavailable    = errors.New("dependency unavailable")
+	ErrForbidden      = errors.New("forbidden")
+	ErrConflict       = errors.New("conflict")
 )
 
 type User struct{ ID, Phone, DisplayName string }
@@ -43,6 +45,12 @@ type Repository interface {
 	GetProfile(context.Context, string) (User, error)
 	SetDisplayName(context.Context, string, string) error
 	GetOrCreateDirectChat(context.Context, string, string) (string, error)
+	ListGroupChats(context.Context, string) ([]GroupChat, error)
+	CreateGroup(context.Context, string, string, []string) (string, error)
+	UpdateGroup(context.Context, string, string, *string, *string) error
+	AddGroupMembers(context.Context, string, string, []string) error
+	RemoveGroupMember(context.Context, string, string, string) error
+	SetGroupAdmins(context.Context, string, string, []string, bool) error
 	RevokeSession(context.Context, string, time.Time) error
 	SessionActive(context.Context, sessiontoken.Claims, time.Time) (bool, error)
 	ListDirectEvents(context.Context, string, int64, int) ([]SyncEvent, error)

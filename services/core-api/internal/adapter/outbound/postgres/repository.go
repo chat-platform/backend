@@ -126,6 +126,7 @@ func (r *Repository) GetOrCreateDirectChat(ctx context.Context, userID, phone st
 	}
 	return chatID, nil
 }
+
 func (r *Repository) RevokeSession(ctx context.Context, sessionID string, at time.Time) error {
 	_, err := r.pool.Exec(ctx, `UPDATE session SET revoked_at = COALESCE(revoked_at, $2) WHERE session_id = $1`, sessionID, at)
 	if err != nil {

@@ -66,6 +66,10 @@ func writeServiceError(c echo.Context, err error) error {
 		return writeError(c, http.StatusBadRequest, "invalid_request", "request is invalid")
 	case errors.Is(err, app.ErrUnauthorized):
 		return writeError(c, http.StatusUnauthorized, "unauthorized", "authentication failed")
+	case errors.Is(err, app.ErrForbidden):
+		return writeError(c, http.StatusForbidden, "forbidden", "operation is not allowed")
+	case errors.Is(err, app.ErrConflict):
+		return writeError(c, http.StatusConflict, "conflict", "operation conflicts with current group state")
 	case errors.Is(err, app.ErrNotFound):
 		return writeError(c, http.StatusNotFound, "not_found", "resource was not found")
 	case errors.Is(err, app.ErrUnavailable):
