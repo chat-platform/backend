@@ -33,14 +33,14 @@ func (r *OutboxRepository) ClaimBatch(ctx context.Context, outboxType string, ba
 		payloadExpr = "event.payload"
 	}
 	query := fmt.Sprintf(`WITH candidates AS (
-		SELECT outbox.id FROM %s AS outbox
+		SELECT outbox.id, %s AS payload FROM %s AS outbox
 		%s
 		WHERE outbox.dispatched_at IS NULL AND (outbox.claim_expiry IS NULL OR outbox.claim_expiry <= now())
 		ORDER BY outbox.id LIMIT $1 FOR UPDATE OF outbox SKIP LOCKED
 		)
 		UPDATE %s AS outbox SET claim_expiry = now() + $2 * interval '1 microsecond'
-		FROM candidates %s WHERE outbox.id = candidates.id
-		RETURNING outbox.id, outbox.device_id::text, %s`, table, groupJoin(outboxType), table, groupJoinAfter(outboxType), payloadExpr)
+		FROM candidates WHERE outbox.id = candidates.id
+		RETURNING outbox.id, outbox.device_id::text, candidates.payload`, payloadExpr, table, groupJoin(outboxType), table)
 	rows, err := tx.Query(ctx, query, batchSize, lease.Microseconds())
 	if err != nil {
 		return nil, fmt.Errorf("claim %s outbox rows: %w", outboxType, err)
@@ -144,5 +144,3 @@ func groupJoin(outboxType string) string {
 	}
 	return ""
 }
-
-func groupJoinAfter(outboxType string) string { return groupJoin(outboxType) }
