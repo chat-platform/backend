@@ -7,8 +7,8 @@ import (
 )
 
 type ChatRepository interface {
-	IsAuthorizedToSend(context.Context, string, string) (bool, error)
+	AuthorizedChatType(context.Context, string, string) (string, error)
 	ResolveMessageRecipients(context.Context, string) ([]domain.RecipientDevice, error)
-	EnqueueMessageEvent(context.Context, domain.SendMessage, []domain.RecipientDevice) (domain.MessageAck, error)
+	EnqueueMessageEvent(context.Context, string, domain.SendMessage, []domain.RecipientDevice) (domain.MessageAck, error)
 	MarkDelivered(context.Context, string, string, int64) error
 }

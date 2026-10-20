@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -13,21 +14,31 @@ import (
 
 type testOutbox struct {
 	events  []domain.OutboxEvent
-	marked  map[int64]domain.Route
+	marked  map[string]domain.Route
 	markErr error
 }
 
-func (o *testOutbox) ClaimBatch(context.Context, int, time.Duration) ([]domain.OutboxEvent, error) {
-	return o.events, nil
+func (o *testOutbox) ClaimBatch(_ context.Context, outboxType string, _ int, _ time.Duration) ([]domain.OutboxEvent, error) {
+	events := make([]domain.OutboxEvent, 0)
+	for _, event := range o.events {
+		typ := event.OutboxType
+		if typ == "" {
+			typ = "direct"
+		}
+		if typ == outboxType {
+			events = append(events, event)
+		}
+	}
+	return events, nil
 }
-func (o *testOutbox) MarkDispatched(_ context.Context, id int64, route domain.Route) error {
+func (o *testOutbox) MarkDispatched(_ context.Context, outboxType string, id int64, route domain.Route) error {
 	if o.markErr != nil {
 		return o.markErr
 	}
 	if o.marked == nil {
-		o.marked = make(map[int64]domain.Route)
+		o.marked = make(map[string]domain.Route)
 	}
-	o.marked[id] = route
+	o.marked[fmt.Sprintf("%s:%d", outboxType, id)] = route
 	return nil
 }
 
@@ -71,8 +82,20 @@ func TestRunOnceRoutesOnlineAndMarksOffline(t *testing.T) {
 	if publisher.calls != 1 {
 		t.Fatalf("publish calls=%d, want 1", publisher.calls)
 	}
-	if outbox.marked[1].To != domain.RouteWebSocket || outbox.marked[2].To != "" {
+	if outbox.marked["direct:1"].To != domain.RouteWebSocket || outbox.marked["direct:2"].To != "" {
 		t.Fatalf("marked routes=%+v", outbox.marked)
+	}
+}
+
+func TestRunOnceDispatchesGroupEventsWithGroupType(t *testing.T) {
+	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 1, OutboxType: "group", DeviceID: "online"}}}
+	publisher := &testPublisher{}
+	d := New(outbox, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "conn"}}}, publisher, OutboxOptions{BatchSize: 10, ClaimLease: time.Second}, quietLogger(t))
+	if count, err := d.RunOnce(context.Background()); err != nil || count != 1 {
+		t.Fatalf("RunOnce()=(%d,%v), want (1,nil)", count, err)
+	}
+	if len(publisher.events) != 1 || publisher.events[0].OutboxType != "group" || outbox.marked["group:1"].To != domain.RouteWebSocket {
+		t.Fatalf("published=%+v marked=%+v", publisher.events, outbox.marked)
 	}
 }
 
@@ -114,7 +137,7 @@ func TestRunOnceReportsMarkFailureAfterPublish(t *testing.T) {
 }
 
 func TestPublishThenMarkFailureCanRetrySameLogicalMessage(t *testing.T) {
-	event := domain.OutboxEvent{ID: 9, DeviceID: "online", Payload: []byte(`{"senderId":"sender-1","clientMsgId":"client-1"}`)}
+	event := domain.OutboxEvent{ID: 9, OutboxType: "direct", DeviceID: "online", Payload: []byte(`{"senderId":"sender-1","clientMsgId":"client-1"}`)}
 	outbox := &testOutbox{events: []domain.OutboxEvent{event}, markErr: errors.New("temporary postgres failure")}
 	publisher := &testPublisher{}
 	registry := testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}

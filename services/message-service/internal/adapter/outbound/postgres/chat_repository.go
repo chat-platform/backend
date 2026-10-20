@@ -34,19 +34,20 @@ type messagePayload struct {
 	TS          int64  `json:"ts"`
 }
 
-func (r *ChatRepository) IsAuthorizedToSend(ctx context.Context, chatID, senderID string) (bool, error) {
-	var allowed bool
+func (r *ChatRepository) AuthorizedChatType(ctx context.Context, chatID, senderID string) (string, error) {
+	var chatType string
 	err := r.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM chat c
-			JOIN chat_membership cm ON cm.chat_id = c.chat_id AND cm.user_id = $2
-			WHERE c.chat_id = $1 AND c.type = 'DIRECT' AND c.deleted_at IS NULL
-		)`, chatID, senderID).Scan(&allowed)
-	if err != nil {
-		return false, fmt.Errorf("check chat send authorization: %w", err)
+		SELECT c.type
+		FROM chat c
+		JOIN chat_membership cm ON cm.chat_id = c.chat_id AND cm.user_id = $2
+		WHERE c.chat_id = $1 AND c.deleted_at IS NULL`, chatID, senderID).Scan(&chatType)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
 	}
-	return allowed, nil
+	if err != nil {
+		return "", fmt.Errorf("check chat send authorization: %w", err)
+	}
+	return chatType, nil
 }
 
 func (r *ChatRepository) ResolveMessageRecipients(ctx context.Context, chatID string) ([]domain.RecipientDevice, error) {
@@ -82,10 +83,11 @@ func (r *ChatRepository) ResolveMessageRecipients(ctx context.Context, chatID st
 
 func (r *ChatRepository) EnqueueMessageEvent(
 	ctx context.Context,
+	chatType string,
 	message domain.SendMessage,
 	recipients []domain.RecipientDevice,
 ) (domain.MessageAck, error) {
-	if len(recipients) == 0 {
+	if len(recipients) == 0 && chatType != "GROUP" {
 		return domain.MessageAck{}, domain.ErrNoRecipients
 	}
 
@@ -106,6 +108,50 @@ func (r *ChatRepository) EnqueueMessageEvent(
 		return domain.MessageAck{}, fmt.Errorf("begin message event write transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	var currentType string
+	err = tx.QueryRow(ctx, `
+		SELECT c.type
+		FROM chat c
+		JOIN chat_membership cm ON cm.chat_id = c.chat_id AND cm.user_id = $2
+		WHERE c.chat_id = $1 AND c.deleted_at IS NULL
+		FOR UPDATE OF c`, message.ChatID, message.SenderID).Scan(&currentType)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && currentType != chatType) {
+		return domain.MessageAck{}, domain.ErrChatAccessDenied
+	}
+	if err != nil {
+		return domain.MessageAck{}, fmt.Errorf("recheck chat membership in message transaction: %w", err)
+	}
+	if currentType == "GROUP" {
+		var eventID int64
+		err = tx.QueryRow(ctx, `
+			INSERT INTO group_event (chat_id, sender_id, client_msg_id, event_type, payload, created_at)
+			VALUES ($1, $2, $3, 'NEW_MESSAGE', $4, to_timestamp($5::double precision / 1000))
+			ON CONFLICT (sender_id, client_msg_id) DO NOTHING
+			RETURNING event_id`, message.ChatID, message.SenderID, message.ClientMsgID, string(payload), timestampMS).Scan(&eventID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			var originalTimestamp int64
+			if err := tx.QueryRow(ctx, `SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint FROM group_event WHERE sender_id = $1 AND client_msg_id = $2`, message.SenderID, message.ClientMsgID).Scan(&originalTimestamp); err != nil {
+				return domain.MessageAck{}, fmt.Errorf("load existing group acknowledgement: %w", err)
+			}
+			return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: originalTimestamp}, nil
+		}
+		if err != nil {
+			return domain.MessageAck{}, fmt.Errorf("insert group event: %w", err)
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO group_outbox (event_id, recipient_id, device_id, created_at)
+			SELECT $1, cm.user_id, d.device_id, to_timestamp($2::double precision / 1000)
+			FROM chat_membership cm
+			JOIN device d ON d.user_id = cm.user_id AND d.revoked_at IS NULL
+			WHERE cm.chat_id = $3 AND d.device_id <> $4`, eventID, timestampMS, message.ChatID, message.DeviceID)
+		if err != nil {
+			return domain.MessageAck{}, fmt.Errorf("insert group outbox recipients: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return domain.MessageAck{}, fmt.Errorf("commit group message transaction: %w", err)
+		}
+		return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, nil
+	}
 
 	recipientIDs := make([]string, len(recipients))
 	deviceIDs := make([]string, len(recipients))
@@ -186,12 +232,18 @@ func (r *ChatRepository) findExistingMessageAck(
 }
 
 func (r *ChatRepository) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {
-	if outboxType != "direct" {
+	var query string
+	switch outboxType {
+	case "direct":
+		query = `UPDATE direct_outbox SET delivered_at = COALESCE(delivered_at, now()) WHERE id = $1 AND device_id = $2`
+	case "group":
+		query = `UPDATE group_outbox SET delivered_at = COALESCE(delivered_at, now()) WHERE id = $1 AND device_id = $2`
+	default:
 		return domain.ErrInvalidMessage
 	}
-	_, err := r.pool.Exec(ctx, `UPDATE direct_outbox SET delivered_at = COALESCE(delivered_at, now()) WHERE id = $1 AND device_id = $2`, outboxID, deviceID)
+	_, err := r.pool.Exec(ctx, query, outboxID, deviceID)
 	if err != nil {
-		return fmt.Errorf("mark direct outbox event delivered: %w", err)
+		return fmt.Errorf("mark %s outbox event delivered: %w", outboxType, err)
 	}
 	return nil
 }

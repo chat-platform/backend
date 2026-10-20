@@ -42,7 +42,8 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, `CREATE TABLE direct_outbox (id BIGINT PRIMARY KEY, device_id UUID NOT NULL, delivered_at TIMESTAMPTZ)`); err != nil {
+	if _, err := pool.Exec(ctx, `CREATE TABLE direct_outbox (id BIGINT PRIMARY KEY, device_id UUID NOT NULL, delivered_at TIMESTAMPTZ);
+	CREATE TABLE group_outbox (id BIGINT PRIMARY KEY, device_id UUID NOT NULL, delivered_at TIMESTAMPTZ)`); err != nil {
 		t.Fatal(err)
 	}
 	device := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -69,5 +70,23 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM direct_outbox WHERE id=7`).Scan(&delivered); err != nil || !delivered {
 		t.Fatalf("delivered=(%v,%v), want true", delivered, err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(id,device_id) VALUES (7,$1)`, device); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkDelivered(ctx, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "group", 7); err != nil {
+		t.Fatalf("wrong-device group receipt should be an idempotent no-op: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM group_outbox WHERE id=7`).Scan(&delivered); err != nil || delivered {
+		t.Fatalf("wrong-device group receipt changed row: delivered=(%v,%v)", delivered, err)
+	}
+	if err := repo.MarkDelivered(ctx, device, "group", 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkDelivered(ctx, device, "group", 7); err != nil {
+		t.Fatalf("duplicate group receipt should be idempotent: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM group_outbox WHERE id=7`).Scan(&delivered); err != nil || !delivered {
+		t.Fatalf("group delivered=(%v,%v), want true", delivered, err)
 	}
 }

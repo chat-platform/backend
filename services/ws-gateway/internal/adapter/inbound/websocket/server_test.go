@@ -294,7 +294,7 @@ func TestSyncReadyFlushesBufferedDeliveryToClient(t *testing.T) {
 	if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
 		t.Fatalf("auth ack=(%+v,%v)", authAck, err)
 	}
-	payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxID: 17, Content: "during sync"})
+	payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 17, Content: "during sync"})
 	if err := hub.Deliver(context.Background(), operations.connection.ConnID, wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: payload}); err != nil {
 		t.Fatal(err)
 	}

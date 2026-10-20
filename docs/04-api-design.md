@@ -95,7 +95,7 @@ Conventions:
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/sync?since=<cursor>` | Backfill missed events. |
+| `GET` | `/v1/sync?since_direct=<cursor>&since_group=<cursor>` | Backfill missed events. |
 | `GET` | `/v1/chats` | List chats. |
 
 Notes:
@@ -105,10 +105,12 @@ Notes:
 - `/profile/picture` stores a media ID from `/v1/media`; the binary
   itself goes through the media endpoint.
 - `/sync` is the catch-up path when WS frames are missed. (eg: when Phone was not online, etc)
-- The sync response contains `events` (`outboxId`, `eventType`, `payload`),
-  `nextCursor`, and `hasMore`. `since_direct` defaults to 0; `limit` defaults
-  to 100 and is capped at 500. The cursor is a global outbox ID filtered by
-  the authenticated device, not a contiguous per-device sequence.
+- Sync returns independent `direct` and `group` pages, each with `events`
+  (`outboxId`, `eventType`, `payload`), `nextCursor`, and `hasMore`.
+  `since_direct` and `since_group` default to 0. `limit` defaults to 100,
+  is capped at 500, and applies independently to each page. Each cursor is
+  its outbox table's global ID filtered by the authenticated device; the two
+  sequences are independent and are not contiguous per device.
 
 ## 4. WebSocket API
 <!-- define ws APIs here -->

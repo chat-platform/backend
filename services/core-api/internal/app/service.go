@@ -40,6 +40,11 @@ type SyncPage struct {
 	HasMore    bool        `json:"hasMore"`
 }
 
+type SyncResponse struct {
+	Direct SyncPage `json:"direct"`
+	Group  SyncPage `json:"group"`
+}
+
 type Repository interface {
 	CompleteOTP(context.Context, string, string, string, string, string, time.Time) (User, Device, Session, error)
 	GetProfile(context.Context, string) (User, error)
@@ -54,6 +59,7 @@ type Repository interface {
 	RevokeSession(context.Context, string, time.Time) error
 	SessionActive(context.Context, sessiontoken.Claims, time.Time) (bool, error)
 	ListDirectEvents(context.Context, string, int64, int) ([]SyncEvent, error)
+	ListGroupEvents(context.Context, string, int64, int) ([]SyncEvent, error)
 }
 
 type SessionCache interface {
@@ -182,23 +188,36 @@ func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string,
 	return s.repo.GetOrCreateDirectChat(ctx, userID, phone)
 }
 
-func (s *Service) Sync(ctx context.Context, claims sessiontoken.Claims, cursor int64, limit int) (SyncPage, error) {
-	if cursor < 0 || limit < 1 || limit > 500 {
-		return SyncPage{}, ErrInvalidRequest
+func (s *Service) Sync(ctx context.Context, claims sessiontoken.Claims, directCursor, groupCursor int64, limit int) (SyncResponse, error) {
+	if directCursor < 0 || groupCursor < 0 || limit < 1 || limit > 500 {
+		return SyncResponse{}, ErrInvalidRequest
 	}
-	events, err := s.repo.ListDirectEvents(ctx, claims.DeviceID, cursor, limit+1)
+	directEvents, err := s.repo.ListDirectEvents(ctx, claims.DeviceID, directCursor, limit+1)
 	if err != nil {
-		return SyncPage{}, ErrUnavailable
+		return SyncResponse{}, ErrUnavailable
 	}
-	page := SyncPage{Events: events, NextCursor: cursor}
+	groupEvents, err := s.repo.ListGroupEvents(ctx, claims.DeviceID, groupCursor, limit+1)
+	if err != nil {
+		return SyncResponse{}, ErrUnavailable
+	}
+	return SyncResponse{
+		Direct: makeSyncPage(directEvents, directCursor, limit),
+		Group:  makeSyncPage(groupEvents, groupCursor, limit),
+	}, nil
+}
+
+func makeSyncPage(events []SyncEvent, cursor int64, limit int) SyncPage {
+	page := SyncPage{Events: make([]SyncEvent, 0, min(len(events), limit)), NextCursor: cursor}
 	if len(events) > limit {
 		page.HasMore = true
-		page.Events = events[:limit]
+		page.Events = append(page.Events, events[:limit]...)
+	} else {
+		page.Events = append(page.Events, events...)
 	}
 	if len(page.Events) > 0 {
 		page.NextCursor = page.Events[len(page.Events)-1].OutboxID
 	}
-	return page, nil
+	return page
 }
 
 func (s *Service) Logout(ctx context.Context, claims sessiontoken.Claims) error {
