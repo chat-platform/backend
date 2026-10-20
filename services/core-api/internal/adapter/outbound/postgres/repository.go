@@ -143,12 +143,9 @@ func (r *Repository) ListGroupChats(ctx context.Context, userID string) ([]app.G
 	chats := make([]app.GroupChat, 0)
 	for rows.Next() {
 		var chat app.GroupChat
-		var name, picture pgtype.Text
-		if err := rows.Scan(&chat.ID, &name, &picture, &chat.UpdatedAt); err != nil {
+		var picture pgtype.Text
+		if err := rows.Scan(&chat.ID, &chat.Name, &picture, &chat.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan group chat: %w", err)
-		}
-		if name.Valid {
-			chat.Name = &name.String
 		}
 		if picture.Valid {
 			chat.ProfilePic = &picture.String

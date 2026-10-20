@@ -42,7 +42,7 @@ type SyncPage struct {
 
 type GroupChat struct {
 	ID         string    `json:"chatId"`
-	Name       *string   `json:"name"`
+	Name       string    `json:"name"`
 	ProfilePic *string   `json:"profilePic"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 }

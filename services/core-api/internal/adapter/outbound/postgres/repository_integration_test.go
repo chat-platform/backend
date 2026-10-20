@@ -53,7 +53,7 @@ func testRepository(t *testing.T) (*Repository, *pgxpool.Pool) {
 CREATE TABLE users(user_id UUID PRIMARY KEY, phone TEXT NOT NULL UNIQUE, display_name TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE device(device_id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(user_id),platform TEXT NOT NULL,is_primary BOOLEAN NOT NULL DEFAULT true,device_name TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),last_seen_at TIMESTAMPTZ,revoked_at TIMESTAMPTZ);
 CREATE TABLE session(session_id UUID PRIMARY KEY,device_id UUID NOT NULL REFERENCES device(device_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),expires_at TIMESTAMPTZ NOT NULL,revoked_at TIMESTAMPTZ);
-CREATE TABLE chat(chat_id UUID PRIMARY KEY,type TEXT NOT NULL,name TEXT,profile_pic TEXT,created_by UUID REFERENCES users(user_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),deleted_at TIMESTAMPTZ);
+CREATE TABLE chat(chat_id UUID PRIMARY KEY,type TEXT NOT NULL,name TEXT,profile_pic TEXT,created_by UUID REFERENCES users(user_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),deleted_at TIMESTAMPTZ,CHECK (type <> 'GROUP' OR (name IS NOT NULL AND length(btrim(name)) > 0)));
 CREATE TABLE chat_membership(chat_id UUID NOT NULL REFERENCES chat(chat_id),user_id UUID NOT NULL REFERENCES users(user_id),role TEXT NOT NULL DEFAULT 'member',joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),member_tag TEXT,PRIMARY KEY(chat_id,user_id));
 CREATE TABLE direct_outbox(id BIGSERIAL PRIMARY KEY,device_id UUID NOT NULL,event_type TEXT NOT NULL,payload TEXT NOT NULL);`)
 	if err != nil {
@@ -177,7 +177,7 @@ func TestCreateAndManageGroupMembershipTransactionally(t *testing.T) {
 		t.Fatalf("last admin self-leave error=%v, want conflict", err)
 	}
 	chats, err := repo.ListGroupChats(ctx, member)
-	if err != nil || len(chats) != 1 || chats[0].ID != groupID || chats[0].Name == nil || *chats[0].Name != name || chats[0].ProfilePic == nil || *chats[0].ProfilePic != picture {
+	if err != nil || len(chats) != 1 || chats[0].ID != groupID || chats[0].Name != name || chats[0].ProfilePic == nil || *chats[0].ProfilePic != picture {
 		t.Fatalf("listed groups=%+v error=%v", chats, err)
 	}
 }
@@ -220,7 +220,7 @@ func TestListGroupChatsExcludesDirectDeletedAndOtherUsersChats(t *testing.T) {
 		t.Fatal(err)
 	}
 	chats, err := repo.ListGroupChats(ctx, user)
-	if err != nil || len(chats) != 1 || chats[0].ID != visible || chats[0].Name == nil || *chats[0].Name != "visible" {
+	if err != nil || len(chats) != 1 || chats[0].ID != visible || chats[0].Name != "visible" {
 		t.Fatalf("groups=%+v error=%v", chats, err)
 	}
 	otherChats, err := repo.ListGroupChats(ctx, uuid.NewString())
@@ -228,6 +228,21 @@ func TestListGroupChatsExcludesDirectDeletedAndOtherUsersChats(t *testing.T) {
 		t.Fatalf("unrelated user's groups=%+v error=%v", otherChats, err)
 	}
 }
+
+func TestChatNameConstraintOnlyRequiresNamesForGroups(t *testing.T) {
+	_, pool := testRepository(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO chat(chat_id,type,name) VALUES($1,'DIRECT',NULL)`, uuid.NewString()); err != nil {
+		t.Fatalf("unnamed direct chat should be allowed: %v", err)
+	}
+	for _, name := range []*string{nil, ptrString("  ")} {
+		if _, err := pool.Exec(ctx, `INSERT INTO chat(chat_id,type,name) VALUES($1,'GROUP',$2)`, uuid.NewString(), name); err == nil {
+			t.Fatalf("group name %v should violate required-name constraint", name)
+		}
+	}
+}
+
+func ptrString(value string) *string { return &value }
 
 func TestListDirectEventsUsesDeviceAndCursorInOrder(t *testing.T) {
 	repo, pool := testRepository(t)
