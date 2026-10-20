@@ -17,6 +17,7 @@ import (
 type ChatOperations interface {
 	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, string, string, int64) error
+	MarkRead(context.Context, domain.ReadReceipt) error
 }
 
 type Server struct {
@@ -98,4 +99,32 @@ func (s *Server) MarkDelivered(ctx context.Context, request *messagev1.MarkDeliv
 		return nil, status.Error(codes.Internal, "could not mark event delivered")
 	}
 	return &messagev1.MarkDeliveredResponse{}, nil
+}
+
+func (s *Server) MarkRead(ctx context.Context, request *messagev1.MarkReadRequest) (*messagev1.MarkReadResponse, error) {
+	if request == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	if err := s.validator.Validate(request); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	clientMsgID, err := uuid.Parse(request.GetClientMsgId())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "client_msg_id must be a valid UUID")
+	}
+	err = s.operations.MarkRead(ctx, domain.ReadReceipt{
+		ReaderID: request.GetReaderUserId(), ChatID: request.GetChatId(), SenderID: request.GetSenderId(),
+		ClientMsgID: clientMsgID.String(), ReadAt: request.GetReadAt(),
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidMessage) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		if errors.Is(err, domain.ErrChatAccessDenied) {
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+		}
+		s.logger.Error(ctx, "could not record read receipt", "error", err, "chat_id", request.GetChatId(), "sender_id", request.GetSenderId())
+		return nil, status.Error(codes.Internal, "could not record read receipt")
+	}
+	return &messagev1.MarkReadResponse{}, nil
 }

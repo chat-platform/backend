@@ -59,3 +59,10 @@ func (s *ChatOperations) MarkDelivered(ctx context.Context, deviceID string, out
 	}
 	return s.chatRepository.MarkDelivered(ctx, deviceID, outboxType, outboxID)
 }
+
+func (s *ChatOperations) MarkRead(ctx context.Context, receipt domain.ReadReceipt) error {
+	if receipt.ReaderID == "" || receipt.ChatID == "" || receipt.SenderID == "" || receipt.ClientMsgID == "" || receipt.ReadAt <= 0 {
+		return domain.ErrInvalidMessage
+	}
+	return s.chatRepository.MarkRead(ctx, receipt)
+}

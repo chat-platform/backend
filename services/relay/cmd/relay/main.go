@@ -46,14 +46,18 @@ func main() {
 	}
 	outboxRepository := postgresadapter.NewOutboxRepository(pool)
 	dispatcher := app.New(outboxRepository, redisadapter.NewRegistry(rc), redisadapter.NewPublisher(rc), app.OutboxOptions{
-		BatchSize: cfg.Outbox.BatchSize, ClaimLease: cfg.Outbox.ClaimLease,
+		BatchSize: cfg.Outbox.BatchSize, RetryBatchSize: cfg.Retry.BatchSize, ClaimLease: cfg.Outbox.ClaimLease,
 	}, logger.With("component", "dispatcher"))
 	logger.Info(ctx, "relay started", "workers", cfg.Workers.Count, "batch_size", cfg.Outbox.BatchSize, "poll_interval", cfg.Workers.PollInterval.String(), "claim_lease", cfg.Outbox.ClaimLease.String())
 	var workers sync.WaitGroup
-	workers.Add(cfg.Workers.Count + 1)
+	workers.Add(cfg.Workers.Count + 2)
 	go func() {
 		defer workers.Done()
 		runCleanupWorker(ctx, outboxRepository, logger.With("component", "outbox_cleanup"))
+	}()
+	go func() {
+		defer workers.Done()
+		runRetryWorker(ctx, cfg.Retry.Interval, dispatcher, logger.With("component", "retry"))
 	}()
 	for workerID := 1; workerID <= cfg.Workers.Count; workerID++ {
 		go func(id int) {
@@ -65,6 +69,31 @@ func main() {
 	logger.Info(context.Background(), "relay stopping", "workers", cfg.Workers.Count)
 	workers.Wait()
 	logger.Info(context.Background(), "relay stopped")
+}
+
+type retryDispatcher interface {
+	RetryOnce(context.Context) (int, error)
+}
+
+func runRetryWorker(ctx context.Context, interval time.Duration, dispatcher retryDispatcher, logger logging.Logger) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	logger.Info(ctx, "relay retry worker started", "interval", interval.String())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			count, err := dispatcher.RetryOnce(ctx)
+			if err != nil {
+				logger.Error(ctx, "relay retry iteration failed", "error", err)
+				continue
+			}
+			if count > 0 {
+				logger.Info(ctx, "relay retry iteration completed", "rows_retried", count)
+			}
+		}
+	}
 }
 
 type outboxCleaner interface {

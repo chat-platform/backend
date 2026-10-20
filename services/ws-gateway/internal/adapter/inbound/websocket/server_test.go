@@ -30,6 +30,8 @@ type fakeOperations struct {
 	delivered       []int64
 	deliveredCh     chan struct{}
 	deliveredDevice string
+	readReceipt     wsframe.ReadReceiptPayload
+	readCh          chan struct{}
 }
 
 func (f *fakeOperations) Register(_ context.Context, identity domain.Identity, connID string) (domain.Connection, error) {
@@ -79,6 +81,13 @@ func (f *fakeOperations) MarkDelivered(_ context.Context, identity domain.Identi
 	f.deliveredDevice = identity.DeviceID
 	if f.deliveredCh != nil {
 		close(f.deliveredCh)
+	}
+	return nil
+}
+func (f *fakeOperations) MarkRead(_ context.Context, _ domain.Identity, chatID, senderID, clientMsgID string, readAt int64) error {
+	f.readReceipt = wsframe.ReadReceiptPayload{ChatID: chatID, SenderID: senderID, ClientMsgID: clientMsgID, ReadAt: readAt}
+	if f.readCh != nil {
+		close(f.readCh)
 	}
 	return nil
 }
@@ -271,6 +280,49 @@ func TestDeliveryReceiptIsForwardedToMessageService(t *testing.T) {
 	if len(operations.delivered) != 1 || operations.delivered[0] != 42 || operations.deliveredDevice != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
 		t.Fatalf("delivery receipts=%v device=%q", operations.delivered, operations.deliveredDevice)
 	}
+}
+
+func TestReadReceiptIsForwardedWithAuthenticatedIdentity(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := &fakeOperations{readCh: make(chan struct{})}
+	server := httptest.NewServer(NewServer(operations, logger, NewHub()))
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	var authAck wsframe.Envelope
+	if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
+		t.Fatalf("auth ack=(%+v,%v)", authAck, err)
+	}
+	payload := wsframe.ReadReceiptPayload{ChatID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", SenderID: "22222222-2222-4222-8222-222222222222", ClientMsgID: "0199d628-39d0-7000-8000-000000000001", ReadAt: 1770000000123}
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeReceiptRead, Payload: mustJSON(t, payload)}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-operations.readCh:
+	case <-time.After(time.Second):
+		t.Fatal("read receipt was not forwarded")
+	}
+	if operations.readReceipt != payload {
+		t.Fatalf("read receipt=%+v, want %+v", operations.readReceipt, payload)
+	}
+}
+
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestSyncReadyFlushesBufferedDeliveryToClient(t *testing.T) {

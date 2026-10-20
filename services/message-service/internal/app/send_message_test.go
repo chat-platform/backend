@@ -39,6 +39,7 @@ func (r *chatRepositoryStub) MarkDelivered(_ context.Context, _, outboxType stri
 	r.deliveredType = outboxType
 	return nil
 }
+func (r *chatRepositoryStub) MarkRead(context.Context, domain.ReadReceipt) error { return nil }
 
 func TestGroupSendAllowsNoEchoRecipientsAndMarksGroupDelivery(t *testing.T) {
 	logger, err := logging.New(io.Discard, logging.Config{})

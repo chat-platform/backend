@@ -12,4 +12,5 @@ type ChatRepository interface {
 	EnqueueDirectMessageEvent(context.Context, domain.SendMessage, []domain.RecipientDevice) (domain.MessageAck, error)
 	EnqueueGroupMessageEvent(context.Context, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, string, string, int64) error
+	MarkRead(context.Context, domain.ReadReceipt) error
 }

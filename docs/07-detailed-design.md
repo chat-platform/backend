@@ -236,8 +236,9 @@ loop:
            WHERE routed_to = 'WS'
              AND dispatched_at IS NOT NULL
              AND delivered_at IS NULL
-             AND dispatched_at < now() - retry_threshold
-             AND dispatched_at > now() - retry_window
+             AND attempt_count < 10
+             AND dispatched_at <= now() - interval '30 seconds' * 2^(attempt_count - 1)
+             AND (claim_expiry IS NULL OR claim_expiry <= now())
            ORDER BY id
            LIMIT batch_size
            FOR UPDATE SKIP LOCKED
@@ -245,6 +246,7 @@ loop:
     for each row:
         ws_node = registry.lookup(row.device_id)
         if ws_node:
+            increment attempt_count and update dispatched_at
             XADD ws:deliver:{ws_node} * <event>
 
     sleep(retry_interval)
@@ -255,13 +257,12 @@ Key points:
 - **Only `routed_to = 'WS'`.** Rows routed to `notif:stream` (offline
   devices) are excluded — those recover via sync on reconnect, and
   retrying them would flood the notification stream.
-- **`retry_threshold`** — how long a row must be dispatched-and-
-  undelivered before it's considered stuck. Must exceed the normal
-  delivery round-trip (Gateway send → client ack → Message Service →
-  `delivered_at`), otherwise healthy in-flight rows get retried.
-- **`retry_window`** — how far back the scan looks. Rows dispatched
-  longer ago than this are outside the window; they're either
-  abandoned or handled by another mechanism.
+- **Backoff** — the initial WS dispatch is attempt 1. Retries wait 30s,
+  60s, 120s, and so on, with at most 10 attempts total.
+- **Claiming** — Relay uses a bounded `FOR UPDATE SKIP LOCKED` claim and
+  the existing lease so concurrent workers do not claim the same row.
+- **Exhaustion** — rows at attempt 10 remain in the outbox for inspection
+  and are excluded from automatic retries and age-based cleanup.
 - **`delivered_at IS NULL`** — the row wasn't acked by the client.
 - **Idempotent re-dispatch.** The client dedupes logical messages on
   `(senderId, clientMsgId)`. A retry that arrives after the message was actually delivered is a
@@ -277,8 +278,9 @@ If the device is offline at retry time, `registry.lookup` returns
 nothing and the row is skipped. It will be picked up on the device's
 next reconnect-sync.
 
-TODO: decide `retry_threshold`, `retry_window`, `retry_interval`, and
-the scan's `batch_size`.
+The retry worker scans every 10 seconds in batches of 100 by default;
+both settings are configurable. Eligibility uses `dispatched_at` and
+`attempt_count`, so old undelivered events remain eligible after backoff.
 
 ### 2.5 Duplicate delivery
 

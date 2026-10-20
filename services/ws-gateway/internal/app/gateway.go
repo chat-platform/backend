@@ -91,3 +91,10 @@ func (g *Gateway) MarkDelivered(ctx context.Context, identity domain.Identity, o
 	}
 	return g.messages.MarkDelivered(ctx, identity.DeviceID, outboxType, outboxID)
 }
+
+func (g *Gateway) MarkRead(ctx context.Context, identity domain.Identity, chatID, senderID, clientMsgID string, readAt int64) error {
+	if strings.TrimSpace(chatID) == "" || strings.TrimSpace(senderID) == "" || strings.TrimSpace(clientMsgID) == "" || readAt <= 0 {
+		return domain.ErrInvalidMessage
+	}
+	return g.messages.MarkRead(ctx, identity.DeviceID, identity.UserID, chatID, senderID, clientMsgID, readAt)
+}

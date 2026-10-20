@@ -15,6 +15,7 @@ type Config struct {
 	RedisAddr   string
 	Workers     WorkerSettings
 	Outbox      OutboxSettings
+	Retry       RetrySettings
 }
 
 type WorkerSettings struct {
@@ -25,6 +26,11 @@ type WorkerSettings struct {
 type OutboxSettings struct {
 	BatchSize  int
 	ClaimLease time.Duration
+}
+
+type RetrySettings struct {
+	Interval  time.Duration
+	BatchSize int
 }
 
 func FromEnv(logger logging.Logger) (Config, error) {
@@ -60,11 +66,28 @@ func FromEnv(logger logging.Logger) (Config, error) {
 			logger.Warn(context.Background(), "invalid relay claim lease; using default", "value", value)
 		}
 	}
+	retryInterval := 10 * time.Second
+	if value := os.Getenv("RELAY_RETRY_INTERVAL"); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			retryInterval = parsed
+		} else {
+			logger.Warn(context.Background(), "invalid relay retry interval; using default", "value", value)
+		}
+	}
+	retryBatch := 100
+	if value := os.Getenv("RELAY_RETRY_BATCH_SIZE"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			retryBatch = parsed
+		} else {
+			logger.Warn(context.Background(), "invalid relay retry batch size; using default", "value", value)
+		}
+	}
 	return Config{
 		PostgresDSN: getenv(logger, "POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"),
 		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"),
 		Workers:     WorkerSettings{Count: workers, PollInterval: poll},
 		Outbox:      OutboxSettings{BatchSize: batch, ClaimLease: lease},
+		Retry:       RetrySettings{Interval: retryInterval, BatchSize: retryBatch},
 	}, nil
 }
 
