@@ -26,24 +26,31 @@ func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMes
 		return domain.MessageAck{}, domain.ErrChatAccessDenied
 	}
 
-	allRecipients, err := s.chatRepository.ResolveMessageRecipients(ctx, command.ChatID)
-	if err != nil {
-		return domain.MessageAck{}, err
-	}
-	recipients := make([]domain.RecipientDevice, 0, len(allRecipients))
-	for _, recipient := range allRecipients {
-		if recipient.DeviceID != command.DeviceID {
-			recipients = append(recipients, recipient)
+	switch chatType {
+	case "DIRECT":
+		allRecipients, err := s.chatRepository.ResolveMessageRecipients(ctx, command.ChatID)
+		if err != nil {
+			return domain.MessageAck{}, err
 		}
+		recipients := make([]domain.RecipientDevice, 0, len(allRecipients))
+		for _, recipient := range allRecipients {
+			if recipient.DeviceID != command.DeviceID {
+				recipients = append(recipients, recipient)
+			}
+		}
+		if len(recipients) == 0 {
+			s.logger.Warn(ctx, "no recipient devices remain after excluding sender device",
+				"chat_id", command.ChatID,
+				"resolved_devices", len(allRecipients),
+			)
+			return domain.MessageAck{}, domain.ErrNoRecipients
+		}
+		return s.chatRepository.EnqueueDirectMessageEvent(ctx, command, recipients)
+	case "GROUP":
+		return s.chatRepository.EnqueueGroupMessageEvent(ctx, command)
+	default:
+		return domain.MessageAck{}, domain.ErrChatAccessDenied
 	}
-	if len(recipients) == 0 && chatType != "GROUP" {
-		s.logger.Warn(ctx, "no recipient devices remain after excluding sender device",
-			"chat_id", command.ChatID,
-			"resolved_devices", len(allRecipients),
-		)
-		return domain.MessageAck{}, domain.ErrNoRecipients
-	}
-	return s.chatRepository.EnqueueMessageEvent(ctx, chatType, command, recipients)
 }
 
 func (s *ChatOperations) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {

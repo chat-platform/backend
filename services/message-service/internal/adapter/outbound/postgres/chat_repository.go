@@ -81,26 +81,17 @@ func (r *ChatRepository) ResolveMessageRecipients(ctx context.Context, chatID st
 	return recipients, nil
 }
 
-func (r *ChatRepository) EnqueueMessageEvent(
+func (r *ChatRepository) EnqueueDirectMessageEvent(
 	ctx context.Context,
-	chatType string,
 	message domain.SendMessage,
 	recipients []domain.RecipientDevice,
 ) (domain.MessageAck, error) {
-	if len(recipients) == 0 && chatType != "GROUP" {
+	if len(recipients) == 0 {
 		return domain.MessageAck{}, domain.ErrNoRecipients
 	}
-
-	timestampMS := time.Now().UnixMilli()
-	payload, err := json.Marshal(messagePayload{
-		ChatID:      message.ChatID,
-		SenderID:    message.SenderID,
-		ClientMsgID: message.ClientMsgID,
-		Content:     message.Content,
-		TS:          timestampMS,
-	})
+	timestampMS, payload, err := encodeMessagePayload(message)
 	if err != nil {
-		return domain.MessageAck{}, fmt.Errorf("encode message payload: %w", err)
+		return domain.MessageAck{}, err
 	}
 
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
@@ -108,50 +99,6 @@ func (r *ChatRepository) EnqueueMessageEvent(
 		return domain.MessageAck{}, fmt.Errorf("begin message event write transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	var currentType string
-	err = tx.QueryRow(ctx, `
-		SELECT c.type
-		FROM chat c
-		JOIN chat_membership cm ON cm.chat_id = c.chat_id AND cm.user_id = $2
-		WHERE c.chat_id = $1 AND c.deleted_at IS NULL
-		FOR UPDATE OF c`, message.ChatID, message.SenderID).Scan(&currentType)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && currentType != chatType) {
-		return domain.MessageAck{}, domain.ErrChatAccessDenied
-	}
-	if err != nil {
-		return domain.MessageAck{}, fmt.Errorf("recheck chat membership in message transaction: %w", err)
-	}
-	if currentType == "GROUP" {
-		var eventID int64
-		err = tx.QueryRow(ctx, `
-			INSERT INTO group_event (chat_id, sender_id, client_msg_id, event_type, payload, created_at)
-			VALUES ($1, $2, $3, 'NEW_MESSAGE', $4, to_timestamp($5::double precision / 1000))
-			ON CONFLICT (sender_id, client_msg_id) DO NOTHING
-			RETURNING event_id`, message.ChatID, message.SenderID, message.ClientMsgID, string(payload), timestampMS).Scan(&eventID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			var originalTimestamp int64
-			if err := tx.QueryRow(ctx, `SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint FROM group_event WHERE sender_id = $1 AND client_msg_id = $2`, message.SenderID, message.ClientMsgID).Scan(&originalTimestamp); err != nil {
-				return domain.MessageAck{}, fmt.Errorf("load existing group acknowledgement: %w", err)
-			}
-			return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: originalTimestamp}, nil
-		}
-		if err != nil {
-			return domain.MessageAck{}, fmt.Errorf("insert group event: %w", err)
-		}
-		_, err = tx.Exec(ctx, `
-			INSERT INTO group_outbox (event_id, recipient_id, device_id, created_at)
-			SELECT $1, cm.user_id, d.device_id, to_timestamp($2::double precision / 1000)
-			FROM chat_membership cm
-			JOIN device d ON d.user_id = cm.user_id AND d.revoked_at IS NULL
-			WHERE cm.chat_id = $3 AND d.device_id <> $4`, eventID, timestampMS, message.ChatID, message.DeviceID)
-		if err != nil {
-			return domain.MessageAck{}, fmt.Errorf("insert group outbox recipients: %w", err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return domain.MessageAck{}, fmt.Errorf("commit group message transaction: %w", err)
-		}
-		return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, nil
-	}
 
 	recipientIDs := make([]string, len(recipients))
 	deviceIDs := make([]string, len(recipients))
@@ -199,6 +146,62 @@ func (r *ChatRepository) EnqueueMessageEvent(
 		ClientMsgID: message.ClientMsgID,
 		TimestampMS: timestampMS,
 	}, nil
+}
+
+func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message domain.SendMessage) (domain.MessageAck, error) {
+	timestampMS, payload, err := encodeMessagePayload(message)
+	if err != nil {
+		return domain.MessageAck{}, err
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return domain.MessageAck{}, fmt.Errorf("begin group message write transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var eventID int64
+	err = tx.QueryRow(ctx, `
+		INSERT INTO group_event (chat_id, sender_id, client_msg_id, event_type, payload, created_at)
+		VALUES ($1, $2, $3, 'NEW_MESSAGE', $4, to_timestamp($5::double precision / 1000))
+		ON CONFLICT (sender_id, client_msg_id) DO NOTHING
+		RETURNING event_id`, message.ChatID, message.SenderID, message.ClientMsgID, string(payload), timestampMS).Scan(&eventID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var originalTimestamp int64
+		if err := tx.QueryRow(ctx, `SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint FROM group_event WHERE sender_id = $1 AND client_msg_id = $2`, message.SenderID, message.ClientMsgID).Scan(&originalTimestamp); err != nil {
+			return domain.MessageAck{}, fmt.Errorf("load existing group acknowledgement: %w", err)
+		}
+		return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: originalTimestamp}, nil
+	}
+	if err != nil {
+		return domain.MessageAck{}, fmt.Errorf("insert group event: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO group_outbox (event_id, recipient_id, device_id, created_at)
+		SELECT $1, cm.user_id, d.device_id, to_timestamp($2::double precision / 1000)
+		FROM chat_membership cm
+		JOIN device d ON d.user_id = cm.user_id AND d.revoked_at IS NULL
+		WHERE cm.chat_id = $3 AND d.device_id <> $4`, eventID, timestampMS, message.ChatID, message.DeviceID)
+	if err != nil {
+		return domain.MessageAck{}, fmt.Errorf("insert group outbox recipients: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.MessageAck{}, fmt.Errorf("commit group message transaction: %w", err)
+	}
+	return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, nil
+}
+
+func encodeMessagePayload(message domain.SendMessage) (int64, []byte, error) {
+	timestampMS := time.Now().UnixMilli()
+	payload, err := json.Marshal(messagePayload{
+		ChatID:      message.ChatID,
+		SenderID:    message.SenderID,
+		ClientMsgID: message.ClientMsgID,
+		Content:     message.Content,
+		TS:          timestampMS,
+	})
+	if err != nil {
+		return 0, nil, fmt.Errorf("encode message payload: %w", err)
+	}
+	return timestampMS, payload, nil
 }
 
 func (r *ChatRepository) findExistingMessageAck(

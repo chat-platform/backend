@@ -100,8 +100,12 @@ func (r *CachedChatRepository) ResolveMessageRecipients(ctx context.Context, cha
 	return recipients, nil
 }
 
-func (r *CachedChatRepository) EnqueueMessageEvent(ctx context.Context, chatType string, message domain.SendMessage, recipients []domain.RecipientDevice) (domain.MessageAck, error) {
-	return r.store.EnqueueMessageEvent(ctx, chatType, message, recipients)
+func (r *CachedChatRepository) EnqueueDirectMessageEvent(ctx context.Context, message domain.SendMessage, recipients []domain.RecipientDevice) (domain.MessageAck, error) {
+	return r.store.EnqueueDirectMessageEvent(ctx, message, recipients)
+}
+
+func (r *CachedChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message domain.SendMessage) (domain.MessageAck, error) {
+	return r.store.EnqueueGroupMessageEvent(ctx, message)
 }
 
 func (r *CachedChatRepository) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {
