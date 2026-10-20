@@ -72,11 +72,19 @@ func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
 	id := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "old retry")
-	_, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS', dispatched_at=now()-interval '31 seconds', created_at=now()-interval '60 days', attempt_count=1 WHERE id=$1`, id)
+	_, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS', dispatched_at=now()-interval '23 seconds', created_at=now()-interval '60 days', attempt_count=1 WHERE id=$1`, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	events, err := repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("retry before minimum jittered delay=(%+v,%v), want no rows", events, err)
+	}
+	_, err = pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS', dispatched_at=now()-interval '37 seconds', created_at=now()-interval '60 days', attempt_count=1 WHERE id=$1`, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err = repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
 	if err != nil || len(events) != 1 || events[0].ID != id {
 		t.Fatalf("first retry claim=(%+v,%v)", events, err)
 	}
@@ -91,12 +99,12 @@ func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
 	if attempts != 2 || time.Since(dispatched) > time.Second {
 		t.Fatalf("after retry attempt_count=%d dispatched_at=%v", attempts, dispatched)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET dispatched_at=now()-interval '61 seconds' WHERE id=$1`, id); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET dispatched_at=now()-interval '73 seconds' WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
 	events, err = repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
 	if err != nil || len(events) != 1 {
-		t.Fatalf("second retry should be eligible after 60s: events=%+v err=%v", events, err)
+		t.Fatalf("second retry should be eligible after maximum jittered delay: events=%+v err=%v", events, err)
 	}
 	if err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
 		t.Fatal(err)
@@ -114,7 +122,7 @@ func TestRetryClaimsDirectAndGroupExclusively(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
 	id := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "direct")
-	_, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS',dispatched_at=now()-interval '31 seconds',attempt_count=1 WHERE id=$1`, id)
+	_, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS',dispatched_at=now()-interval '37 seconds',attempt_count=1 WHERE id=$1`, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +131,7 @@ func TestRetryClaimsDirectAndGroupExclusively(t *testing.T) {
 		t.Fatal(err)
 	}
 	var groupID int64
-	if err := pool.QueryRow(ctx, `INSERT INTO group_outbox(event_id,device_id,routed_to,dispatched_at,attempt_count) VALUES ($1,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','WS',now()-interval '31 seconds',1) RETURNING id`, eventID).Scan(&groupID); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO group_outbox(event_id,device_id,routed_to,dispatched_at,attempt_count) VALUES ($1,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','WS',now()-interval '37 seconds',1) RETURNING id`, eventID).Scan(&groupID); err != nil {
 		t.Fatal(err)
 	}
 	directRows, err := repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)

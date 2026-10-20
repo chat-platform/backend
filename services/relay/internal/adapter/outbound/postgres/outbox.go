@@ -109,7 +109,7 @@ func (r *OutboxRepository) ClaimRetryBatch(ctx context.Context, outboxType strin
 		SELECT outbox.id, %s AS payload FROM %s AS outbox %s
 		WHERE outbox.routed_to='WS' AND outbox.dispatched_at IS NOT NULL
 		AND outbox.delivered_at IS NULL AND outbox.attempt_count < 10
-		AND outbox.dispatched_at <= now() - interval '30 seconds' * power(2, outbox.attempt_count - 1)
+		AND outbox.dispatched_at <= now() - interval '30 seconds' * power(2, outbox.attempt_count - 1) * (0.8 + random() * 0.4)
 		AND (outbox.claim_expiry IS NULL OR outbox.claim_expiry <= now())
 		ORDER BY outbox.dispatched_at, outbox.id LIMIT $1 FOR UPDATE OF outbox SKIP LOCKED
 	)

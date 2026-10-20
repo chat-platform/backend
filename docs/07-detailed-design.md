@@ -237,7 +237,7 @@ loop:
              AND dispatched_at IS NOT NULL
              AND delivered_at IS NULL
              AND attempt_count < 10
-             AND dispatched_at <= now() - interval '30 seconds' * 2^(attempt_count - 1)
+             AND dispatched_at <= now() - interval '30 seconds' * 2^(attempt_count - 1) * (0.8 + random() * 0.4)
              AND (claim_expiry IS NULL OR claim_expiry <= now())
            ORDER BY id
            LIMIT batch_size
@@ -257,8 +257,9 @@ Key points:
 - **Only `routed_to = 'WS'`.** Rows routed to `notif:stream` (offline
   devices) are excluded — those recover via sync on reconnect, and
   retrying them would flood the notification stream.
-- **Backoff** — the initial WS dispatch is attempt 1. Retries wait 30s,
-  60s, 120s, and so on, with at most 10 attempts total.
+- **Backoff** — the initial WS dispatch is attempt 1. Base retry delays
+  are 30s, 60s, 120s, and so on, with independent ±20% jitter and at
+  most 10 attempts total.
 - **Claiming** — Relay uses a bounded `FOR UPDATE SKIP LOCKED` claim and
   the existing lease so concurrent workers do not claim the same row.
 - **Exhaustion** — rows at attempt 10 remain in the outbox for inspection
