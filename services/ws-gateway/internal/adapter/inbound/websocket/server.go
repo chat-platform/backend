@@ -16,31 +16,36 @@ import (
 )
 
 const (
-	identityTimeout = 10 * time.Second
-	heartbeatEvery  = 20 * time.Second
-	readTimeout     = 60 * time.Second
-	maxFrameBytes   = 1 << 20
+	authTimeout    = 10 * time.Second
+	heartbeatEvery = 20 * time.Second
+	readTimeout    = 60 * time.Second
+	maxFrameBytes  = 1 << 20
 )
 
 type Operations interface {
+	Authenticate(context.Context, string) (domain.Identity, error)
+	IsSessionActive(context.Context, string) (bool, error)
 	Register(context.Context, domain.Identity, string) (domain.Connection, error)
 	Refresh(context.Context, string, domain.Connection) (bool, error)
 	Unregister(context.Context, string, domain.Connection) error
 	Send(context.Context, domain.Identity, domain.SendMessage) (domain.MessageAck, error)
+	MarkDelivered(context.Context, domain.Identity, string, int64) error
 }
 
 type Server struct {
-	operations Operations
-	hub        *Hub
-	logger     logging.Logger
-	upgrader   websocket.Upgrader
+	operations        Operations
+	hub               *Hub
+	logger            logging.Logger
+	upgrader          websocket.Upgrader
+	heartbeatInterval time.Duration
 }
 
 func NewServer(operations Operations, logger logging.Logger, hub *Hub) *Server {
 	return &Server{
-		operations: operations,
-		hub:        hub,
-		logger:     logger,
+		operations:        operations,
+		hub:               hub,
+		logger:            logger,
+		heartbeatInterval: heartbeatEvery,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: 10 * time.Second,
 		},
@@ -61,30 +66,31 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		}
 	}()
 	conn.SetReadLimit(maxFrameBytes)
-	if err := conn.SetReadDeadline(time.Now().Add(identityTimeout)); err != nil {
-		s.logger.Error(request.Context(), "could not set websocket identity read deadline", "error", err,
+	if err := conn.SetReadDeadline(time.Now().Add(authTimeout)); err != nil {
+		s.logger.Error(request.Context(), "could not set websocket auth read deadline", "error", err,
 			"remote_addr", request.RemoteAddr)
 		writeClose(conn, s.logger, request.Context(), websocket.CloseInternalServerErr, "connection setup failed")
 		return
 	}
 
-	identity, err := readIdentity(conn, s.logger, request.Context(), request.RemoteAddr)
+	token, err := readAuthToken(conn, s.logger, request.Context(), request.RemoteAddr)
 	if err != nil {
-		writeClose(conn, s.logger, request.Context(), websocket.ClosePolicyViolation, "valid identity frame required")
+		writeClose(conn, s.logger, request.Context(), websocket.ClosePolicyViolation, "valid auth frame required")
+		return
+	}
+	identity, err := s.operations.Authenticate(request.Context(), token)
+	if err != nil {
+		writeClose(conn, s.logger, request.Context(), websocket.ClosePolicyViolation, "valid session token required")
 		return
 	}
 	connectionID := uuid.NewString()
-	s.hub.Register(connectionID, socket)
 	connection, err := s.operations.Register(request.Context(), identity, connectionID)
 	if err != nil {
-		s.hub.Remove(connectionID, socket)
 		writeClose(conn, s.logger, request.Context(), websocket.CloseInternalServerErr, "connection registration failed")
 		return
 	}
+	s.hub.RegisterAuthenticated(connectionID, identity.SessionID, identity.DeviceID, connection, socket)
 	defer s.hub.Remove(connection.ConnID, socket)
-	s.logger.Info(request.Context(), "websocket connection registered",
-		"user_id", identity.UserID, "device_id", identity.DeviceID,
-		"ws_node", connection.NodeID, "conn_id", connection.ConnID)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -95,6 +101,21 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			"user_id", identity.UserID, "device_id", identity.DeviceID,
 			"ws_node", connection.NodeID, "conn_id", connection.ConnID)
 	}()
+	active, err := s.operations.IsSessionActive(request.Context(), token)
+	if err != nil || !active {
+		if err != nil {
+			s.logger.Warn(request.Context(), "could not confirm websocket session after registration", "error", err, "session_id", identity.SessionID)
+		}
+		writeClose(conn, s.logger, request.Context(), websocket.ClosePolicyViolation, "session is no longer active")
+		return
+	}
+	if err := socket.WriteJSON(wsframe.Envelope{Type: wsframe.TypeAuthOK, TS: time.Now().UnixMilli(), Payload: json.RawMessage(`{}`)}); err != nil {
+		s.logger.Warn(request.Context(), "could not write websocket auth acknowledgement", "error", err, "session_id", identity.SessionID)
+		return
+	}
+	s.logger.Info(request.Context(), "websocket connection registered",
+		"user_id", identity.UserID, "device_id", identity.DeviceID,
+		"ws_node", connection.NodeID, "conn_id", connection.ConnID)
 	if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
 		s.logger.Error(request.Context(), "could not set websocket read deadline", "error", err,
 			"device_id", identity.DeviceID, "conn_id", connection.ConnID)
@@ -118,6 +139,13 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				"device_id", identity.DeviceID, "conn_id", connection.ConnID)
 			return errors.New("websocket connection no longer owns registry entry")
 		}
+		active, err := s.operations.IsSessionActive(ctx, token)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return errors.New("websocket session has been revoked")
+		}
 		return nil
 	})
 	go s.pingLoop(ctx, socket)
@@ -138,6 +166,27 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			s.logger.Warn(ctx, "websocket client sent malformed JSON", "error", err, "device_id", identity.DeviceID)
 			s.writeError(ctx, socket, "", "invalid_frame", "frame must be a valid envelope")
+			continue
+		}
+		if envelope.Type == wsframe.TypeSyncReady {
+			if err := s.hub.Ready(connection.ConnID); err != nil {
+				s.logger.Warn(ctx, "could not complete websocket sync handoff", "error", err, "device_id", identity.DeviceID, "conn_id", connection.ConnID)
+				writeClose(conn, s.logger, ctx, websocket.CloseTryAgainLater, "sync handoff failed; reconnect and sync")
+				return
+			}
+			continue
+		}
+		if envelope.Type == wsframe.TypeReceiptDelivered {
+			var receipt wsframe.DeliveryReceiptPayload
+			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &receipt) != nil || receipt.OutboxID <= 0 ||
+				(receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) {
+				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.delivered requires a valid outboxType and positive outboxId")
+				continue
+			}
+			if err := s.operations.MarkDelivered(ctx, identity, string(receipt.OutboxType), receipt.OutboxID); err != nil {
+				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "delivery receipt could not be recorded")
+				continue
+			}
 			continue
 		}
 		if envelope.Type != wsframe.TypeMessageSend {
@@ -187,40 +236,53 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func readIdentity(conn *websocket.Conn, logger logging.Logger, ctx context.Context, remoteAddr string) (domain.Identity, error) {
-	invalid := func(err error) (domain.Identity, error) {
-		logger.Warn(ctx, "websocket connection sent an invalid identity frame", "error", err,
+func readAuthToken(conn *websocket.Conn, logger logging.Logger, ctx context.Context, remoteAddr string) (string, error) {
+	invalid := func(err error) (string, error) {
+		logger.Warn(ctx, "websocket connection sent an invalid auth frame", "error", err,
 			"remote_addr", remoteAddr)
-		return domain.Identity{}, domain.ErrInvalidIdentity
+		return "", domain.ErrInvalidIdentity
 	}
 	_, data, err := conn.ReadMessage()
 	if err != nil {
 		return invalid(err)
 	}
 	var envelope wsframe.Envelope
-	if err := json.Unmarshal(data, &envelope); err != nil || envelope.Type != wsframe.TypeIdentity {
+	if err := json.Unmarshal(data, &envelope); err != nil || envelope.Type != wsframe.TypeAuth {
 		if err == nil {
-			err = errors.New("first websocket frame must be an identity envelope")
+			err = errors.New("first websocket frame must be an auth envelope")
 		}
 		return invalid(err)
 	}
-	var payload wsframe.IdentityPayload
+	var payload wsframe.AuthPayload
 	if len(envelope.Payload) == 0 {
-		return invalid(errors.New("identity payload is empty"))
+		return invalid(errors.New("auth payload is empty"))
 	}
 	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 		return invalid(err)
 	}
-	userID, userErr := uuid.Parse(payload.UserID)
-	deviceID, deviceErr := uuid.Parse(payload.DeviceID)
-	if userErr != nil || deviceErr != nil {
-		return invalid(errors.Join(userErr, deviceErr))
+	if strings.TrimSpace(payload.Token) == "" {
+		return invalid(errors.New("auth token is empty"))
 	}
-	return domain.Identity{UserID: userID.String(), DeviceID: deviceID.String()}, nil
+	return payload.Token, nil
+}
+
+func (s *Server) RevokeConnection(ctx context.Context, connection domain.Connection) {
+	active := s.hub.CloseConnection(connection)
+	if active == nil {
+		return
+	}
+	if err := active.Socket.Close(); err != nil {
+		s.logger.Warn(ctx, "could not close revoked websocket", "error", err, "session_id", connection.SessionID, "conn_id", active.ID)
+	}
+	unregisterCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := s.operations.Unregister(unregisterCtx, active.DeviceID, active.Connection); err != nil {
+		s.logger.Warn(unregisterCtx, "could not remove revoked websocket registry entry", "error", err, "session_id", connection.SessionID, "device_id", active.DeviceID)
+	}
 }
 
 func (s *Server) pingLoop(ctx context.Context, conn *safeSocket) {
-	ticker := time.NewTicker(heartbeatEvery)
+	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {

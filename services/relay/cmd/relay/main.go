@@ -44,12 +44,17 @@ func main() {
 	if err := rc.Ping(ctx).Err(); err != nil {
 		fatal(ctx, logger, "ping redis", err)
 	}
-	dispatcher := app.New(postgresadapter.NewOutboxRepository(pool), redisadapter.NewRegistry(rc), redisadapter.NewPublisher(rc), app.OutboxOptions{
+	outboxRepository := postgresadapter.NewOutboxRepository(pool)
+	dispatcher := app.New(outboxRepository, redisadapter.NewRegistry(rc), redisadapter.NewPublisher(rc), app.OutboxOptions{
 		BatchSize: cfg.Outbox.BatchSize, ClaimLease: cfg.Outbox.ClaimLease,
 	}, logger.With("component", "dispatcher"))
 	logger.Info(ctx, "relay started", "workers", cfg.Workers.Count, "batch_size", cfg.Outbox.BatchSize, "poll_interval", cfg.Workers.PollInterval.String(), "claim_lease", cfg.Outbox.ClaimLease.String())
 	var workers sync.WaitGroup
-	workers.Add(cfg.Workers.Count)
+	workers.Add(cfg.Workers.Count + 1)
+	go func() {
+		defer workers.Done()
+		runCleanupWorker(ctx, outboxRepository, logger.With("component", "outbox_cleanup"))
+	}()
 	for workerID := 1; workerID <= cfg.Workers.Count; workerID++ {
 		go func(id int) {
 			defer workers.Done()
@@ -60,6 +65,38 @@ func main() {
 	logger.Info(context.Background(), "relay stopping", "workers", cfg.Workers.Count)
 	workers.Wait()
 	logger.Info(context.Background(), "relay stopped")
+}
+
+type outboxCleaner interface {
+	DeleteExpiredBatch(context.Context, int) (int64, error)
+}
+
+func runCleanupWorker(ctx context.Context, cleaner outboxCleaner, logger logging.Logger) {
+	const batchSize = 1000
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		var deleted int64
+		for ctx.Err() == nil {
+			count, err := cleaner.DeleteExpiredBatch(ctx, batchSize)
+			if err != nil {
+				logger.Error(ctx, "direct outbox cleanup failed", "deleted_rows", deleted, "error", err)
+				break
+			}
+			deleted += count
+			if count < batchSize {
+				break
+			}
+		}
+		if deleted > 0 {
+			logger.Info(ctx, "direct outbox cleanup completed", "deleted_rows", deleted)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 type workerDispatcher interface {

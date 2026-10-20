@@ -10,6 +10,7 @@ option go_package = "github.com/chat-platform/backend/shared/gen/message/v1;mess
 // WS Gateway calls this; it does not deliver to recipients.
 service MessageService {
   rpc SendMessage(SendMessageRequest) returns (SendMessageAck);
+  rpc MarkDelivered(MarkDeliveredRequest) returns (MarkDeliveredResponse);
 }
 
 message SendMessageRequest {
@@ -28,3 +29,11 @@ message SendMessageAck {
   string client_msg_id = 1;
   int64 ts_unix_milli = 2;
 }
+
+message MarkDeliveredRequest {
+  string device_id = 1 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
+  int64 outbox_id = 2 [(buf.validate.field).int64.gt = 0];
+  string outbox_type = 3 [(buf.validate.field).string = {pattern: "^(direct|group)$"}];
+}
+
+message MarkDeliveredResponse {}

@@ -55,6 +55,13 @@ Conventions:
 |---|---|---|
 | `GET` | `/v1/profile/me` | Own profile. |
 | `PUT` | `/v1/profile/name` | Display name. |
+
+### Chats
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/v1/chats/direct` | Create or return a DIRECT chat for a peer phone number. |
+| `GET` | `/v1/chats/groups` | Return all GROUP chats (to be used when signed in afresh). |
 | `PUT` | `/v1/profile/picture` | Profile picture (media ID).  | <!-- Need to change this to direct upload -->
 | `GET` | `/v1/users/lookup?phone=...` | Lookup by phone (rate-limited). |
 
@@ -98,6 +105,10 @@ Notes:
 - `/profile/picture` stores a media ID from `/v1/media`; the binary
   itself goes through the media endpoint.
 - `/sync` is the catch-up path when WS frames are missed. (eg: when Phone was not online, etc)
+- The sync response contains `events` (`outboxId`, `eventType`, `payload`),
+  `nextCursor`, and `hasMore`. `since_direct` defaults to 0; `limit` defaults
+  to 100 and is capped at 500. The cursor is a global outbox ID filtered by
+  the authenticated device, not a contiguous per-device sequence.
 
 ## 4. WebSocket API
 <!-- define ws APIs here -->
@@ -106,6 +117,10 @@ Notes:
 ```text
 connect → auth (session token) → auth_ok → heartbeat → events
 ```
+
+The Gateway verifies the HS256 JWT and checks that its `sid` is active in
+Redis before registering the socket. Logout revokes the session and closes
+its active sockets.
 
 - First frame must carry the session token from `/auth/otp/verify`.
 - Server pings periodically; missing pongs mark the socket dead.
@@ -131,14 +146,19 @@ connect → auth (session token) → auth_ok → heartbeat → events
 |---|---|---|---|
 | `message.send` | C → S | `{ chatId, clientMsgId, content }` | Idempotent via `clientMsgId`. Attempt only; no durability yet. |
 | `message.ack` | S → C | `{ clientMsgId, messageId, ts }` | Server has durably accepted the message. Correlates to `message.send` via `clientMsgId`. |
-| `message.recv` | S → C | `{ chatId, senderId, clientMsgId, content, ts }` | Server pushed to recipient. `senderId` + `clientMsgId` identify and correlate the original client message. WS is lossy/client may not be online, so not a delivery guarantee. |
-| `receipt.delivered` | S → C | `{ chatId, messageId, userId, ts }` | Recipient's device confirmed receipt. |
+| `message.recv` | S → C | `{ outboxType, outboxId, chatId, senderId, clientMsgId, content, ts }` | `outboxType` identifies the outbox table; `outboxId` is its cursor and dedup key. |
+| `receipt.delivered` | C → S | `{ outboxType, outboxId }` | Client confirms it durably applied the event and persisted its cursor. |
+| `sync.ready` | C → S | `{}` | Sent after HTTP sync completes; Gateway flushes buffered events and resumes live delivery. |
 | `receipt.read` | both | `{ chatId, upToMessageId, ts }` | Recipient has read this message. (opened the chat)|
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |
 | `presence` | S → C | `{ userId, status, lastSeen }` | Pushed on change. |
 | `group.*` | S → C | `{ groupId, ... }` | Member added, admin promoted, etc. |
 
 Reconnect sync is not a WS event — it goes over HTTP (`/v1/sync`).
+The client opens and authenticates its WebSocket, pages `/v1/sync` from its
+persisted `cursor`s (group and direct), applies and persists each event before sending
+`receipt.delivered`, then sends `sync.ready` after all pages are exhausted.
+The Gateway buffers live frames until `sync.ready`.
 
 Reliability:
 

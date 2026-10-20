@@ -21,7 +21,7 @@ What the system promises, and under what conditions.
 |---|---|---|
 | Message durability | Once acked, never lost | Postgres commit before ack |
 | Message delivery | At-least-once to each online target device | Outbox + expiry-only Relay claims + retry after lease expiry |
-| Message ordering | Per-device, per-table, by `direct_outbox.id` / `group_outbox.id` | Sync query `ORDER BY id` |
+| Message ordering | Sync pages are ordered by ID; concurrent commits and parallel Relay delivery may reorder events | Sync query `ORDER BY id`; no strict no-loss ordering guarantee |
 | Receipt delivery | At-least-once | Outbox dispatch; client dedup on the first receipt |
 | Push notification | Best-effort | Not source of truth; sync catches up |
 | Presence | Best-effort, eventually consistent | Registry TTL; no durability |

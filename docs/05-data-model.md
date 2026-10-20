@@ -82,18 +82,15 @@ session
 session_id
 device_id → device.device_id
 created_at
-refresh_last_used_at
-refresh_expires_at
+expires_at
 revoked_at
 
-note: no refresh token/its hash here, 
-    instead in refresh token, there shall be sessionId. 
-    Each refresh token be for each session.
-    If required immediate session revoke, lets introduce jti here later
+JWT session ids (`sid`) are stored here. JWT claims bind the session to one
+user and device; Redis caches active/revoked state through token expiry.
 
 direct_outbox
 -------------
-id             PK      -- per-device cursor
+id             PK      -- global sequence; per-device cursor after filtering by device_id
 sender_id              -- FK → user.user_id
 client_msg_id   UUID      -- Client-generated UUIDv7; sender-scoped idempotency key
 recipient_id           -- FK → user.user_id
@@ -189,6 +186,11 @@ chat
 - Get events after cursor
 - Mark event dispatched
 - Mark event delivered
+
+Direct sync filters by `device_id` and `id > direct_cursor`; IDs are global,
+not a contiguous per-device sequence. Concurrent commits and parallel Relay
+delivery can cause out-of-order events, so this cursor model does not provide
+a strict no-loss ordering guarantee.
 
 # Other
 ## Redis - WS registruy
