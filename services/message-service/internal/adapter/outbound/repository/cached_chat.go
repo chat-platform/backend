@@ -12,7 +12,6 @@ import (
 
 const (
 	allowAuthorizationTTL = 30 * time.Second
-	denyAuthorizationTTL  = 5 * time.Second
 	recipientListTTL      = 30 * time.Second
 )
 
@@ -36,7 +35,7 @@ func NewCachedChatRepository(store port.ChatRepository, cache ChatCache, logger 
 	return &CachedChatRepository{store: store, cache: cache, logger: logger}
 }
 
-func (r *CachedChatRepository) IsAuthorizedToSend(ctx context.Context, chatID, userID string) (bool, error) {
+func (r *CachedChatRepository) AuthorizedChatType(ctx context.Context, chatID, userID string) (string, error) {
 	key := "chat_auth:" + chatID + ":" + userID
 	value, found, cacheErr := r.cache.Get(ctx, key)
 	if cacheErr != nil {
@@ -44,29 +43,30 @@ func (r *CachedChatRepository) IsAuthorizedToSend(ctx context.Context, chatID, u
 			"chat_id", chatID, "user_id", userID)
 	} else if found {
 		switch value {
-		case "allow":
-			return true, nil
-		case "deny":
-			return false, nil
+		case "DIRECT":
+			return value, nil
+		case "GROUP", "deny":
+			if err := r.cache.InvalidateChatAuthorization(ctx, chatID, userID); err != nil {
+				r.logger.Warn(ctx, "could not clear mutable group authorization cache", "error", err,
+					"chat_id", chatID, "user_id", userID)
+			}
 		default:
 			r.logger.Warn(ctx, "chat authorization cache contains an invalid decision", "chat_id", chatID,
 				"user_id", userID, "decision", value)
 		}
 	}
 
-	allowed, err := r.store.IsAuthorizedToSend(ctx, chatID, userID)
+	chatType, err := r.store.AuthorizedChatType(ctx, chatID, userID)
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	value, ttl := "deny", denyAuthorizationTTL
-	if allowed {
-		value, ttl = "allow", allowAuthorizationTTL
+	if chatType == "DIRECT" {
+		if err := r.cache.Set(ctx, key, chatType, allowAuthorizationTTL); err != nil {
+			r.logger.Warn(ctx, "could not write chat authorization cache", "error", err,
+				"chat_id", chatID, "user_id", userID, "decision", chatType)
+		}
 	}
-	if err := r.cache.Set(ctx, key, value, ttl); err != nil {
-		r.logger.Warn(ctx, "could not write chat authorization cache", "error", err,
-			"chat_id", chatID, "user_id", userID, "decision", value)
-	}
-	return allowed, nil
+	return chatType, nil
 }
 
 func (r *CachedChatRepository) ResolveMessageRecipients(ctx context.Context, chatID string) ([]domain.RecipientDevice, error) {
@@ -100,8 +100,12 @@ func (r *CachedChatRepository) ResolveMessageRecipients(ctx context.Context, cha
 	return recipients, nil
 }
 
-func (r *CachedChatRepository) EnqueueMessageEvent(ctx context.Context, message domain.SendMessage, recipients []domain.RecipientDevice) (domain.MessageAck, error) {
-	return r.store.EnqueueMessageEvent(ctx, message, recipients)
+func (r *CachedChatRepository) EnqueueDirectMessageEvent(ctx context.Context, message domain.SendMessage, recipients []domain.RecipientDevice) (domain.MessageAck, error) {
+	return r.store.EnqueueDirectMessageEvent(ctx, message, recipients)
+}
+
+func (r *CachedChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message domain.SendMessage) (domain.MessageAck, error) {
+	return r.store.EnqueueGroupMessageEvent(ctx, message)
 }
 
 func (r *CachedChatRepository) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {

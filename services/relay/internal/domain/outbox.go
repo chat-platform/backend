@@ -1,9 +1,10 @@
 package domain
 
 type OutboxEvent struct {
-	ID       int64
-	DeviceID string
-	Payload  []byte
+	ID         int64
+	OutboxType string
+	DeviceID   string
+	Payload    []byte
 }
 
 type Connection struct {

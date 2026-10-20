@@ -15,14 +15,17 @@ import (
 )
 
 type sessionRepoStub struct {
-	active     bool
-	revoked    bool
-	claims     sessiontoken.Claims
-	revokeErr  error
-	events     []app.SyncEvent
-	syncDevice string
-	syncCursor int64
-	syncLimit  int
+	active           bool
+	revoked          bool
+	claims           sessiontoken.Claims
+	revokeErr        error
+	events           []app.SyncEvent
+	groupEvents      []app.SyncEvent
+	syncDevice       string
+	directSyncCursor int64
+	directSyncLimit  int
+	groupSyncCursor  int64
+	groupSyncLimit   int
 }
 
 func (r *sessionRepoStub) CompleteOTP(context.Context, string, string, string, string, string, time.Time) (app.User, app.Device, app.Session, error) {
@@ -66,8 +69,13 @@ func (r *sessionRepoStub) SessionActive(_ context.Context, claims sessiontoken.C
 	return r.active, nil
 }
 func (r *sessionRepoStub) ListDirectEvents(_ context.Context, deviceID string, cursor int64, limit int) ([]app.SyncEvent, error) {
-	r.syncDevice, r.syncCursor, r.syncLimit = deviceID, cursor, limit
+	r.syncDevice, r.directSyncCursor, r.directSyncLimit = deviceID, cursor, limit
 	return r.events, nil
+}
+
+func (r *sessionRepoStub) ListGroupEvents(_ context.Context, _ string, cursor int64, limit int) ([]app.SyncEvent, error) {
+	r.groupSyncCursor, r.groupSyncLimit = cursor, limit
+	return r.groupEvents, nil
 }
 
 type sessionCacheStub struct {
@@ -175,21 +183,22 @@ func TestSyncRequiresBearerAndUsesAuthenticatedDevice(t *testing.T) {
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status=%d, want 401", unauthorized.Code)
 	}
-	request := httptest.NewRequest(http.MethodGet, "/v1/sync?since_direct=5&limit=1", nil)
+	repo.groupEvents = []app.SyncEvent{{OutboxID: 9, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"chatId":"group"}`)}}
+	request := httptest.NewRequest(http.MethodGet, "/v1/sync?since_direct=5&since_group=7&limit=1", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	var page app.SyncPage
+	var page app.SyncResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if repo.syncDevice != claims.DeviceID || repo.syncCursor != 5 || repo.syncLimit != 2 {
-		t.Fatalf("repo sync request device=%q cursor=%d limit=%d", repo.syncDevice, repo.syncCursor, repo.syncLimit)
+	if repo.syncDevice != claims.DeviceID || repo.directSyncCursor != 5 || repo.directSyncLimit != 2 || repo.groupSyncCursor != 7 || repo.groupSyncLimit != 2 {
+		t.Fatalf("repo sync request device=%q direct_cursor=%d group_cursor=%d direct_limit=%d group_limit=%d", repo.syncDevice, repo.directSyncCursor, repo.groupSyncCursor, repo.directSyncLimit, repo.groupSyncLimit)
 	}
-	if len(page.Events) != 1 || page.NextCursor != 12 || page.HasMore {
+	if len(page.Direct.Events) != 1 || page.Direct.NextCursor != 12 || page.Direct.HasMore || len(page.Group.Events) != 1 || page.Group.NextCursor != 9 {
 		t.Fatalf("unexpected sync page: %+v", page)
 	}
 }
@@ -200,7 +209,7 @@ func TestSyncRejectsInvalidQuery(t *testing.T) {
 	claims := sessiontoken.Claims{SessionID: "sid", UserID: "user", DeviceID: "device-a", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
 	token, _ := sessiontoken.Sign(claims, secret)
 	server := New(app.New(&sessionRepoStub{active: true}, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }}))
-	for _, path := range []string{"/v1/sync?since_direct=-1", "/v1/sync?since_direct=nope", "/v1/sync?limit=0"} {
+	for _, path := range []string{"/v1/sync?since_direct=-1", "/v1/sync?since_direct=nope", "/v1/sync?since_group=-1", "/v1/sync?limit=0"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer "+token)
 		recorder := httptest.NewRecorder()

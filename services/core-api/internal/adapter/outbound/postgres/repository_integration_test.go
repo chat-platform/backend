@@ -55,7 +55,9 @@ CREATE TABLE device(device_id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES 
 CREATE TABLE session(session_id UUID PRIMARY KEY,device_id UUID NOT NULL REFERENCES device(device_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),expires_at TIMESTAMPTZ NOT NULL,revoked_at TIMESTAMPTZ);
 CREATE TABLE chat(chat_id UUID PRIMARY KEY,type TEXT NOT NULL,name TEXT,profile_pic TEXT,created_by UUID REFERENCES users(user_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),deleted_at TIMESTAMPTZ);
 CREATE TABLE chat_membership(chat_id UUID NOT NULL REFERENCES chat(chat_id),user_id UUID NOT NULL REFERENCES users(user_id),role TEXT NOT NULL DEFAULT 'member',joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),member_tag TEXT,PRIMARY KEY(chat_id,user_id));
-CREATE TABLE direct_outbox(id BIGSERIAL PRIMARY KEY,device_id UUID NOT NULL,event_type TEXT NOT NULL,payload TEXT NOT NULL);`)
+CREATE TABLE direct_outbox(id BIGSERIAL PRIMARY KEY,device_id UUID NOT NULL,event_type TEXT NOT NULL,payload TEXT NOT NULL);
+CREATE TABLE group_event(event_id BIGINT PRIMARY KEY,event_type TEXT NOT NULL,payload TEXT NOT NULL);
+CREATE TABLE group_outbox(id BIGSERIAL PRIMARY KEY,event_id BIGINT NOT NULL REFERENCES group_event(event_id),device_id UUID NOT NULL);`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +231,6 @@ func TestListGroupChatsExcludesDirectDeletedAndOtherUsersChats(t *testing.T) {
 	}
 }
 
-
 func TestListDirectEventsUsesDeviceAndCursorInOrder(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
@@ -249,5 +250,25 @@ func TestListDirectEventsUsesDeviceAndCursorInOrder(t *testing.T) {
 	page, err := repo.ListDirectEvents(ctx, deviceA, 2, 1)
 	if err != nil || len(page) != 1 || page[0].OutboxID != 4 {
 		t.Fatalf("next sync page=(%+v,%v), want event 4", page, err)
+	}
+}
+
+func TestListGroupEventsJoinsPayloadAndUsesIndependentDeviceCursor(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	deviceA, deviceB := uuid.NewString(), uuid.NewString()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO group_event(event_id,event_type,payload) VALUES (3,'NEW_MESSAGE','{"n":3}'),(4,'NEW_MESSAGE','{"n":4}');
+		INSERT INTO group_outbox(id,event_id,device_id) VALUES (2,3,$1),(7,4,$1),(3,3,$2)`, deviceA, deviceB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := repo.ListGroupEvents(ctx, deviceA, 0, 10)
+	if err != nil || len(events) != 2 || events[0].OutboxID != 2 || string(events[0].Payload) != `{"n":3}` || events[1].OutboxID != 7 {
+		t.Fatalf("group sync events=%+v error=%v", events, err)
+	}
+	page, err := repo.ListGroupEvents(ctx, deviceA, 2, 1)
+	if err != nil || len(page) != 1 || page[0].OutboxID != 7 || page[0].EventType != "NEW_MESSAGE" {
+		t.Fatalf("next group sync page=(%+v,%v), want group outbox row 7", page, err)
 	}
 }

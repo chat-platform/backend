@@ -108,7 +108,7 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 	if err != nil {
 		return decodedDelivery{}, err
 	}
-	if typ != string(wsframe.OutboxTypeDirect) {
+	if typ != string(wsframe.OutboxTypeDirect) && typ != string(wsframe.OutboxTypeGroup) {
 		return decodedDelivery{}, fmt.Errorf("unsupported outbox type %q", typ)
 	}
 	if outboxID <= 0 {

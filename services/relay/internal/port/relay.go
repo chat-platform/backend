@@ -7,8 +7,8 @@ import (
 )
 
 type OutboxRepository interface {
-	ClaimBatch(context.Context, int, time.Duration) ([]domain.OutboxEvent, error)
-	MarkDispatched(context.Context, int64, domain.Route) error
+	ClaimBatch(context.Context, string, int, time.Duration) ([]domain.OutboxEvent, error)
+	MarkDispatched(context.Context, string, int64, domain.Route) error
 }
 type ConnectionRegistry interface {
 	Lookup(context.Context, string) (domain.Connection, bool, error)

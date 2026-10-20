@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -98,12 +99,12 @@ func TestHubBuffersUntilReadyThenFlushesInOutboxOrder(t *testing.T) {
 	socket := &captureSocket{}
 	h.RegisterAuthenticated("conn", "sid", "device", domain.Connection{}, socket)
 	for _, id := range []int64{9, 3, 7} {
-		payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxID: id})
+		payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: id})
 		if err := h.Deliver(context.Background(), "conn", wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: payload}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	duplicatePayload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxID: 7})
+	duplicatePayload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 7})
 	if err := h.Deliver(context.Background(), "conn", wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: duplicatePayload}); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +123,7 @@ func TestHubBuffersUntilReadyThenFlushesInOutboxOrder(t *testing.T) {
 			t.Fatalf("frame %d payload=%+v err=%v, want outboxId=%d", i, payload, err, want)
 		}
 	}
-	payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxID: 12})
+	payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 12})
 	if err := h.Deliver(context.Background(), "conn", wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: payload}); err != nil {
 		t.Fatal(err)
 	}
@@ -131,12 +132,45 @@ func TestHubBuffersUntilReadyThenFlushesInOutboxOrder(t *testing.T) {
 	}
 }
 
+func TestHubBufferDeduplicatesWithinEachOutboxType(t *testing.T) {
+	h := NewHub()
+	socket := &captureSocket{}
+	h.RegisterAuthenticated("conn", "sid", "device", domain.Connection{}, socket)
+	for _, outboxType := range []wsframe.OutboxType{wsframe.OutboxTypeDirect, wsframe.OutboxTypeGroup} {
+		for _, id := range []int64{4, 2, 4} {
+			payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxType: outboxType, OutboxID: id})
+			if err := h.Deliver(context.Background(), "conn", wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: payload}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := h.Ready("conn"); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(socket.values); got != 4 {
+		t.Fatalf("flushed %d frames, want IDs 2 and 4 from each outbox", got)
+	}
+	seen := map[wsframe.OutboxType][]int64{}
+	for _, envelope := range socket.values {
+		var payload wsframe.MessageRecvPayload
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		seen[payload.OutboxType] = append(seen[payload.OutboxType], payload.OutboxID)
+	}
+	for _, outboxType := range []wsframe.OutboxType{wsframe.OutboxTypeDirect, wsframe.OutboxTypeGroup} {
+		if !reflect.DeepEqual(seen[outboxType], []int64{2, 4}) {
+			t.Fatalf("%s IDs=%v, want [2 4]", outboxType, seen[outboxType])
+		}
+	}
+}
+
 func TestHubClosesRetryablyWhenSyncBufferOverflows(t *testing.T) {
 	h := NewHub()
 	socket := &captureSocket{}
 	h.RegisterAuthenticated("conn", "sid", "device", domain.Connection{}, socket)
 	for i := int64(1); i <= maxSyncBufferEvents+1; i++ {
-		payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxID: i})
+		payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: i})
 		err := h.Deliver(context.Background(), "conn", wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: payload})
 		if i == maxSyncBufferEvents+1 {
 			if !errors.Is(err, ErrSyncBufferFull) || !errors.Is(err, ErrConnectionGone) {
@@ -157,7 +191,7 @@ func TestHubClosesRetryablyWhenSyncBufferByteLimitIsExceeded(t *testing.T) {
 	h.RegisterAuthenticated("conn", "sid", "device", domain.Connection{}, socket)
 	content := strings.Repeat("x", maxSyncBufferBytes/3)
 	for i := int64(1); i <= 3; i++ {
-		payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxID: i, Content: content})
+		payload, _ := json.Marshal(wsframe.MessageRecvPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: i, Content: content})
 		err := h.Deliver(context.Background(), "conn", wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: payload})
 		if i == 3 {
 			if !errors.Is(err, ErrSyncBufferFull) {

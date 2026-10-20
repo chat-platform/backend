@@ -35,6 +35,21 @@ func TestDecodeDeliveryPreservesOutboxAndMessageIdentity(t *testing.T) {
 		t.Fatalf("payload=%+v", payload)
 	}
 }
+
+func TestDecodeGroupDeliveryCarriesIndependentOutboxIdentity(t *testing.T) {
+	message := redis.XMessage{ID: "1-0", Values: map[string]any{"outbox_id": "42", "outbox_type": "group", "device_id": "device", "conn_id": "conn", "payload": `{"chatId":"group-chat","senderId":"sender","clientMsgId":"client-id","content":"hello","ts":123}`}}
+	delivery, err := decodeDelivery(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload wsframe.MessageRecvPayload
+	if err := json.Unmarshal(delivery.envelope.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if delivery.outboxType != "group" || payload.OutboxType != wsframe.OutboxTypeGroup || payload.OutboxID != 42 || payload.ChatID != "group-chat" {
+		t.Fatalf("group delivery=%+v payload=%+v", delivery, payload)
+	}
+}
 func TestDecodeDeliveryRejectsMissingFields(t *testing.T) {
 	if _, err := decodeDelivery(redis.XMessage{Values: map[string]any{}}); err == nil {
 		t.Fatal("expected malformed stream event error")

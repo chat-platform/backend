@@ -54,6 +54,15 @@ func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, err = pool.Exec(ctx, `CREATE TABLE group_event (event_id BIGSERIAL PRIMARY KEY, payload TEXT NOT NULL);
+	CREATE TABLE group_outbox (
+		id BIGSERIAL PRIMARY KEY, event_id BIGINT NOT NULL REFERENCES group_event(event_id),
+		device_id UUID NOT NULL, routed_to TEXT, dispatched_at TIMESTAMPTZ,
+		claim_expiry TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), delivered_at TIMESTAMPTZ
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return NewOutboxRepository(pool), pool
 }
 
@@ -104,7 +113,7 @@ func TestClaimBatchAndMarkDispatched(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
 	ids := []int64{insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one"), insertEvent(t, pool, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "two")}
-	events, err := repo.ClaimBatch(ctx, 10, time.Minute)
+	events, err := repo.ClaimBatch(ctx, "direct", 10, time.Minute)
 	if err != nil || len(events) != 2 {
 		t.Fatalf("ClaimBatch()=(%d,%v), want (2,nil)", len(events), err)
 	}
@@ -116,10 +125,10 @@ func TestClaimBatchAndMarkDispatched(t *testing.T) {
 	if !lease.After(time.Now()) {
 		t.Fatalf("claim expiry=%v, want future lease", lease)
 	}
-	if err := repo.MarkDispatched(ctx, ids[0], domain.Route{To: domain.RouteWebSocket}); err != nil {
+	if err := repo.MarkDispatched(ctx, "direct", ids[0], domain.Route{To: domain.RouteWebSocket}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkDispatched(ctx, ids[1], domain.Route{}); err != nil {
+	if err := repo.MarkDispatched(ctx, "direct", ids[1], domain.Route{}); err != nil {
 		t.Fatal(err)
 	}
 	var routed *string
@@ -136,9 +145,36 @@ func TestClaimBatchAndMarkDispatched(t *testing.T) {
 	if routed != nil || dispatched.IsZero() {
 		t.Fatalf("offline route=%v dispatched_at=%v", routed, dispatched)
 	}
-	more, err := repo.ClaimBatch(ctx, 10, time.Minute)
+	more, err := repo.ClaimBatch(ctx, "direct", 10, time.Minute)
 	if err != nil || len(more) != 0 {
 		t.Fatalf("ClaimBatch after dispatch=(%d,%v), want (0,nil)", len(more), err)
+	}
+}
+
+func TestClaimGroupBatchJoinsPayloadAndMarksGroupRow(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	device := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	var id int64
+	if err := pool.QueryRow(ctx, `INSERT INTO group_event(payload) VALUES ('{"chatId":"group"}') RETURNING event_id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(event_id,device_id) VALUES ($1,$2)`, id, device); err != nil {
+		t.Fatal(err)
+	}
+	events, err := repo.ClaimBatch(ctx, "group", 10, time.Minute)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("group ClaimBatch()=(%+v,%v), want one event", events, err)
+	}
+	if events[0].OutboxType != "group" || events[0].DeviceID != device || string(events[0].Payload) != `{"chatId":"group"}` {
+		t.Fatalf("claimed group event=%+v", events[0])
+	}
+	if err := repo.MarkDispatched(ctx, "group", events[0].ID, domain.Route{To: domain.RouteWebSocket}); err != nil {
+		t.Fatal(err)
+	}
+	var route string
+	if err := pool.QueryRow(ctx, `SELECT routed_to FROM group_outbox WHERE id=$1`, events[0].ID).Scan(&route); err != nil || route != domain.RouteWebSocket {
+		t.Fatalf("group route=(%q,%v), want WS", route, err)
 	}
 }
 
@@ -146,18 +182,18 @@ func TestClaimBatchExcludesUnexpiredClaimAndReclaimsExpiredLease(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
 	id := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "lease")
-	first, err := repo.ClaimBatch(ctx, 1, time.Minute)
+	first, err := repo.ClaimBatch(ctx, "direct", 1, time.Minute)
 	if err != nil || len(first) != 1 {
 		t.Fatalf("first claim=(%d,%v)", len(first), err)
 	}
-	second, err := repo.ClaimBatch(ctx, 1, time.Minute)
+	second, err := repo.ClaimBatch(ctx, "direct", 1, time.Minute)
 	if err != nil || len(second) != 0 {
 		t.Fatalf("unexpired concurrent claim=(%d,%v), want (0,nil)", len(second), err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET claim_expiry=now()-interval '1 second' WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
-	third, err := repo.ClaimBatch(ctx, 1, time.Minute)
+	third, err := repo.ClaimBatch(ctx, "direct", 1, time.Minute)
 	if err != nil || len(third) != 1 || third[0].ID != id {
 		t.Fatalf("expired claim=(%+v,%v), want row %d", third, err, id)
 	}
@@ -167,7 +203,7 @@ func TestUnmarkedRowCanBeClaimedAgainAfterLease(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
 	id := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "retry")
-	if _, err := repo.ClaimBatch(ctx, 1, time.Minute); err != nil {
+	if _, err := repo.ClaimBatch(ctx, "direct", 1, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	// A lookup/publish failure does not call MarkDispatched. The row becomes
@@ -175,7 +211,7 @@ func TestUnmarkedRowCanBeClaimedAgainAfterLease(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET claim_expiry=now()-interval '1 second' WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := repo.ClaimBatch(ctx, 1, time.Minute)
+	retry, err := repo.ClaimBatch(ctx, "direct", 1, time.Minute)
 	if err != nil || len(retry) != 1 || retry[0].ID != id {
 		t.Fatalf("retry claim=(%+v,%v), want row %d", retry, err, id)
 	}

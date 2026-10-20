@@ -32,16 +32,32 @@ func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publish
 	return &Dispatcher{outbox: outbox, registry: registry, publisher: publisher, outboxOptions: options, logger: logger}
 }
 func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
-	events, err := d.outbox.ClaimBatch(ctx, d.outboxOptions.BatchSize, d.outboxOptions.ClaimLease)
-	if err != nil {
-		d.logger.Error(ctx, "outbox batch claim failed", "error", err, "batch_size", d.outboxOptions.BatchSize)
-		return 0, err
+	count := 0
+	totalClaimed := 0
+	for _, outboxType := range []string{"direct", "group"} {
+		events, err := d.outbox.ClaimBatch(ctx, outboxType, d.outboxOptions.BatchSize, d.outboxOptions.ClaimLease)
+		if err != nil {
+			d.logger.Error(ctx, "outbox batch claim failed", "error", err, "outbox_type", outboxType, "batch_size", d.outboxOptions.BatchSize)
+			return count, err
+		}
+		totalClaimed += len(events)
+		processed, err := d.dispatchBatch(ctx, outboxType, events)
+		count += processed
+		if err != nil {
+			return count, err
+		}
 	}
+	d.logger.Info(ctx, "outbox drain batch completed", "rows_claimed", totalClaimed, "rows_dispatched", count, "batch_size", d.outboxOptions.BatchSize)
+	return count, nil
+}
+
+func (d *Dispatcher) dispatchBatch(ctx context.Context, outboxType string, events []domain.OutboxEvent) (int, error) {
 	count := 0
 	for _, event := range events {
+		event.OutboxType = outboxType
 		connection, online, err := d.registry.Lookup(ctx, event.DeviceID)
 		if err != nil {
-			d.logger.Error(ctx, "device registry lookup failed", "outbox_id", event.ID, "device_id", event.DeviceID, "error", err)
+			d.logger.Error(ctx, "device registry lookup failed", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "error", err)
 			return count, fmt.Errorf("lookup device %s: %w", event.DeviceID, err)
 		}
 		route := domain.Route{}
@@ -49,18 +65,17 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
 			d.logger.Info(ctx, "outbox event skipped for offline device", "outbox_id", event.ID, "device_id", event.DeviceID)
 		} else {
 			if err := d.publisher.Publish(ctx, connection, event); err != nil {
-				d.logger.Error(ctx, "could not publish websocket delivery", "outbox_id", event.ID, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID, "error", err)
+				d.logger.Error(ctx, "could not publish websocket delivery", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID, "error", err)
 				return count, fmt.Errorf("publish outbox %d: %w", event.ID, err)
 			}
 			route = domain.Route{To: domain.RouteWebSocket}
-			d.logger.Info(ctx, "outbox event routed to websocket stream", "outbox_id", event.ID, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID)
+			d.logger.Info(ctx, "outbox event routed to websocket stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID)
 		}
-		if err := d.outbox.MarkDispatched(ctx, event.ID, route); err != nil {
-			d.logger.Error(ctx, "could not mark outbox dispatched", "outbox_id", event.ID, "device_id", event.DeviceID, "error", err)
+		if err := d.outbox.MarkDispatched(ctx, outboxType, event.ID, route); err != nil {
+			d.logger.Error(ctx, "could not mark outbox dispatched", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "error", err)
 			return count, fmt.Errorf("mark outbox %d dispatched: %w", event.ID, err)
 		}
 		count++
 	}
-	d.logger.Info(ctx, "outbox drain batch completed", "rows_claimed", len(events), "rows_dispatched", count, "batch_size", d.outboxOptions.BatchSize)
 	return count, nil
 }

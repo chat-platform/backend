@@ -170,4 +170,32 @@ func (r *Repository) ListDirectEvents(ctx context.Context, deviceID string, curs
 	return events, nil
 }
 
+func (r *Repository) ListGroupEvents(ctx context.Context, deviceID string, cursor int64, limit int) ([]app.SyncEvent, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT outbox.id, event.event_type, event.payload
+		FROM group_outbox AS outbox
+		JOIN group_event AS event ON event.event_id = outbox.event_id
+		WHERE outbox.device_id = $1 AND outbox.id > $2
+		ORDER BY outbox.id
+		LIMIT $3`, deviceID, cursor, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query group sync events: %w", err)
+	}
+	defer rows.Close()
+	events := make([]app.SyncEvent, 0, limit)
+	for rows.Next() {
+		var event app.SyncEvent
+		var payload string
+		if err := rows.Scan(&event.OutboxID, &event.EventType, &payload); err != nil {
+			return nil, fmt.Errorf("scan group sync event: %w", err)
+		}
+		event.Payload = json.RawMessage(payload)
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read group sync events: %w", err)
+	}
+	return events, nil
+}
+
 var _ app.Repository = (*Repository)(nil)

@@ -38,12 +38,18 @@ type socketEntry struct {
 	failed              bool
 	buffer              []bufferedEnvelope
 	bufferedBytes       int
-	bufferedIDs         map[int64]struct{}
+	bufferedIDs         map[deliveryKey]struct{}
 }
 
 type bufferedEnvelope struct {
-	envelope wsframe.Envelope
-	outboxID int64
+	envelope   wsframe.Envelope
+	outboxID   int64
+	outboxType wsframe.OutboxType
+}
+
+type deliveryKey struct {
+	outboxType wsframe.OutboxType
+	outboxID   int64
 }
 
 type Hub struct {
@@ -71,7 +77,7 @@ func (h *Hub) RegisterAuthenticated(id, sessionID, deviceID string, connection d
 	h.mu.Lock()
 	h.entries[id] = &socketEntry{
 		socket: socket, sessionID: sessionID, deviceID: deviceID,
-		connection: connection, bufferedIDs: make(map[int64]struct{}),
+		connection: connection, bufferedIDs: make(map[deliveryKey]struct{}),
 	}
 	h.mu.Unlock()
 }
@@ -114,12 +120,13 @@ func (h *Hub) Deliver(_ context.Context, id string, envelope wsframe.Envelope) e
 		return ErrConnectionGone
 	}
 	if !entry.ready {
-		if envelope.Type == wsframe.TypeMessageRecv && payload.OutboxID <= 0 {
+		if envelope.Type == wsframe.TypeMessageRecv && (payload.OutboxID <= 0 || (payload.OutboxType != wsframe.OutboxTypeDirect && payload.OutboxType != wsframe.OutboxTypeGroup)) {
 			entry.mu.Unlock()
-			return fmt.Errorf("buffered message.recv requires a positive outboxId")
+			return fmt.Errorf("buffered message.recv requires a positive outboxId and valid outboxType")
 		}
 		if payload.OutboxID > 0 {
-			if _, exists := entry.bufferedIDs[payload.OutboxID]; exists {
+			key := deliveryKey{outboxType: payload.OutboxType, outboxID: payload.OutboxID}
+			if _, exists := entry.bufferedIDs[key]; exists {
 				entry.mu.Unlock()
 				return nil
 			}
@@ -131,10 +138,10 @@ func (h *Hub) Deliver(_ context.Context, id string, envelope wsframe.Envelope) e
 			_ = entry.socket.CloseWithCode(websocket.CloseTryAgainLater, "sync buffer overflow; reconnect and sync")
 			return fmt.Errorf("%w: %w", port.ErrConnectionGone, ErrSyncBufferFull)
 		}
-		entry.buffer = append(entry.buffer, bufferedEnvelope{envelope: envelope, outboxID: payload.OutboxID})
+		entry.buffer = append(entry.buffer, bufferedEnvelope{envelope: envelope, outboxID: payload.OutboxID, outboxType: payload.OutboxType})
 		entry.bufferedBytes += len(encoded)
 		if payload.OutboxID > 0 {
-			entry.bufferedIDs[payload.OutboxID] = struct{}{}
+			entry.bufferedIDs[deliveryKey{outboxType: payload.OutboxType, outboxID: payload.OutboxID}] = struct{}{}
 		}
 		entry.mu.Unlock()
 		return nil
@@ -161,6 +168,9 @@ func (h *Hub) Ready(id string) error {
 		return ErrConnectionGone
 	}
 	sort.SliceStable(entry.buffer, func(i, j int) bool {
+		if entry.buffer[i].outboxType != entry.buffer[j].outboxType {
+			return entry.buffer[i].outboxType < entry.buffer[j].outboxType
+		}
 		return entry.buffer[i].outboxID < entry.buffer[j].outboxID
 	})
 	for _, item := range entry.buffer {

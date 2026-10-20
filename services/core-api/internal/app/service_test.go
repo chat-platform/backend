@@ -25,6 +25,9 @@ type repoFake struct {
 	syncDevice  string
 	syncCursor  int64
 	syncLimit   int
+	groupEvents []SyncEvent
+	groupCursor int64
+	groupLimit  int
 }
 
 func (r *repoFake) CompleteOTP(_ context.Context, phone, _, _, deviceID, sid string, expires time.Time) (User, Device, Session, error) {
@@ -82,22 +85,42 @@ func (r *repoFake) ListDirectEvents(_ context.Context, deviceID string, cursor i
 	return events, nil
 }
 
+func (r *repoFake) ListGroupEvents(_ context.Context, deviceID string, cursor int64, limit int) ([]SyncEvent, error) {
+	r.groupCursor, r.groupLimit = cursor, limit
+	var events []SyncEvent
+	for _, event := range r.groupEvents {
+		if event.OutboxID > cursor {
+			events = append(events, event)
+		}
+	}
+	if len(events) > limit {
+		events = events[:limit]
+	}
+	return events, nil
+}
+
 func TestSyncUsesDeviceCursorAndPagesWithOneLookahead(t *testing.T) {
 	repo := &repoFake{syncEvents: []SyncEvent{
 		{OutboxID: 4, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"text":"four"}`)},
 		{OutboxID: 8, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"text":"eight"}`)},
 		{OutboxID: 9, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"text":"nine"}`)},
+	}, groupEvents: []SyncEvent{
+		{OutboxID: 7, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"text":"group-seven"}`)},
+		{OutboxID: 9, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"text":"group-nine"}`)},
 	}}
 	claims := sessiontoken.Claims{DeviceID: "device-a"}
-	page, err := New(repo, &cacheFake{}, Config{}).Sync(context.Background(), claims, 4, 1)
+	page, err := New(repo, &cacheFake{}, Config{}).Sync(context.Background(), claims, 4, 2, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if repo.syncDevice != "device-a" || repo.syncCursor != 4 || repo.syncLimit != 2 {
 		t.Fatalf("repository query device=%q cursor=%d limit=%d", repo.syncDevice, repo.syncCursor, repo.syncLimit)
 	}
-	if len(page.Events) != 1 || page.Events[0].OutboxID != 8 || page.NextCursor != 8 || !page.HasMore {
+	if len(page.Direct.Events) != 1 || page.Direct.Events[0].OutboxID != 8 || page.Direct.NextCursor != 8 || !page.Direct.HasMore || len(page.Group.Events) != 1 || page.Group.Events[0].OutboxID != 7 || page.Group.NextCursor != 7 || !page.Group.HasMore {
 		t.Fatalf("unexpected page: %+v", page)
+	}
+	if repo.groupCursor != 2 || repo.groupLimit != 2 {
+		t.Fatalf("group repository query cursor=%d limit=%d", repo.groupCursor, repo.groupLimit)
 	}
 }
 
@@ -123,9 +146,10 @@ func TestSyncRejectsInvalidCursorAndLimit(t *testing.T) {
 	service := New(&repoFake{}, &cacheFake{}, Config{})
 	for _, tc := range []struct {
 		cursor int64
+		group  int64
 		limit  int
-	}{{-1, 10}, {0, 0}, {0, 501}} {
-		if _, err := service.Sync(context.Background(), sessiontoken.Claims{DeviceID: "d"}, tc.cursor, tc.limit); err != ErrInvalidRequest {
+	}{{-1, 0, 10}, {0, -1, 10}, {0, 0, 0}, {0, 0, 501}} {
+		if _, err := service.Sync(context.Background(), sessiontoken.Claims{DeviceID: "d"}, tc.cursor, tc.group, tc.limit); err != ErrInvalidRequest {
 			t.Fatalf("Sync(%d,%d) err=%v, want ErrInvalidRequest", tc.cursor, tc.limit, err)
 		}
 	}
