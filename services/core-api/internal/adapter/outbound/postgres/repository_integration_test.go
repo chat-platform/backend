@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/chat-platform/backend/services/core-api/internal/app"
 	"github.com/chat-platform/backend/shared/pkg/sessiontoken"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -120,6 +122,110 @@ func TestGetOrCreateDirectChatIsIdempotent(t *testing.T) {
 	var chats int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM chat WHERE type='DIRECT'`).Scan(&chats); err != nil || chats != 1 {
 		t.Fatalf("direct chat count=(%d,%v)", chats, err)
+	}
+}
+
+func TestCreateAndManageGroupMembershipTransactionally(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	creator, member, other := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	_, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15551110001'),($2,'+15551110002'),($3,'+15551110003')`, creator, member, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupID, err := repo.CreateGroup(ctx, creator, "study", []string{member})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var creatorRole, memberRole string
+	if err := pool.QueryRow(ctx, `SELECT role FROM chat_membership WHERE chat_id=$1 AND user_id=$2`, groupID, creator).Scan(&creatorRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT role FROM chat_membership WHERE chat_id=$1 AND user_id=$2`, groupID, member).Scan(&memberRole); err != nil {
+		t.Fatal(err)
+	}
+	if creatorRole != "admin" || memberRole != "member" {
+		t.Fatalf("creator role=%q member role=%q", creatorRole, memberRole)
+	}
+	if err := repo.AddGroupMembers(ctx, creator, groupID, []string{other}); err != nil {
+		t.Fatal(err)
+	}
+	// Existing membership is idempotent.
+	if err := repo.AddGroupMembers(ctx, creator, groupID, []string{other}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetGroupAdmins(ctx, creator, groupID, []string{member}, true); err != nil {
+		t.Fatal(err)
+	}
+	name, picture := "renamed", "pic-1"
+	if err := repo.UpdateGroup(ctx, creator, groupID, &name, &picture); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetGroupAdmins(ctx, creator, groupID, []string{creator}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetGroupAdmins(ctx, member, groupID, []string{member}, false); !errors.Is(err, app.ErrConflict) {
+		t.Fatalf("demote last admin error=%v, want conflict", err)
+	}
+	if err := repo.AddGroupMembers(ctx, creator, groupID, []string{uuid.NewString()}); !errors.Is(err, app.ErrForbidden) {
+		t.Fatalf("non-admin add error=%v, want forbidden", err)
+	}
+	if err := repo.RemoveGroupMember(ctx, member, groupID, other); err != nil {
+		t.Fatalf("admin remove member: %v", err)
+	}
+	if err := repo.RemoveGroupMember(ctx, member, groupID, member); !errors.Is(err, app.ErrConflict) {
+		t.Fatalf("last admin self-leave error=%v, want conflict", err)
+	}
+	chats, err := repo.ListGroupChats(ctx, member)
+	if err != nil || len(chats) != 1 || chats[0].ID != groupID || chats[0].Name == nil || *chats[0].Name != name || chats[0].ProfilePic == nil || *chats[0].ProfilePic != picture {
+		t.Fatalf("listed groups=%+v error=%v", chats, err)
+	}
+}
+
+func TestGroupCreationRejectsMissingUserWithoutPartialRows(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	creator := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15552220001')`, creator); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateGroup(ctx, creator, "study", []string{uuid.NewString()}); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("create missing user error=%v, want not found", err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM chat WHERE type='GROUP'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("groups after rejected create=(%d,%v), want 0", count, err)
+	}
+	if _, err := repo.CreateGroup(ctx, creator, "study", []string{creator, creator}); !errors.Is(err, app.ErrInvalidRequest) {
+		t.Fatalf("create duplicate members error=%v, want invalid request", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM chat WHERE type='GROUP'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("groups after duplicate create=(%d,%v), want 0", count, err)
+	}
+}
+
+func TestListGroupChatsExcludesDirectDeletedAndOtherUsersChats(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	user, other := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15553330001'),($2,'+15553330002')`, user, other); err != nil {
+		t.Fatal(err)
+	}
+	visible, direct, deleted := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO chat(chat_id,type,name,deleted_at) VALUES
+		($1,'GROUP','visible',NULL),($2,'DIRECT','direct',NULL),($3,'GROUP','deleted',now());
+		INSERT INTO chat_membership(chat_id,user_id) VALUES($1,$4),($2,$4),($3,$4),($1,$5)`, visible, direct, deleted, user, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chats, err := repo.ListGroupChats(ctx, user)
+	if err != nil || len(chats) != 1 || chats[0].ID != visible || chats[0].Name == nil || *chats[0].Name != "visible" {
+		t.Fatalf("groups=%+v error=%v", chats, err)
+	}
+	otherChats, err := repo.ListGroupChats(ctx, uuid.NewString())
+	if err != nil || len(otherChats) != 0 {
+		t.Fatalf("unrelated user's groups=%+v error=%v", otherChats, err)
 	}
 }
 
