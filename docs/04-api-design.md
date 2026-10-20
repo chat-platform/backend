@@ -61,6 +61,7 @@ Conventions:
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/v1/chats/direct` | Create or return a DIRECT chat for a peer phone number. |
+| `GET` | `/v1/chats/groups` | Return all GROUP chats (to be used when signed in afresh). |
 | `PUT` | `/v1/profile/picture` | Profile picture (media ID).  | <!-- Need to change this to direct upload -->
 | `GET` | `/v1/users/lookup?phone=...` | Lookup by phone (rate-limited). |
 
