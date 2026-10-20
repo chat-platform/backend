@@ -46,7 +46,7 @@ Conventions:
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/v1/auth/otp/request` | Start OTP flow. |
-| `POST` | `/v1/auth/otp/verify` | Verify OTP; returns JWT session token and registers device. |
+| `POST` | `/v1/auth/otp/verify` | Verify OTP; returns session token; registers device. |
 | `POST` | `/v1/auth/logout` | Invalidate session. |
 
 ### Profile
@@ -94,7 +94,7 @@ Conventions:
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/sync?since_direct=<id>&limit=<n>` | Backfill direct events for the authenticated device. |
+| `GET` | `/v1/sync?since=<cursor>` | Backfill missed events. |
 | `GET` | `/v1/chats` | List chats. |
 
 Notes:
@@ -113,17 +113,15 @@ Notes:
 <!-- define ws APIs here -->
 ### Lifecycle
 
-```json
-{"type":"auth","id":"auth-1","ts":0,"payload":{"token":"<session-token>"}}
+```text
+connect → auth (session token) → auth_ok → heartbeat → events
 ```
-
-The server replies with `auth_ok` after token and session validation succeeds.
 
 The Gateway verifies the HS256 JWT and checks that its `sid` is active in
 Redis before registering the socket. Logout revokes the session and closes
 its active sockets.
 
-- First frame must be an `auth` frame carrying the session token from `/auth/otp/verify`.
+- First frame must carry the session token from `/auth/otp/verify`.
 - Server pings periodically; missing pongs mark the socket dead.
 - Each device opens its own socket. A user is online if any socket
   is live.
@@ -157,14 +155,13 @@ its active sockets.
 
 Reconnect sync is not a WS event — it goes over HTTP (`/v1/sync`).
 The client opens and authenticates its WebSocket, pages `/v1/sync` from its
-persisted `direct_cursor`, applies and persists each event before sending
+persisted `cursor`s (group and direct), applies and persists each event before sending
 `receipt.delivered`, then sends `sync.ready` after all pages are exhausted.
 The Gateway buffers live frames until `sync.ready`.
 
 Reliability:
 
-- WS is treated as lossy; `/sync` recovers missed events within retention,
-  subject to the documented global-ID concurrency ordering limitation.
+- WS is treated as lossy; anything important is recoverable via `/sync`.
 - Client sends carry `clientMsgId`; server deduplicates on it.
 - Server persists the message, then acks the sender, then fans out.
 
@@ -211,7 +208,7 @@ WebSocket lost
     ↓
 Reconnect + auth
     ↓
-HTTP: GET /v1/sync?since_direct=<cursor>&limit=<n>
+HTTP: GET /v1/sync?since=<cursor>
     ↓
 Apply missed events
     ↓
