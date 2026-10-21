@@ -80,6 +80,14 @@ docker compose exec -T postgres psql -U messenger -d messenger \
   -f /docker-entrypoint-initdb.d/migrations/000004_direct_outbox_sync_retention.up.sql
 ```
 
+Convert an existing direct outbox payload column to the current `TEXT` schema
+with:
+
+```sh
+docker compose exec -T postgres psql -U messenger -d messenger \
+  -f /docker-entrypoint-initdb.d/migrations/000008_direct_outbox_payload_text.up.sql
+```
+
 Core API listens on `http://localhost:8081`. Request and verify a development
 OTP (`000000`) for each phone number:
 

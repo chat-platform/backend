@@ -320,7 +320,7 @@ func (r *ChatRepository) MarkRead(ctx context.Context, receipt domain.ReadReceip
 func enqueueReceiptForSender(ctx context.Context, tx pgx.Tx, eventSenderID, recipientID, clientMsgID string, payload []byte) error {
 	_, err := tx.Exec(ctx, `INSERT INTO direct_outbox
 		(sender_id, client_msg_id, recipient_id, device_id, event_type, payload)
-		SELECT $1::uuid, $3::uuid, $2::uuid, d.device_id, 'RECEIPT', $4
+		SELECT $1::uuid, $3::uuid, $2::uuid, d.device_id, 'RECEIPT', $4::text
 		FROM device d WHERE d.user_id=$2::uuid AND d.revoked_at IS NULL`, eventSenderID, recipientID, clientMsgID, string(payload))
 	if err != nil {
 		return fmt.Errorf("enqueue receipt for sender devices: %w", err)
