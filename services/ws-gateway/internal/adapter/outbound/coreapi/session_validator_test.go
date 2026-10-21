@@ -43,8 +43,8 @@ func TestValidateSessionMapsRejectedCredentials(t *testing.T) {
 		validator := NewSessionValidator(sessionClientFunc(func(context.Context, *sessionv1.ValidateSessionRequest, ...grpc.CallOption) (*sessionv1.ValidateSessionResponse, error) {
 			return nil, status.Error(code, "rejected")
 		}))
-		if _, err := validator.ValidateSession(context.Background(), "token"); err != domain.ErrInvalidIdentity {
-			t.Fatalf("code %s: error=%v", code, err)
+		if _, err := validator.ValidateSession(context.Background(), "token"); !errors.Is(err, domain.ErrInvalidIdentity) || status.Code(err) != code {
+			t.Fatalf("code %s: error=%v, status=%s", code, err, status.Code(err))
 		}
 	}
 }

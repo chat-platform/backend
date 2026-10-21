@@ -3,8 +3,10 @@ package domain
 import "errors"
 
 var (
-	ErrInvalidIdentity = errors.New("invalid connection identity")
-	ErrInvalidMessage  = errors.New("invalid message.send frame")
+	ErrInvalidIdentity      = errors.New("invalid connection identity")
+	ErrMalformedAuthFrame   = errors.New("malformed websocket auth frame")
+	ErrInvalidMessage       = errors.New("invalid message.send frame")
+	ErrConnectionSuperseded = errors.New("websocket connection no longer owns device registration")
 )
 
 type Identity struct {
