@@ -29,6 +29,7 @@ func NewChatRepository(pool *pgxpool.Pool, logger logging.Logger) *ChatRepositor
 type messagePayload struct {
 	ChatID      string `json:"chatId"`
 	SenderID    string `json:"senderId"`
+	SenderPhone string `json:"senderPhone,omitempty"`
 	ClientMsgID string `json:"clientMsgId"`
 	Content     string `json:"content"`
 	TS          int64  `json:"ts"`
@@ -89,7 +90,11 @@ func (r *ChatRepository) EnqueueDirectMessageEvent(
 	if len(recipients) == 0 {
 		return domain.MessageAck{}, domain.ErrNoRecipients
 	}
-	timestampMS, payload, err := encodeMessagePayload(message)
+	var senderPhone string
+	if err := r.pool.QueryRow(ctx, `SELECT phone FROM users WHERE user_id = $1`, message.SenderID).Scan(&senderPhone); err != nil {
+		return domain.MessageAck{}, fmt.Errorf("load sender phone for message payload: %w", err)
+	}
+	timestampMS, payload, err := encodeMessagePayload(message, senderPhone)
 	if err != nil {
 		return domain.MessageAck{}, err
 	}
@@ -149,7 +154,7 @@ func (r *ChatRepository) EnqueueDirectMessageEvent(
 }
 
 func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message domain.SendMessage) (domain.MessageAck, error) {
-	timestampMS, payload, err := encodeMessagePayload(message)
+	timestampMS, payload, err := encodeMessagePayload(message, "")
 	if err != nil {
 		return domain.MessageAck{}, err
 	}
@@ -189,11 +194,12 @@ func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message d
 	return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, nil
 }
 
-func encodeMessagePayload(message domain.SendMessage) (int64, []byte, error) {
+func encodeMessagePayload(message domain.SendMessage, senderPhone string) (int64, []byte, error) {
 	timestampMS := time.Now().UnixMilli()
 	payload, err := json.Marshal(messagePayload{
 		ChatID:      message.ChatID,
 		SenderID:    message.SenderID,
+		SenderPhone: senderPhone,
 		ClientMsgID: message.ClientMsgID,
 		Content:     message.Content,
 		TS:          timestampMS,
