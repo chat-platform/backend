@@ -3,10 +3,11 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/chat-platform/backend/services/relay/internal/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"time"
 )
 
 type OutboxRepository struct{ pool *pgxpool.Pool }
@@ -75,7 +76,7 @@ func (r *OutboxRepository) MarkDispatched(ctx context.Context, outboxType string
 	if route.To != "" {
 		routed = route.To
 	}
-	result, err := r.pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET dispatched_at=now(), routed_to=$2, attempt_count=CASE WHEN $2='WS' THEN 1 ELSE 0 END, claim_expiry=NULL WHERE id=$1 AND dispatched_at IS NULL`, table), id, routed)
+	result, err := r.pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET dispatched_at=now(), routed_to=$2, attempt_count=1, claim_expiry=NULL WHERE id=$1 AND dispatched_at IS NULL`, table), id, routed)
 	if err != nil {
 		return fmt.Errorf("mark outbox %d dispatched: %w", id, err)
 	}
