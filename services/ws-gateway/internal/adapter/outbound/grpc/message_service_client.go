@@ -26,10 +26,13 @@ func (s *messageServiceClient) SendMessage(ctx context.Context, command domain.S
 	})
 	if err != nil {
 		code := status.Code(err)
-		if code == codes.Unavailable || code == codes.DeadlineExceeded {
-			s.logger.Error(ctx, "message service RPC could not be completed", "error", err,
-				"sender_id", command.SenderID, "device_id", command.DeviceID,
-				"chat_id", command.ChatID, "client_msg_id", command.ClientMsgID)
+		args := []any{"error", err, "grpc_code", code.String(),
+			"sender_id", command.SenderID, "device_id", command.DeviceID,
+			"chat_id", command.ChatID, "client_msg_id", command.ClientMsgID}
+		if code == codes.InvalidArgument || code == codes.PermissionDenied || code == codes.FailedPrecondition || code == codes.Unauthenticated {
+			s.logger.Warn(ctx, "message service send RPC failed", args...)
+		} else {
+			s.logger.Error(ctx, "message service send RPC failed", args...)
 		}
 		return domain.MessageAck{}, err
 	}
@@ -39,8 +42,13 @@ func (s *messageServiceClient) SendMessage(ctx context.Context, command domain.S
 func (s *messageServiceClient) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {
 	_, err := s.client.MarkDelivered(ctx, &messagev1.MarkDeliveredRequest{DeviceId: deviceID, OutboxType: outboxType, OutboxId: outboxID})
 	if err != nil {
-		if code := status.Code(err); code == codes.Unavailable || code == codes.DeadlineExceeded {
-			s.logger.Error(ctx, "message service delivery receipt RPC could not be completed", "error", err, "device_id", deviceID, "outbox_id", outboxID)
+		code := status.Code(err)
+		if code == codes.InvalidArgument || code == codes.PermissionDenied || code == codes.NotFound {
+			s.logger.Warn(ctx, "message service delivery receipt RPC failed", "error", err,
+				"grpc_code", code.String(), "device_id", deviceID, "outbox_type", outboxType, "outbox_id", outboxID)
+		} else {
+			s.logger.Error(ctx, "message service delivery receipt RPC failed", "error", err,
+				"grpc_code", code.String(), "device_id", deviceID, "outbox_type", outboxType, "outbox_id", outboxID)
 		}
 		return err
 	}
