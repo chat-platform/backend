@@ -88,6 +88,14 @@ docker compose exec -T postgres psql -U messenger -d messenger \
   -f /docker-entrypoint-initdb.d/migrations/000008_direct_outbox_payload_text.up.sql
 ```
 
+If an existing database has the unused `originating_device_id` column on
+`direct_outbox`, remove it with:
+
+```sh
+docker compose exec -T postgres psql -U messenger -d messenger \
+  -f /docker-entrypoint-initdb.d/migrations/000009_drop_direct_outbox_originating_device_id.up.sql
+```
+
 Core API listens on `http://localhost:8081`. Request and verify a development
 OTP (`000000`) for each phone number:
 
