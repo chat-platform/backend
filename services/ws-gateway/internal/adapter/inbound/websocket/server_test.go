@@ -84,8 +84,8 @@ func (f *fakeOperations) MarkDelivered(_ context.Context, identity domain.Identi
 	}
 	return nil
 }
-func (f *fakeOperations) MarkRead(_ context.Context, _ domain.Identity, chatID, senderID, clientMsgID string, readAt int64) error {
-	f.readReceipt = wsframe.ReadReceiptPayload{ChatID: chatID, SenderID: senderID, ClientMsgID: clientMsgID, ReadAt: readAt}
+func (f *fakeOperations) MarkRead(_ context.Context, _ domain.Identity, outboxType string, outboxID, readAt int64) error {
+	f.readReceipt = wsframe.ReadReceiptPayload{OutboxType: wsframe.OutboxType(outboxType), OutboxID: outboxID, ReadAt: readAt}
 	if f.readCh != nil {
 		close(f.readCh)
 	}
@@ -302,7 +302,7 @@ func TestReadReceiptIsForwardedWithAuthenticatedIdentity(t *testing.T) {
 	if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
 		t.Fatalf("auth ack=(%+v,%v)", authAck, err)
 	}
-	payload := wsframe.ReadReceiptPayload{ChatID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", SenderID: "22222222-2222-4222-8222-222222222222", ClientMsgID: "0199d628-39d0-7000-8000-000000000001", ReadAt: 1770000000123}
+	payload := wsframe.ReadReceiptPayload{OutboxType: wsframe.OutboxTypeGroup, OutboxID: 42, ReadAt: 1770000000123}
 	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeReceiptRead, Payload: mustJSON(t, payload)}); err != nil {
 		t.Fatal(err)
 	}

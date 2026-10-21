@@ -47,7 +47,7 @@ func (s *messageServiceClient) MarkDelivered(ctx context.Context, deviceID strin
 	return nil
 }
 
-func (s *messageServiceClient) MarkRead(ctx context.Context, deviceID, readerID, chatID, senderID, clientMsgID string, readAt int64) error {
-	_, err := s.client.MarkRead(ctx, &messagev1.MarkReadRequest{DeviceId: deviceID, ReaderUserId: readerID, ChatId: chatID, SenderId: senderID, ClientMsgId: clientMsgID, ReadAt: readAt})
+func (s *messageServiceClient) MarkRead(ctx context.Context, deviceID, outboxType string, outboxID, readAt int64) error {
+	_, err := s.client.MarkRead(ctx, &messagev1.MarkReadRequest{DeviceId: deviceID, OutboxType: outboxType, OutboxId: outboxID, ReadAt: readAt})
 	return err
 }

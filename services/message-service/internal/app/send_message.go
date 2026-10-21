@@ -61,7 +61,7 @@ func (s *ChatOperations) MarkDelivered(ctx context.Context, deviceID string, out
 }
 
 func (s *ChatOperations) MarkRead(ctx context.Context, receipt domain.ReadReceipt) error {
-	if receipt.ReaderID == "" || receipt.ChatID == "" || receipt.SenderID == "" || receipt.ClientMsgID == "" || receipt.ReadAt <= 0 {
+	if receipt.DeviceID == "" || (receipt.OutboxType != "direct" && receipt.OutboxType != "group") || receipt.OutboxID <= 0 || receipt.ReadAt <= 0 {
 		return domain.ErrInvalidMessage
 	}
 	return s.chatRepository.MarkRead(ctx, receipt)

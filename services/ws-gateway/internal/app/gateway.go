@@ -92,9 +92,9 @@ func (g *Gateway) MarkDelivered(ctx context.Context, identity domain.Identity, o
 	return g.messages.MarkDelivered(ctx, identity.DeviceID, outboxType, outboxID)
 }
 
-func (g *Gateway) MarkRead(ctx context.Context, identity domain.Identity, chatID, senderID, clientMsgID string, readAt int64) error {
-	if strings.TrimSpace(chatID) == "" || strings.TrimSpace(senderID) == "" || strings.TrimSpace(clientMsgID) == "" || readAt <= 0 {
+func (g *Gateway) MarkRead(ctx context.Context, identity domain.Identity, outboxType string, outboxID int64, readAt int64) error {
+	if (outboxType != "direct" && outboxType != "group") || outboxID <= 0 || readAt <= 0 {
 		return domain.ErrInvalidMessage
 	}
-	return g.messages.MarkRead(ctx, identity.DeviceID, identity.UserID, chatID, senderID, clientMsgID, readAt)
+	return g.messages.MarkRead(ctx, identity.DeviceID, outboxType, outboxID, readAt)
 }

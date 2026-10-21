@@ -41,11 +41,10 @@ message MarkDeliveredResponse {}
 
 message MarkReadRequest {
   string device_id = 1 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
-  string chat_id = 2 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
-  string sender_id = 3 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
-  string client_msg_id = 4 [(buf.validate.field).string.uuid = true];
+  reserved 2, 3, 4;
   int64 read_at = 5 [(buf.validate.field).int64.gt = 0];
-  string reader_user_id = 6 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
+  int64 outbox_id = 6 [(buf.validate.field).int64.gt = 0];
+  string outbox_type = 7 [(buf.validate.field).string = {pattern: "^(direct|group)$"}];
 }
 
 message MarkReadResponse {}

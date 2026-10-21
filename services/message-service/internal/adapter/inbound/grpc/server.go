@@ -108,14 +108,7 @@ func (s *Server) MarkRead(ctx context.Context, request *messagev1.MarkReadReques
 	if err := s.validator.Validate(request); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	clientMsgID, err := uuid.Parse(request.GetClientMsgId())
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, "client_msg_id must be a valid UUID")
-	}
-	err = s.operations.MarkRead(ctx, domain.ReadReceipt{
-		ReaderID: request.GetReaderUserId(), ChatID: request.GetChatId(), SenderID: request.GetSenderId(),
-		ClientMsgID: clientMsgID.String(), ReadAt: request.GetReadAt(),
-	})
+	err := s.operations.MarkRead(ctx, domain.ReadReceipt{DeviceID: request.GetDeviceId(), OutboxType: request.GetOutboxType(), OutboxID: request.GetOutboxId(), ReadAt: request.GetReadAt()})
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidMessage) {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -123,7 +116,7 @@ func (s *Server) MarkRead(ctx context.Context, request *messagev1.MarkReadReques
 		if errors.Is(err, domain.ErrChatAccessDenied) {
 			return nil, status.Error(codes.PermissionDenied, err.Error())
 		}
-		s.logger.Error(ctx, "could not record read receipt", "error", err, "chat_id", request.GetChatId(), "sender_id", request.GetSenderId())
+		s.logger.Error(ctx, "could not record read receipt", "error", err, "device_id", request.GetDeviceId(), "outbox_type", request.GetOutboxType(), "outbox_id", request.GetOutboxId())
 		return nil, status.Error(codes.Internal, "could not record read receipt")
 	}
 	return &messagev1.MarkReadResponse{}, nil

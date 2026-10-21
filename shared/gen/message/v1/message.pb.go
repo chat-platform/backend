@@ -250,11 +250,9 @@ func (*MarkDeliveredResponse) Descriptor() ([]byte, []int) {
 type MarkReadRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	ChatId        string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
-	SenderId      string                 `protobuf:"bytes,3,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
-	ClientMsgId   string                 `protobuf:"bytes,4,opt,name=client_msg_id,json=clientMsgId,proto3" json:"client_msg_id,omitempty"`
 	ReadAt        int64                  `protobuf:"varint,5,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
-	ReaderUserId  string                 `protobuf:"bytes,6,opt,name=reader_user_id,json=readerUserId,proto3" json:"reader_user_id,omitempty"`
+	OutboxId      int64                  `protobuf:"varint,6,opt,name=outbox_id,json=outboxId,proto3" json:"outbox_id,omitempty"`
+	OutboxType    string                 `protobuf:"bytes,7,opt,name=outbox_type,json=outboxType,proto3" json:"outbox_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -296,27 +294,6 @@ func (x *MarkReadRequest) GetDeviceId() string {
 	return ""
 }
 
-func (x *MarkReadRequest) GetChatId() string {
-	if x != nil {
-		return x.ChatId
-	}
-	return ""
-}
-
-func (x *MarkReadRequest) GetSenderId() string {
-	if x != nil {
-		return x.SenderId
-	}
-	return ""
-}
-
-func (x *MarkReadRequest) GetClientMsgId() string {
-	if x != nil {
-		return x.ClientMsgId
-	}
-	return ""
-}
-
 func (x *MarkReadRequest) GetReadAt() int64 {
 	if x != nil {
 		return x.ReadAt
@@ -324,9 +301,16 @@ func (x *MarkReadRequest) GetReadAt() int64 {
 	return 0
 }
 
-func (x *MarkReadRequest) GetReaderUserId() string {
+func (x *MarkReadRequest) GetOutboxId() int64 {
 	if x != nil {
-		return x.ReaderUserId
+		return x.OutboxId
+	}
+	return 0
+}
+
+func (x *MarkReadRequest) GetOutboxType() string {
+	if x != nil {
+		return x.OutboxType
 	}
 	return ""
 }
@@ -392,18 +376,14 @@ const file_message_v1_message_proto_rawDesc = "" +
 	"\toutbox_id\x18\x02 \x01(\x03B\a\xbaH\x04\"\x02 \x00R\boutboxId\x128\n" +
 	"\voutbox_type\x18\x03 \x01(\tB\x17\xbaH\x14r\x122\x10^(direct|group)$R\n" +
 	"outboxType\"\x17\n" +
-	"\x15MarkDeliveredResponse\"\x9e\x02\n" +
+	"\x15MarkDeliveredResponse\"\xd3\x01\n" +
 	"\x0fMarkReadRequest\x12,\n" +
 	"\tdevice_id\x18\x01 \x01(\tB\x0f\xbaH\fr\n" +
-	"\x10\x012\x06.*\\S.*R\bdeviceId\x12(\n" +
-	"\achat_id\x18\x02 \x01(\tB\x0f\xbaH\fr\n" +
-	"\x10\x012\x06.*\\S.*R\x06chatId\x12,\n" +
-	"\tsender_id\x18\x03 \x01(\tB\x0f\xbaH\fr\n" +
-	"\x10\x012\x06.*\\S.*R\bsenderId\x12,\n" +
-	"\rclient_msg_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\vclientMsgId\x12 \n" +
-	"\aread_at\x18\x05 \x01(\x03B\a\xbaH\x04\"\x02 \x00R\x06readAt\x125\n" +
-	"\x0ereader_user_id\x18\x06 \x01(\tB\x0f\xbaH\fr\n" +
-	"\x10\x012\x06.*\\S.*R\freaderUserId\"\x12\n" +
+	"\x10\x012\x06.*\\S.*R\bdeviceId\x12 \n" +
+	"\aread_at\x18\x05 \x01(\x03B\a\xbaH\x04\"\x02 \x00R\x06readAt\x12$\n" +
+	"\toutbox_id\x18\x06 \x01(\x03B\a\xbaH\x04\"\x02 \x00R\boutboxId\x128\n" +
+	"\voutbox_type\x18\a \x01(\tB\x17\xbaH\x14r\x122\x10^(direct|group)$R\n" +
+	"outboxTypeJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05\"\x12\n" +
 	"\x10MarkReadResponse2\xf8\x01\n" +
 	"\x0eMessageService\x12I\n" +
 	"\vSendMessage\x12\x1e.message.v1.SendMessageRequest\x1a\x1a.message.v1.SendMessageAck\x12T\n" +

@@ -55,7 +55,7 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 	sender := "11111111-1111-4111-8111-111111111111"
 	reader := "22222222-2222-4222-8222-222222222222"
 	clientMsg := "0199d628-39d0-7000-8000-000000000001"
-	if _, err := pool.Exec(ctx, `INSERT INTO device(device_id,user_id) VALUES ($1,$2),('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',$2);
+	if _, err := pool.Exec(ctx, `INSERT INTO device(device_id,user_id) VALUES ($1,$4),('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',$2),('cccccccc-cccc-4ccc-8ccc-cccccccccccc',$2);
 	INSERT INTO chat(chat_id,type) VALUES ('33333333-3333-4333-8333-333333333333','DIRECT'),('44444444-4444-4444-8444-444444444444','GROUP');
 	INSERT INTO chat_membership(chat_id,user_id) VALUES ('33333333-3333-4333-8333-333333333333',$2),('33333333-3333-4333-8333-333333333333',$4),('44444444-4444-4444-8444-444444444444',$2),('44444444-4444-4444-8444-444444444444',$4);
 	INSERT INTO direct_outbox(id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload) VALUES (7,$2,$3,$4,$1,'NEW_MESSAGE','{"chatId":"33333333-3333-4333-8333-333333333333","senderId":"11111111-1111-4111-8111-111111111111","clientMsgId":"0199d628-39d0-7000-8000-000000000001","content":"hi","ts":1}');
@@ -103,12 +103,18 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE event_type='RECEIPT'`).Scan(&receipts); err != nil || receipts != 4 {
 		t.Fatalf("delivery receipt events=(%d,%v), want one per sender device for each direct and group message", receipts, err)
 	}
-	for _, chatID := range []string{"33333333-3333-4333-8333-333333333333", "44444444-4444-4444-8444-444444444444"} {
-		if err := repo.MarkRead(ctx, domain.ReadReceipt{ReaderID: reader, ChatID: chatID, SenderID: sender, ClientMsgID: clientMsg, ReadAt: 1770000000123}); err != nil {
-			t.Fatalf("MarkRead(%s): %v", chatID, err)
+	for _, outboxType := range []string{"direct", "group"} {
+		if err := repo.MarkRead(ctx, domain.ReadReceipt{DeviceID: device, OutboxType: outboxType, OutboxID: 7, ReadAt: 1770000000123}); err != nil {
+			t.Fatalf("MarkRead(%s): %v", outboxType, err)
 		}
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE event_type='RECEIPT' AND payload::jsonb->>'receiptType'='read'`).Scan(&receipts); err != nil || receipts != 4 {
 		t.Fatalf("read receipt events=(%d,%v), want one per sender device for direct and group messages", receipts, err)
+	}
+	if err := repo.MarkRead(ctx, domain.ReadReceipt{DeviceID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", OutboxType: "direct", OutboxID: 7, ReadAt: 1770000000123}); err != domain.ErrChatAccessDenied {
+		t.Fatalf("read receipt from a device that was not a recipient error=%v, want ErrChatAccessDenied", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE event_type='RECEIPT' AND payload::jsonb->>'receiptType'='read'`).Scan(&receipts); err != nil || receipts != 4 {
+		t.Fatalf("unauthorized read receipt events=(%d,%v), want unchanged count 4", receipts, err)
 	}
 }

@@ -9,7 +9,7 @@ import (
 type MessageService interface {
 	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, string, string, int64) error
-	MarkRead(context.Context, string, string, string, string, string, int64) error
+	MarkRead(context.Context, string, string, int64, int64) error
 }
 
 type ConnectionRegistry interface {

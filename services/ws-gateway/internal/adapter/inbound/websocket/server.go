@@ -30,7 +30,7 @@ type Operations interface {
 	Unregister(context.Context, string, domain.Connection) error
 	Send(context.Context, domain.Identity, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, domain.Identity, string, int64) error
-	MarkRead(context.Context, domain.Identity, string, string, string, int64) error
+	MarkRead(context.Context, domain.Identity, string, int64, int64) error
 }
 
 type Server struct {
@@ -193,14 +193,13 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if envelope.Type == wsframe.TypeReceiptRead {
 			var receipt wsframe.ReadReceiptPayload
 			decodeErr := json.Unmarshal(envelope.Payload, &receipt)
-			clientMsgID, idErr := uuid.Parse(receipt.ClientMsgID)
 			if len(envelope.Payload) == 0 || decodeErr != nil ||
-				strings.TrimSpace(receipt.ChatID) == "" || strings.TrimSpace(receipt.SenderID) == "" ||
-				idErr != nil || receipt.ReadAt <= 0 {
-				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.read requires chatId, senderId, UUID clientMsgId, and positive readAt")
+				(receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) ||
+				receipt.OutboxID <= 0 || receipt.ReadAt <= 0 {
+				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.read requires a valid outboxType, positive outboxId, and positive readAt")
 				continue
 			}
-			if err := s.operations.MarkRead(ctx, identity, receipt.ChatID, receipt.SenderID, clientMsgID.String(), receipt.ReadAt); err != nil {
+			if err := s.operations.MarkRead(ctx, identity, string(receipt.OutboxType), receipt.OutboxID, receipt.ReadAt); err != nil {
 				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "read receipt could not be recorded")
 			}
 			continue

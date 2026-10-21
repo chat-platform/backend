@@ -22,11 +22,10 @@ type MessageAck struct {
 }
 
 type ReadReceipt struct {
-	ReaderID    string
-	ChatID      string
-	SenderID    string
-	ClientMsgID string
-	ReadAt      int64
+	DeviceID   string
+	OutboxType string
+	OutboxID   int64
+	ReadAt     int64
 }
 
 type RecipientDevice struct {

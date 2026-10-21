@@ -281,26 +281,34 @@ func (r *ChatRepository) MarkRead(ctx context.Context, receipt domain.ReadReceip
 		return fmt.Errorf("begin read receipt transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	var authorized bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM chat c
-		JOIN chat_membership reader ON reader.chat_id=c.chat_id AND reader.user_id=$2
-		JOIN chat_membership sender ON sender.chat_id=c.chat_id AND sender.user_id=$3
-		WHERE c.chat_id=$1 AND c.deleted_at IS NULL
-		AND $2 <> $3
-		AND ((c.type='DIRECT' AND EXISTS (SELECT 1 FROM direct_outbox o WHERE o.sender_id=$3 AND o.client_msg_id=$4::uuid AND o.event_type='NEW_MESSAGE' AND o.payload::jsonb->>'chatId'=$1))
-		OR (c.type='GROUP' AND EXISTS (SELECT 1 FROM group_event e WHERE e.chat_id=c.chat_id AND e.sender_id=$3 AND e.client_msg_id=$4::uuid AND e.event_type='NEW_MESSAGE')))
-	)`, receipt.ChatID, receipt.ReaderID, receipt.SenderID, receipt.ClientMsgID).Scan(&authorized); err != nil {
-		return fmt.Errorf("authorize read receipt: %w", err)
+	var readerID, senderID, clientMsgID string
+	var query string
+	switch receipt.OutboxType {
+	case "direct":
+		query = `SELECT d.user_id::text, o.sender_id::text, o.client_msg_id::text
+			FROM direct_outbox o JOIN device d ON d.device_id=o.device_id AND d.user_id=o.recipient_id
+			WHERE o.id=$2 AND o.device_id=$1 AND d.revoked_at IS NULL AND o.event_type='NEW_MESSAGE'`
+	case "group":
+		query = `SELECT d.user_id::text, e.sender_id::text, e.client_msg_id::text
+			FROM group_outbox o JOIN device d ON d.device_id=o.device_id AND d.user_id=o.recipient_id
+			JOIN group_event e ON e.event_id=o.event_id
+			WHERE o.id=$2 AND o.device_id=$1 AND d.revoked_at IS NULL AND e.event_type='NEW_MESSAGE'`
+	default:
+		return domain.ErrInvalidMessage
 	}
-	if !authorized {
+	if err := tx.QueryRow(ctx, query, receipt.DeviceID, receipt.OutboxID).Scan(&readerID, &senderID, &clientMsgID); errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrChatAccessDenied
+	} else if err != nil {
+		return fmt.Errorf("authorize read receipt source event: %w", err)
+	}
+	if readerID == senderID {
 		return domain.ErrChatAccessDenied
 	}
-	payload, err := json.Marshal(map[string]any{"receiptType": "read", "senderId": receipt.SenderID, "clientMsgId": receipt.ClientMsgID, "readAt": receipt.ReadAt, "readerUserId": receipt.ReaderID})
+	payload, err := json.Marshal(map[string]any{"receiptType": "read", "senderId": senderID, "clientMsgId": clientMsgID, "readAt": receipt.ReadAt, "readerUserId": readerID})
 	if err != nil {
 		return fmt.Errorf("encode read receipt: %w", err)
 	}
-	if err := enqueueReceiptForSender(ctx, tx, receipt.ReaderID, receipt.SenderID, receipt.ClientMsgID, payload); err != nil {
+	if err := enqueueReceiptForSender(ctx, tx, readerID, senderID, clientMsgID, payload); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -339,7 +339,7 @@ Triggered when the user (recipient) opens the chat. The client sends one
 `receipt.read` per message it has read, addressed to that message's
 sender:
 
-    receipt.read { chatId, senderId, clientMsgId, readAt }
+    receipt.read { outboxType, outboxId, readAt }
 
 The server does not store read state: there is no `msg_seen_status`, and
 no `read_at` column on the outbox.
@@ -355,9 +355,11 @@ into `direct_outbox`, addressed to the sender's devices:
   `direct_outbox` row per device of that user.
 
 Per-message (not a range): the client sends one receipt per message. The
-server does not need to know the chat's message order, and cannot verify
-a range — it just forwards each receipt. The sender's devices apply each
-receipt to the matching message (identified by `senderId, clientMsgId`).
+outbox type and ID identify the exact source event. Message Service
+checks that the authenticated device was a recipient, then derives the
+sender and message ID from the stored outbox row. The sender's devices
+apply each receipt to the matching message (identified by
+`senderId, clientMsgId`).
 
 If multiple devices of the same reader send receipts for the same
 message, the sender's client applies the first and ignores duplicates.

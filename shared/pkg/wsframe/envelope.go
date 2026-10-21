@@ -59,8 +59,7 @@ type DeliveryReceiptPayload struct {
 }
 
 type ReadReceiptPayload struct {
-	ChatID      string `json:"chatId"`
-	SenderID    string `json:"senderId"`
-	ClientMsgID string `json:"clientMsgId"`
-	ReadAt      int64  `json:"readAt"`
+	OutboxType OutboxType `json:"outboxType"`
+	OutboxID   int64      `json:"outboxId"`
+	ReadAt     int64      `json:"readAt"`
 }
