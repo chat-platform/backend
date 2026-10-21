@@ -251,7 +251,7 @@ func (r *ChatRepository) MarkDelivered(ctx context.Context, deviceID string, out
 	}
 	defer tx.Rollback(ctx)
 	var senderID, clientMsgID, eventType, readerID string
-	query := fmt.Sprintf(`SELECT %s.sender_id::text, %s.client_msg_id::text, %s.event_type, outbox.recipient_id::text
+	query := fmt.Sprintf(`SELECT %s::text, %s::text, %s, outbox.recipient_id::text
 		FROM %s AS outbox %s WHERE outbox.id=$1 AND outbox.device_id=$2 AND outbox.delivered_at IS NULL
 		FOR UPDATE OF outbox`, receiptSenderExpr(outboxType), receiptClientMsgExpr(outboxType), receiptTypeExpr(outboxType), table, eventJoin)
 	if err := tx.QueryRow(ctx, query, outboxID, deviceID).Scan(&senderID, &clientMsgID, &eventType, &readerID); errors.Is(err, pgx.ErrNoRows) {

@@ -14,7 +14,7 @@ func NewTokenRepository(pool *pgxpool.Pool) *TokenRepository { return &TokenRepo
 
 func (r *TokenRepository) PushToken(ctx context.Context, deviceID string) (string, string, error) {
 	var token, platform string
-	err := r.pool.QueryRow(ctx, `SELECT push_token, platform FROM device WHERE device_id=$1 AND revoked_at IS NULL`, deviceID).Scan(&token, &platform)
+	err := r.pool.QueryRow(ctx, `SELECT COALESCE(push_token, ''), platform FROM device WHERE device_id=$1 AND revoked_at IS NULL`, deviceID).Scan(&token, &platform)
 	if err == pgx.ErrNoRows {
 		return "", "", nil
 	}
