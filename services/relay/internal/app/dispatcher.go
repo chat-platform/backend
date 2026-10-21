@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/chat-platform/backend/services/relay/internal/domain"
 	"github.com/chat-platform/backend/services/relay/internal/port"
@@ -98,7 +99,15 @@ func (d *Dispatcher) dispatchBatch(ctx context.Context, outboxType string, event
 		}
 		route := domain.Route{}
 		if !online {
-			d.logger.Info(ctx, "outbox event skipped for offline device", "outbox_id", event.ID, "device_id", event.DeviceID)
+			if chatID, eligible := notificationChatID(event.EventType, event.Payload); eligible {
+				if err := d.publisher.PublishNotification(ctx, event); err != nil {
+					return count, fmt.Errorf("publish notification hint for outbox %d: %w", event.ID, err)
+				}
+				route = domain.Route{To: domain.RouteNotification}
+				d.logger.Info(ctx, "outbox event routed to notification stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "chat_id", chatID)
+			} else {
+				d.logger.Info(ctx, "outbox event skipped for offline device", "outbox_id", event.ID, "device_id", event.DeviceID)
+			}
 		} else {
 			if err := d.publisher.Publish(ctx, connection, event); err != nil {
 				d.logger.Error(ctx, "could not publish websocket delivery", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID, "error", err)
@@ -114,4 +123,14 @@ func (d *Dispatcher) dispatchBatch(ctx context.Context, outboxType string, event
 		count++
 	}
 	return count, nil
+}
+
+func notificationChatID(eventType string, payload []byte) (string, bool) {
+	var event struct {
+		ChatID string `json:"chatId"`
+	}
+	if eventType != "NEW_MESSAGE" || json.Unmarshal(payload, &event) != nil || event.ChatID == "" {
+		return "", false
+	}
+	return event.ChatID, true
 }

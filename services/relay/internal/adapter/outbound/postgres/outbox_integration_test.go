@@ -47,7 +47,7 @@ func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
 	}
 	t.Cleanup(pool.Close)
 	_, err = pool.Exec(ctx, `CREATE TABLE direct_outbox (
-		id BIGSERIAL PRIMARY KEY, device_id UUID NOT NULL, payload TEXT NOT NULL,
+		id BIGSERIAL PRIMARY KEY, device_id UUID NOT NULL, event_type TEXT NOT NULL DEFAULT 'NEW_MESSAGE', payload TEXT NOT NULL,
 		routed_to TEXT, dispatched_at TIMESTAMPTZ, claim_expiry TIMESTAMPTZ,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT now(), delivered_at TIMESTAMPTZ,
 		attempt_count INTEGER NOT NULL DEFAULT 0
@@ -55,7 +55,7 @@ func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = pool.Exec(ctx, `CREATE TABLE group_event (event_id BIGSERIAL PRIMARY KEY, payload TEXT NOT NULL);
+	_, err = pool.Exec(ctx, `CREATE TABLE group_event (event_id BIGSERIAL PRIMARY KEY, event_type TEXT NOT NULL DEFAULT 'NEW_MESSAGE', payload TEXT NOT NULL);
 	CREATE TABLE group_outbox (
 		id BIGSERIAL PRIMARY KEY, event_id BIGINT NOT NULL REFERENCES group_event(event_id),
 		device_id UUID NOT NULL, routed_to TEXT, dispatched_at TIMESTAMPTZ,
@@ -234,6 +234,23 @@ func TestClaimBatchAndMarkDispatched(t *testing.T) {
 	more, err := repo.ClaimBatch(ctx, "direct", 10, time.Minute)
 	if err != nil || len(more) != 0 {
 		t.Fatalf("ClaimBatch after dispatch=(%d,%v), want (0,nil)", len(more), err)
+	}
+}
+
+func TestClaimRetryBatchExcludesNotificationRoutes(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	wsID := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "ws")
+	notifID := insertEvent(t, pool, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "notification")
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS',dispatched_at=now()-interval '2 minutes',attempt_count=1 WHERE id=$1`, wsID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='NOTIF',dispatched_at=now()-interval '2 minutes',attempt_count=1 WHERE id=$1`, notifID); err != nil {
+		t.Fatal(err)
+	}
+	events, err := repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
+	if err != nil || len(events) != 1 || events[0].ID != wsID {
+		t.Fatalf("retry events=%+v err=%v, want only WS row %d", events, err, wsID)
 	}
 }
 

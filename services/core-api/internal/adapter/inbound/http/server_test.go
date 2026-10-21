@@ -26,6 +26,9 @@ type sessionRepoStub struct {
 	directSyncLimit  int
 	groupSyncCursor  int64
 	groupSyncLimit   int
+	pushDevice       string
+	pushToken        string
+	clearedDevice    string
 }
 
 func (r *sessionRepoStub) CompleteOTP(context.Context, string, string, string, string, string, time.Time) (app.User, app.Device, app.Session, error) {
@@ -35,6 +38,14 @@ func (r *sessionRepoStub) GetProfile(context.Context, string) (app.User, error) 
 	return app.User{}, nil
 }
 func (r *sessionRepoStub) SetDisplayName(context.Context, string, string) error { return nil }
+func (r *sessionRepoStub) SetPushToken(_ context.Context, device, token string) error {
+	r.pushDevice, r.pushToken = device, token
+	return nil
+}
+func (r *sessionRepoStub) ClearPushToken(_ context.Context, device string) error {
+	r.clearedDevice = device
+	return nil
+}
 func (r *sessionRepoStub) GetOrCreateDirectChat(context.Context, string, string) (string, error) {
 	return "", nil
 }
@@ -217,5 +228,36 @@ func TestSyncRejectsInvalidQuery(t *testing.T) {
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("%s status=%d, want 400", path, recorder.Code)
 		}
+	}
+}
+
+func TestPushTokenLifecycleUsesAuthenticatedDevice(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	secret := []byte("a sufficiently long test signing secret 123456")
+	claims := sessiontoken.Claims{SessionID: "sid", UserID: "user", DeviceID: "device-owned", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	token, err := sessiontoken.Sign(claims, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &sessionRepoStub{active: true}
+	server := New(app.New(repo, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }}))
+	for _, value := range []string{"token-old", "token-new"} {
+		request := httptest.NewRequest(http.MethodPut, "/v1/devices/push-token", strings.NewReader(`{"token":"`+value+`"}`))
+		request.Header.Set("Authorization", "Bearer "+token)
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("PUT status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		if repo.pushDevice != claims.DeviceID || repo.pushToken != value {
+			t.Fatalf("registered device=%q token=%q", repo.pushDevice, repo.pushToken)
+		}
+	}
+	request := httptest.NewRequest(http.MethodDelete, "/v1/devices/push-token", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent || repo.clearedDevice != claims.DeviceID {
+		t.Fatalf("DELETE status=%d cleared device=%q", recorder.Code, repo.clearedDevice)
 	}
 }

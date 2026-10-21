@@ -18,4 +18,5 @@ type ConnectionRegistry interface {
 }
 type StreamPublisher interface {
 	Publish(context.Context, domain.Connection, domain.OutboxEvent) error
+	PublishNotification(context.Context, domain.OutboxEvent) error
 }

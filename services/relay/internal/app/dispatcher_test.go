@@ -74,9 +74,10 @@ func (r testRegistry) Lookup(_ context.Context, id string) (domain.Connection, b
 }
 
 type testPublisher struct {
-	calls  int
-	err    error
-	events []domain.OutboxEvent
+	calls         int
+	err           error
+	events        []domain.OutboxEvent
+	notifications []domain.OutboxEvent
 }
 
 func (p *testPublisher) Publish(_ context.Context, _ domain.Connection, event domain.OutboxEvent) error {
@@ -84,9 +85,14 @@ func (p *testPublisher) Publish(_ context.Context, _ domain.Connection, event do
 	p.events = append(p.events, event)
 	return p.err
 }
+func (p *testPublisher) PublishNotification(_ context.Context, event domain.OutboxEvent) error {
+	p.calls++
+	p.notifications = append(p.notifications, event)
+	return p.err
+}
 
 func TestRunOnceRoutesOnlineAndMarksOffline(t *testing.T) {
-	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 1, DeviceID: "online"}, {ID: 2, DeviceID: "offline"}}}
+	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 1, DeviceID: "online"}, {ID: 2, DeviceID: "offline", EventType: "RECEIPT"}}}
 	publisher := &testPublisher{}
 	registry := testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws-1", ConnID: "conn-1"}}}
 	d := New(outbox, registry, publisher, OutboxOptions{BatchSize: 10, ClaimLease: time.Second}, quietLogger(t))
@@ -102,6 +108,18 @@ func TestRunOnceRoutesOnlineAndMarksOffline(t *testing.T) {
 	}
 	if outbox.marked["direct:1"].To != domain.RouteWebSocket || outbox.marked["direct:2"].To != "" {
 		t.Fatalf("marked routes=%+v", outbox.marked)
+	}
+}
+
+func TestRunOnceRoutesOfflineNewMessagesToNotifications(t *testing.T) {
+	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 3, DeviceID: "offline", EventType: "NEW_MESSAGE", Payload: []byte(`{"chatId":"chat-1","content":"must-not-be-forwarded"}`)}}}
+	publisher := &testPublisher{}
+	d := New(outbox, testRegistry{}, publisher, OutboxOptions{BatchSize: 10}, quietLogger(t))
+	if count, err := d.RunOnce(context.Background()); err != nil || count != 1 {
+		t.Fatalf("RunOnce()=(%d,%v), want (1,nil)", count, err)
+	}
+	if len(publisher.notifications) != 1 || outbox.marked["direct:3"].To != domain.RouteNotification {
+		t.Fatalf("notifications=%+v routes=%+v", publisher.notifications, outbox.marked)
 	}
 }
 
@@ -127,7 +145,7 @@ func TestRunOnceDoesNotMarkWhenLookupOrPublishFails(t *testing.T) {
 		{name: "publish", registry: testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}, publisher: &testPublisher{err: errors.New("redis publish down")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 7, DeviceID: "online"}}}
+			outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 7, DeviceID: "online", EventType: "NEW_MESSAGE", Payload: []byte(`{"chatId":"chat"}`)}}}
 			if tc.publisher == nil {
 				tc.publisher = &testPublisher{}
 			}
@@ -143,7 +161,7 @@ func TestRunOnceDoesNotMarkWhenLookupOrPublishFails(t *testing.T) {
 }
 
 func TestRunOnceReportsMarkFailureAfterPublish(t *testing.T) {
-	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 8, DeviceID: "online"}}, markErr: errors.New("postgres down")}
+	outbox := &testOutbox{events: []domain.OutboxEvent{{ID: 8, DeviceID: "online", EventType: "NEW_MESSAGE", Payload: []byte(`{"chatId":"chat"}`)}}, markErr: errors.New("postgres down")}
 	publisher := &testPublisher{}
 	d := New(outbox, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}, publisher, OutboxOptions{BatchSize: 1, ClaimLease: time.Second}, quietLogger(t))
 	if _, err := d.RunOnce(context.Background()); err == nil {
