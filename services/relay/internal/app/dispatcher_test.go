@@ -13,9 +13,11 @@ import (
 )
 
 type testOutbox struct {
-	events  []domain.OutboxEvent
-	marked  map[string]domain.Route
-	markErr error
+	events      []domain.OutboxEvent
+	retryEvents []domain.OutboxEvent
+	marked      map[string]domain.Route
+	retried     []string
+	markErr     error
 }
 
 func (o *testOutbox) ClaimBatch(_ context.Context, outboxType string, _ int, _ time.Duration) ([]domain.OutboxEvent, error) {
@@ -31,6 +33,15 @@ func (o *testOutbox) ClaimBatch(_ context.Context, outboxType string, _ int, _ t
 	}
 	return events, nil
 }
+func (o *testOutbox) ClaimRetryBatch(_ context.Context, outboxType string, _ int, _ time.Duration) ([]domain.OutboxEvent, error) {
+	events := make([]domain.OutboxEvent, 0)
+	for _, event := range o.retryEvents {
+		if event.OutboxType == outboxType {
+			events = append(events, event)
+		}
+	}
+	return events, nil
+}
 func (o *testOutbox) MarkDispatched(_ context.Context, outboxType string, id int64, route domain.Route) error {
 	if o.markErr != nil {
 		return o.markErr
@@ -39,6 +50,13 @@ func (o *testOutbox) MarkDispatched(_ context.Context, outboxType string, id int
 		o.marked = make(map[string]domain.Route)
 	}
 	o.marked[fmt.Sprintf("%s:%d", outboxType, id)] = route
+	return nil
+}
+func (o *testOutbox) MarkRetryAttempt(_ context.Context, outboxType string, id int64, _ time.Time) error {
+	o.retried = append(o.retried, fmt.Sprintf("%s:%d", outboxType, id))
+	return nil
+}
+func (o *testOutbox) ReleaseRetryClaim(context.Context, string, int64, time.Time, time.Duration) error {
 	return nil
 }
 
@@ -151,6 +169,26 @@ func TestPublishThenMarkFailureCanRetrySameLogicalMessage(t *testing.T) {
 	}
 	if len(publisher.events) != 2 || publisher.events[0].ID != publisher.events[1].ID || !reflect.DeepEqual(publisher.events[0].Payload, publisher.events[1].Payload) {
 		t.Fatalf("retry did not publish the same logical event twice: %+v", publisher.events)
+	}
+}
+
+func TestRetryOncePublishesDirectAndGroupAndMarksAttempts(t *testing.T) {
+	lease := time.Now().Add(time.Minute)
+	outbox := &testOutbox{retryEvents: []domain.OutboxEvent{
+		{ID: 11, OutboxType: "direct", DeviceID: "online", ClaimExpiry: lease},
+		{ID: 12, OutboxType: "group", DeviceID: "online", ClaimExpiry: lease},
+	}}
+	publisher := &testPublisher{}
+	d := New(outbox, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}, publisher, OutboxOptions{RetryBatchSize: 10}, quietLogger(t))
+	count, err := d.RetryOnce(context.Background())
+	if err != nil || count != 2 {
+		t.Fatalf("RetryOnce()=(%d,%v), want (2,nil)", count, err)
+	}
+	if !reflect.DeepEqual(outbox.retried, []string{"direct:11", "group:12"}) {
+		t.Fatalf("retry marks=%v", outbox.retried)
+	}
+	if len(publisher.events) != 2 || publisher.events[0].OutboxType != "direct" || publisher.events[1].OutboxType != "group" {
+		t.Fatalf("published retry events=%+v", publisher.events)
 	}
 }
 

@@ -15,6 +15,9 @@ func (f messageSenderFunc) SendMessage(ctx context.Context, command domain.SendM
 	return f(ctx, command)
 }
 func (messageSenderFunc) MarkDelivered(context.Context, string, string, int64) error { return nil }
+func (messageSenderFunc) MarkRead(context.Context, string, string, int64, int64) error {
+	return nil
+}
 
 type registryStub struct{}
 

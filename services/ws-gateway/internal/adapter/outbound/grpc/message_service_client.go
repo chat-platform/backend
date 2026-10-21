@@ -46,3 +46,8 @@ func (s *messageServiceClient) MarkDelivered(ctx context.Context, deviceID strin
 	}
 	return nil
 }
+
+func (s *messageServiceClient) MarkRead(ctx context.Context, deviceID, outboxType string, outboxID, readAt int64) error {
+	_, err := s.client.MarkRead(ctx, &messagev1.MarkReadRequest{DeviceId: deviceID, OutboxType: outboxType, OutboxId: outboxID, ReadAt: readAt})
+	return err
+}

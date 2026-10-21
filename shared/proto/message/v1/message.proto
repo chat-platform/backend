@@ -11,6 +11,7 @@ option go_package = "github.com/chat-platform/backend/shared/gen/message/v1;mess
 service MessageService {
   rpc SendMessage(SendMessageRequest) returns (SendMessageAck);
   rpc MarkDelivered(MarkDeliveredRequest) returns (MarkDeliveredResponse);
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
 }
 
 message SendMessageRequest {
@@ -37,3 +38,13 @@ message MarkDeliveredRequest {
 }
 
 message MarkDeliveredResponse {}
+
+message MarkReadRequest {
+  string device_id = 1 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
+  reserved 2, 3, 4;
+  int64 read_at = 5 [(buf.validate.field).int64.gt = 0];
+  int64 outbox_id = 6 [(buf.validate.field).int64.gt = 0];
+  string outbox_type = 7 [(buf.validate.field).string = {pattern: "^(direct|group)$"}];
+}
+
+message MarkReadResponse {}

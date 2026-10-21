@@ -1,0 +1,7 @@
+- In mark delivery, 
+    - what if the event has expired post retention period?
+    - What about checking it in usecase itself, saving db resources?
+        - DB shall also handle, i think. Look into this later
+- In read receipts also,
+    - what if the event has expired post retention period? if its sourced to get other details for read event, there is issue
+- Expire cleanup of outbox rows should clean undelivered but dispatched at even later expiry - this is for monitoring purposes

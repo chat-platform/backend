@@ -18,6 +18,7 @@ const (
 	TypeMessageRecv      = "message.recv"
 	TypeSyncReady        = "sync.ready"
 	TypeReceiptDelivered = "receipt.delivered"
+	TypeReceiptRead      = "receipt.read"
 )
 
 type OutboxType string
@@ -55,4 +56,10 @@ type MessageRecvPayload struct {
 type DeliveryReceiptPayload struct {
 	OutboxType OutboxType `json:"outboxType"`
 	OutboxID   int64      `json:"outboxId"`
+}
+
+type ReadReceiptPayload struct {
+	OutboxType OutboxType `json:"outboxType"`
+	OutboxID   int64      `json:"outboxId"`
+	ReadAt     int64      `json:"readAt"`
 }

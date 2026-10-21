@@ -102,8 +102,9 @@ routed_to              -- ENUM: WS, NOTIF
 dispatched_at
 claim_expiry           -- lease until which a Relay worker owns this claim
 delivered_at
+attempt_count           -- delivery attempts, including initial WS dispatch; capped at 10
 
--- UNIQUE (sender_id, client_msg_id, device_id)
+-- Partial UNIQUE (sender_id, client_msg_id, device_id) WHERE event_type = 'NEW_MESSAGE'
 -- Idempotency: on retry, the insert conflicts, and Message Service
 -- returns the same ack without re-inserting.
 -- Granularity: one row per (message, recipient device) in a DIRECT chat.
@@ -125,6 +126,7 @@ created_at
 routed_to
 dispatched_at
 delivered_at
+attempt_count           -- delivery attempts, including initial WS dispatch; capped at 10
 
 -- UNIQUE (event_id, device_id)
 -- Idempotency: enforced on group_event via UNIQUE (sender_id, client_msg_id);

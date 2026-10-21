@@ -235,20 +235,127 @@ func (r *ChatRepository) findExistingMessageAck(
 }
 
 func (r *ChatRepository) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {
+	table, eventJoin, err := receiptOutboxQueryParts(outboxType)
+	if err != nil {
+		return domain.ErrInvalidMessage
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin delivery receipt transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var senderID, clientMsgID, eventType, readerID string
+	query := fmt.Sprintf(`SELECT %s.sender_id::text, %s.client_msg_id::text, %s.event_type, outbox.recipient_id::text
+		FROM %s AS outbox %s WHERE outbox.id=$1 AND outbox.device_id=$2 AND outbox.delivered_at IS NULL
+		FOR UPDATE OF outbox`, receiptSenderExpr(outboxType), receiptClientMsgExpr(outboxType), receiptTypeExpr(outboxType), table, eventJoin)
+	if err := tx.QueryRow(ctx, query, outboxID, deviceID).Scan(&senderID, &clientMsgID, &eventType, &readerID); errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("load delivered event: %w", err)
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET delivered_at=COALESCE(delivered_at,now()) WHERE id=$1 AND device_id=$2`, table), outboxID, deviceID); err != nil {
+		return fmt.Errorf("mark %s outbox event delivered: %w", outboxType, err)
+	}
+	if eventType == "NEW_MESSAGE" {
+		var readAt int64
+		if err := tx.QueryRow(ctx, `SELECT (EXTRACT(EPOCH FROM now()) * 1000)::bigint`).Scan(&readAt); err != nil {
+			return fmt.Errorf("read delivery receipt timestamp: %w", err)
+		}
+		receiptPayload, err := json.Marshal(map[string]any{"receiptType": "delivered", "senderId": senderID, "clientMsgId": clientMsgID, "deliveredAt": readAt, "readerUserId": readerID})
+		if err != nil {
+			return fmt.Errorf("encode delivery receipt: %w", err)
+		}
+		if err := enqueueReceiptForSender(ctx, tx, readerID, senderID, clientMsgID, receiptPayload); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delivery receipt transaction: %w", err)
+	}
+	return nil
+}
+
+func (r *ChatRepository) MarkRead(ctx context.Context, receipt domain.ReadReceipt) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin read receipt transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var readerID, senderID, clientMsgID string
 	var query string
-	switch outboxType {
+	switch receipt.OutboxType {
 	case "direct":
-		query = `UPDATE direct_outbox SET delivered_at = COALESCE(delivered_at, now()) WHERE id = $1 AND device_id = $2`
+		query = `SELECT d.user_id::text, o.sender_id::text, o.client_msg_id::text
+			FROM direct_outbox o JOIN device d ON d.device_id=o.device_id AND d.user_id=o.recipient_id
+			WHERE o.id=$2 AND o.device_id=$1 AND d.revoked_at IS NULL AND o.event_type='NEW_MESSAGE'`
 	case "group":
-		query = `UPDATE group_outbox SET delivered_at = COALESCE(delivered_at, now()) WHERE id = $1 AND device_id = $2`
+		query = `SELECT d.user_id::text, e.sender_id::text, e.client_msg_id::text
+			FROM group_outbox o JOIN device d ON d.device_id=o.device_id AND d.user_id=o.recipient_id
+			JOIN group_event e ON e.event_id=o.event_id
+			WHERE o.id=$2 AND o.device_id=$1 AND d.revoked_at IS NULL AND e.event_type='NEW_MESSAGE'`
 	default:
 		return domain.ErrInvalidMessage
 	}
-	_, err := r.pool.Exec(ctx, query, outboxID, deviceID)
+	if err := tx.QueryRow(ctx, query, receipt.DeviceID, receipt.OutboxID).Scan(&readerID, &senderID, &clientMsgID); errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrChatAccessDenied
+	} else if err != nil {
+		return fmt.Errorf("authorize read receipt source event: %w", err)
+	}
+	if readerID == senderID {
+		return domain.ErrChatAccessDenied
+	}
+	payload, err := json.Marshal(map[string]any{"receiptType": "read", "senderId": senderID, "clientMsgId": clientMsgID, "readAt": receipt.ReadAt, "readerUserId": readerID})
 	if err != nil {
-		return fmt.Errorf("mark %s outbox event delivered: %w", outboxType, err)
+		return fmt.Errorf("encode read receipt: %w", err)
+	}
+	if err := enqueueReceiptForSender(ctx, tx, readerID, senderID, clientMsgID, payload); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit read receipt transaction: %w", err)
 	}
 	return nil
+}
+
+func enqueueReceiptForSender(ctx context.Context, tx pgx.Tx, eventSenderID, recipientID, clientMsgID string, payload []byte) error {
+	_, err := tx.Exec(ctx, `INSERT INTO direct_outbox
+		(sender_id, client_msg_id, recipient_id, device_id, event_type, payload)
+		SELECT $1::uuid, $3::uuid, $2::uuid, d.device_id, 'RECEIPT', $4
+		FROM device d WHERE d.user_id=$2::uuid AND d.revoked_at IS NULL`, eventSenderID, recipientID, clientMsgID, string(payload))
+	if err != nil {
+		return fmt.Errorf("enqueue receipt for sender devices: %w", err)
+	}
+	return nil
+}
+
+func receiptOutboxQueryParts(outboxType string) (table, join string, err error) {
+	switch outboxType {
+	case "direct":
+		return "direct_outbox", "", nil
+	case "group":
+		return "group_outbox", "JOIN group_event AS event ON event.event_id=outbox.event_id", nil
+	default:
+		return "", "", domain.ErrInvalidMessage
+	}
+}
+
+func receiptSenderExpr(outboxType string) string {
+	if outboxType == "group" {
+		return "event.sender_id"
+	}
+	return "outbox.sender_id"
+}
+func receiptClientMsgExpr(outboxType string) string {
+	if outboxType == "group" {
+		return "event.client_msg_id"
+	}
+	return "outbox.client_msg_id"
+}
+func receiptTypeExpr(outboxType string) string {
+	if outboxType == "group" {
+		return "event.event_type"
+	}
+	return "outbox.event_type"
 }
 
 var _ port.ChatRepository = (*ChatRepository)(nil)

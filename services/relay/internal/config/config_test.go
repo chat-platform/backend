@@ -19,6 +19,8 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 		t.Setenv("RELAY_POLL_INTERVAL", "")
 		t.Setenv("RELAY_BATCH_SIZE", "")
 		t.Setenv("RELAY_CLAIM_LEASE", "")
+		t.Setenv("RELAY_RETRY_INTERVAL", "")
+		t.Setenv("RELAY_RETRY_BATCH_SIZE", "")
 		cfg, err := FromEnv(logger)
 		if err != nil {
 			t.Fatal(err)
@@ -34,6 +36,9 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 		}
 		if cfg.Outbox.ClaimLease != 30*time.Second {
 			t.Fatalf("Outbox.ClaimLease=%s, want 30s", cfg.Outbox.ClaimLease)
+		}
+		if cfg.Retry.Interval != 10*time.Second || cfg.Retry.BatchSize != 100 {
+			t.Fatalf("Retry=%+v, want 10s and 100", cfg.Retry)
 		}
 	})
 
@@ -61,12 +66,17 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 		t.Setenv("RELAY_WORKERS", "2")
 		t.Setenv("RELAY_BATCH_SIZE", "25")
 		t.Setenv("RELAY_CLAIM_LEASE", "45s")
+		t.Setenv("RELAY_RETRY_INTERVAL", "15s")
+		t.Setenv("RELAY_RETRY_BATCH_SIZE", "35")
 		cfg, err := FromEnv(logger)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if cfg.Outbox.BatchSize != 25 || cfg.Outbox.ClaimLease != 45*time.Second {
 			t.Fatalf("Outbox=%+v, want batch size 25 and claim lease 45s", cfg.Outbox)
+		}
+		if cfg.Retry.Interval != 15*time.Second || cfg.Retry.BatchSize != 35 {
+			t.Fatalf("Retry=%+v, want 15s and 35", cfg.Retry)
 		}
 	})
 }

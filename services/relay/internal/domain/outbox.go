@@ -1,10 +1,13 @@
 package domain
 
+import "time"
+
 type OutboxEvent struct {
-	ID         int64
-	OutboxType string
-	DeviceID   string
-	Payload    []byte
+	ID          int64
+	OutboxType  string
+	DeviceID    string
+	Payload     []byte
+	ClaimExpiry time.Time
 }
 
 type Connection struct {

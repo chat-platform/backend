@@ -49,7 +49,8 @@ func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
 	_, err = pool.Exec(ctx, `CREATE TABLE direct_outbox (
 		id BIGSERIAL PRIMARY KEY, device_id UUID NOT NULL, payload TEXT NOT NULL,
 		routed_to TEXT, dispatched_at TIMESTAMPTZ, claim_expiry TIMESTAMPTZ,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT now(), delivered_at TIMESTAMPTZ
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(), delivered_at TIMESTAMPTZ,
+		attempt_count INTEGER NOT NULL DEFAULT 0
 	)`)
 	if err != nil {
 		t.Fatal(err)
@@ -58,12 +59,93 @@ func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
 	CREATE TABLE group_outbox (
 		id BIGSERIAL PRIMARY KEY, event_id BIGINT NOT NULL REFERENCES group_event(event_id),
 		device_id UUID NOT NULL, routed_to TEXT, dispatched_at TIMESTAMPTZ,
-		claim_expiry TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), delivered_at TIMESTAMPTZ
+		claim_expiry TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), delivered_at TIMESTAMPTZ,
+		attempt_count INTEGER NOT NULL DEFAULT 0
 	)`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return NewOutboxRepository(pool), pool
+}
+
+func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	id := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "old retry")
+	_, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS', dispatched_at=now()-interval '23 seconds', created_at=now()-interval '60 days', attempt_count=1 WHERE id=$1`, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("retry before minimum jittered delay=(%+v,%v), want no rows", events, err)
+	}
+	_, err = pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS', dispatched_at=now()-interval '37 seconds', created_at=now()-interval '60 days', attempt_count=1 WHERE id=$1`, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err = repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
+	if err != nil || len(events) != 1 || events[0].ID != id {
+		t.Fatalf("first retry claim=(%+v,%v)", events, err)
+	}
+	if err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
+		t.Fatal(err)
+	}
+	var attempts int
+	var dispatched time.Time
+	if err := pool.QueryRow(ctx, `SELECT attempt_count,dispatched_at FROM direct_outbox WHERE id=$1`, id).Scan(&attempts, &dispatched); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || time.Since(dispatched) > time.Second {
+		t.Fatalf("after retry attempt_count=%d dispatched_at=%v", attempts, dispatched)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET dispatched_at=now()-interval '73 seconds' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	events, err = repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("second retry should be eligible after maximum jittered delay: events=%+v err=%v", events, err)
+	}
+	if err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET attempt_count=10, dispatched_at=now()-interval '1 day', claim_expiry=NULL WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	events, err = repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("exhausted retry claim=(%+v,%v), want none", events, err)
+	}
+}
+
+func TestRetryClaimsDirectAndGroupExclusively(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	id := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "direct")
+	_, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS',dispatched_at=now()-interval '37 seconds',attempt_count=1 WHERE id=$1`, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var eventID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO group_event(payload) VALUES ('{"group":true}') RETURNING event_id`).Scan(&eventID); err != nil {
+		t.Fatal(err)
+	}
+	var groupID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO group_outbox(event_id,device_id,routed_to,dispatched_at,attempt_count) VALUES ($1,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','WS',now()-interval '37 seconds',1) RETURNING id`, eventID).Scan(&groupID); err != nil {
+		t.Fatal(err)
+	}
+	directRows, err := repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
+	if err != nil || len(directRows) != 1 || directRows[0].ID != id {
+		t.Fatalf("direct retry rows=%+v err=%v", directRows, err)
+	}
+	other, err := repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
+	if err != nil || len(other) != 0 {
+		t.Fatalf("same row claimed twice: %+v %v", other, err)
+	}
+	groupRows, err := repo.ClaimRetryBatch(ctx, "group", 10, time.Minute)
+	if err != nil || len(groupRows) != 1 || groupRows[0].ID != groupID {
+		t.Fatalf("group retry rows=%+v err=%v", groupRows, err)
+	}
 }
 
 func TestDeleteExpiredBatchPurgesDeliveredAndThirtyDayUndeliveredRows(t *testing.T) {
@@ -72,8 +154,12 @@ func TestDeleteExpiredBatchPurgesDeliveredAndThirtyDayUndeliveredRows(t *testing
 	_, err := pool.Exec(ctx, `INSERT INTO direct_outbox(device_id,payload,created_at,delivered_at) VALUES
 		('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','delivered',now(),now()),
 		('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','expired',now()-interval '31 days',NULL),
-		('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','pending',now()-interval '2 days',NULL)`)
+		('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','pending',now()-interval '2 days',NULL),
+		('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','exhausted',now()-interval '60 days',NULL)`)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET attempt_count=10 WHERE payload='exhausted'`); err != nil {
 		t.Fatal(err)
 	}
 	var deleted int64
@@ -91,12 +177,12 @@ func TestDeleteExpiredBatchPurgesDeliveredAndThirtyDayUndeliveredRows(t *testing
 		t.Fatalf("deleted=%d, want delivered and expired rows", deleted)
 	}
 	var remaining int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox`).Scan(&remaining); err != nil || remaining != 1 {
-		t.Fatalf("remaining rows=(%d,%v), want 1", remaining, err)
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox`).Scan(&remaining); err != nil || remaining != 2 {
+		t.Fatalf("remaining rows=(%d,%v), want pending and exhausted rows", remaining, err)
 	}
-	var payload string
-	if err := pool.QueryRow(ctx, `SELECT payload FROM direct_outbox`).Scan(&payload); err != nil || payload != "pending" {
-		t.Fatalf("remaining payload=(%q,%v), want pending", payload, err)
+	var exhausted bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM direct_outbox WHERE payload='exhausted' AND attempt_count=10)`).Scan(&exhausted); err != nil || !exhausted {
+		t.Fatalf("exhausted row retained=(%v,%v), want true", exhausted, err)
 	}
 }
 
