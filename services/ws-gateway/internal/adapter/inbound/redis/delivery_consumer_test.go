@@ -16,7 +16,7 @@ import (
 )
 
 func TestDecodeDeliveryPreservesOutboxAndMessageIdentity(t *testing.T) {
-	message := redis.XMessage{ID: "1-0", Values: map[string]any{"outbox_id": "42", "outbox_type": "direct", "device_id": "device", "conn_id": "conn", "payload": `{"chatId":"chat","senderId":"sender","clientMsgId":"client-id","content":"hello","ts":123}`}}
+	message := redis.XMessage{ID: "1-0", Values: map[string]any{"outbox_id": "42", "outbox_type": "direct", "device_id": "device", "conn_id": "conn", "payload": `{"chatId":"chat","senderId":"sender","senderPhone":"+15550001111","clientMsgId":"client-id","content":"hello","ts":123}`}}
 	delivery, err := decodeDelivery(message)
 	if err != nil {
 		t.Fatal(err)
@@ -31,8 +31,19 @@ func TestDecodeDeliveryPreservesOutboxAndMessageIdentity(t *testing.T) {
 	if err := json.Unmarshal(delivery.envelope.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.SenderID != "sender" || payload.ClientMsgID != "client-id" || payload.Content != "hello" {
+	if payload.SenderID != "sender" || payload.SenderPhone != "+15550001111" || payload.ClientMsgID != "client-id" || payload.Content != "hello" {
 		t.Fatalf("payload=%+v", payload)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip map[string]any
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	if roundTrip["senderPhone"] != "+15550001111" {
+		t.Fatalf("serialized payload lost senderPhone: %s", encoded)
 	}
 }
 

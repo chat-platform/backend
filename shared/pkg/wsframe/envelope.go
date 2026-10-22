@@ -48,6 +48,7 @@ type MessageRecvPayload struct {
 	OutboxType  OutboxType `json:"outboxType"`
 	OutboxID    int64      `json:"outboxId"`
 	SenderID    string     `json:"senderId"`
+	SenderPhone string     `json:"senderPhone,omitempty"`
 	ClientMsgID string     `json:"clientMsgId"`
 	Content     string     `json:"content"`
 	TS          int64      `json:"ts"`
