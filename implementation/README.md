@@ -27,7 +27,7 @@ reconnect sync and offline recovery.
 
 ### Backend
 
-Go 1.25 or newer, gRPC (WS Gateway → Message Service), WebSocket (clients).
+Go 1.26, gRPC (WS Gateway → Message Service), WebSocket (clients).
 
 ### Database
 
@@ -35,7 +35,11 @@ PostgreSQL (metadata + outbox; source of truth).
 
 ### Messaging / Streaming
 
-Redis Streams (Relay → WS Gateway).
+Redis Streams (Relay → WS Gateway and Notification Service).
+
+### Push Notifications
+
+Firebase Cloud Messaging (FCM), using silent data-only push-to-sync hints.
 
 ### Cache
 
@@ -44,7 +48,7 @@ Redis (WS connection registry).
 ### Infrastructure
 
 Docker Compose for local Postgres, Redis, Core API, Message Service, WS Gateway,
-and Relay.
+Relay, and Notification Service.
 
 ## Components
 
@@ -53,17 +57,29 @@ and Relay.
 - [x] Relay (`services/relay`, Phase 3)
 - [x] Core API (Phase 4A: Auth & Identity)
 - [x] Reconnect & Sync (Phase 4B, direct messages)
-- [ ] Notification Service (later)
+- [x] Notification Service (FCM push-to-sync hints)
 
 ## Development
 
 From the repo root:
 
 ```bash
-docker compose up --build -d # Postgres, Redis, Core API, Message Service, WS Gateway, Relay
+# Keep the service-account key outside the repository.
+export GOOGLE_APPLICATION_CREDENTIALS="/absolute/path/to/firebase-service-account.json"
+export GOOGLE_CLOUD_PROJECT="your-firebase-project-id" # optional if included in the credential file
+docker compose up --build -d # Postgres, Redis, Core API, Message Service, WS Gateway, Relay, Notification Service
 make proto       # generate gRPC stubs into shared/gen
 make tidy        # sync Go workspace / modules
 ```
+
+The Notification Service fails at startup if Firebase Application Default
+Credentials are unavailable. Compose mounts the file named by
+`GOOGLE_APPLICATION_CREDENTIALS` read-only at the container's ADC path. Do not
+commit service-account credentials. Clients register their FCM registration
+token using the authenticated `PUT /v1/devices/push-token` endpoint. Pushes
+contain only `type=sync` and an opaque `chatId`; clients fetch message data from
+the sync API. The Firebase project must have APNs configured for iOS, and web
+clients must be configured for Firebase Cloud Messaging.
 
 The single baseline migration at `shared/migrations/000001_init.up.sql`
 creates the current schema for a new, empty database. The down migration drops

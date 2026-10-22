@@ -16,7 +16,7 @@ import (
 )
 
 func TestDecodeDeliveryPreservesOutboxAndMessageIdentity(t *testing.T) {
-	message := redis.XMessage{ID: "1-0", Values: map[string]any{"outbox_id": "42", "outbox_type": "direct", "device_id": "device", "conn_id": "conn", "payload": `{"chatId":"chat","senderId":"sender","senderPhone":"+15550001111","clientMsgId":"client-id","content":"hello","ts":123}`}}
+	message := redis.XMessage{ID: "1-0", Values: map[string]any{"outbox_id": "42", "outbox_type": "direct", "event_type": "NEW_MESSAGE", "device_id": "device", "conn_id": "conn", "payload": `{"chatId":"chat","senderId":"sender","senderPhone":"+15550001111","clientMsgId":"client-id","content":"hello","ts":123}`}}
 	delivery, err := decodeDelivery(message)
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestDecodeDeliveryPreservesOutboxAndMessageIdentity(t *testing.T) {
 }
 
 func TestDecodeGroupDeliveryCarriesIndependentOutboxIdentity(t *testing.T) {
-	message := redis.XMessage{ID: "1-0", Values: map[string]any{"outbox_id": "42", "outbox_type": "group", "device_id": "device", "conn_id": "conn", "payload": `{"chatId":"group-chat","senderId":"sender","clientMsgId":"client-id","content":"hello","ts":123}`}}
+	message := redis.XMessage{ID: "1-0", Values: map[string]any{"outbox_id": "42", "outbox_type": "group", "event_type": "NEW_MESSAGE", "device_id": "device", "conn_id": "conn", "payload": `{"chatId":"group-chat","senderId":"sender","clientMsgId":"client-id","content":"hello","ts":123}`}}
 	delivery, err := decodeDelivery(message)
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +59,27 @@ func TestDecodeGroupDeliveryCarriesIndependentOutboxIdentity(t *testing.T) {
 	}
 	if delivery.outboxType != "group" || payload.OutboxType != wsframe.OutboxTypeGroup || payload.OutboxID != 42 || payload.ChatID != "group-chat" {
 		t.Fatalf("group delivery=%+v payload=%+v", delivery, payload)
+	}
+}
+
+func TestDecodeReceiptDeliveryPreservesReceiptStatus(t *testing.T) {
+	message := redis.XMessage{ID: "2-0", Values: map[string]any{
+		"outbox_id": "84", "outbox_type": "direct", "event_type": "RECEIPT", "device_id": "sender-device", "conn_id": "sender-conn",
+		"payload": `{"receiptType":"read","senderId":"sender","clientMsgId":"client-id","readAt":456,"readerUserId":"reader"}`,
+	}}
+	delivery, err := decodeDelivery(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivery.envelope.Type != wsframe.TypeReceiptStatus || delivery.envelope.TS != 456 {
+		t.Fatalf("envelope=%+v", delivery.envelope)
+	}
+	var payload wsframe.ReceiptStatusPayload
+	if err := json.Unmarshal(delivery.envelope.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.OutboxID != 84 || payload.OutboxType != wsframe.OutboxTypeDirect || payload.ReceiptType != "read" || payload.ClientMsgID != "client-id" || payload.ReadAt != 456 || payload.SenderID != "sender" || payload.ReaderUserID != "reader" {
+		t.Fatalf("receipt payload=%+v", payload)
 	}
 }
 func TestDecodeDeliveryRejectsMissingFields(t *testing.T) {
@@ -107,7 +128,7 @@ func TestHandleAcknowledgesDeliveredAndGoneConnections(t *testing.T) {
 				t.Fatal(err)
 			}
 			payload := `{"chatId":"chat","senderId":"sender","clientMsgId":"client","content":"private text","ts":123}`
-			if _, err := client.XAdd(ctx, &redis.XAddArgs{Stream: stream, Values: map[string]any{"outbox_id": 42, "outbox_type": "direct", "device_id": "device", "conn_id": "conn", "payload": payload}}).Result(); err != nil {
+			if _, err := client.XAdd(ctx, &redis.XAddArgs{Stream: stream, Values: map[string]any{"outbox_id": 42, "outbox_type": "direct", "event_type": "NEW_MESSAGE", "device_id": "device", "conn_id": "conn", "payload": payload}}).Result(); err != nil {
 				t.Fatal(err)
 			}
 			result, err := client.XReadGroup(ctx, &redis.XReadGroupArgs{Group: group, Consumer: "test-consumer", Streams: []string{stream, ">"}, Count: 1, Block: time.Second}).Result()

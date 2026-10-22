@@ -10,7 +10,7 @@ import (
 	"time"
 
 	redisadapter "github.com/chat-platform/backend/services/notification-service/internal/adapter/inbound/redis"
-	mockadapter "github.com/chat-platform/backend/services/notification-service/internal/adapter/outbound/mock"
+	fcmadapter "github.com/chat-platform/backend/services/notification-service/internal/adapter/outbound/fcm"
 	postgresadapter "github.com/chat-platform/backend/services/notification-service/internal/adapter/outbound/postgres"
 	"github.com/chat-platform/backend/services/notification-service/internal/app"
 	"github.com/chat-platform/backend/shared/pkg/logging"
@@ -26,6 +26,11 @@ func main() {
 		log.Fatal(err)
 	}
 	logger = logger.With("service", "notification-service")
+	fcmClient, err := fcmadapter.NewADCClient(ctx, os.Getenv("GOOGLE_CLOUD_PROJECT"))
+	if err != nil {
+		logger.Error(ctx, "initialize FCM client", "error", err)
+		os.Exit(1)
+	}
 	pool, err := pgxpool.New(ctx, env("POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"))
 	if err != nil {
 		log.Fatal(err)
@@ -41,7 +46,7 @@ func main() {
 	}
 	host, _ := os.Hostname()
 	consumerID := fmt.Sprintf("%s-%d", host, os.Getpid())
-	notifier := app.New(postgresadapter.NewTokenRepository(pool), mockadapter.NewSender(logger.With("component", "mock_sender")), logger.With("component", "notifier"))
+	notifier := app.New(postgresadapter.NewTokenRepository(pool), fcmadapter.NewSender(fcmClient), logger.With("component", "notifier"))
 	consumer := redisadapter.NewConsumer(client, consumerID, notifier, logger.With("component", "stream_consumer"), durationEnv("NOTIFICATION_COALESCE_WINDOW", 5*time.Second))
 	if err := consumer.Run(ctx); err != nil && ctx.Err() == nil {
 		log.Fatal(err)

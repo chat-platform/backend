@@ -16,6 +16,7 @@ const (
 	TypeMessageSend      = "message.send"
 	TypeMessageAck       = "message.ack"
 	TypeMessageRecv      = "message.recv"
+	TypeReceiptStatus    = "receipt.status"
 	TypeSyncReady        = "sync.ready"
 	TypeReceiptDelivered = "receipt.delivered"
 	TypeReceiptRead      = "receipt.read"
@@ -63,4 +64,17 @@ type ReadReceiptPayload struct {
 	OutboxType OutboxType `json:"outboxType"`
 	OutboxID   int64      `json:"outboxId"`
 	ReadAt     int64      `json:"readAt"`
+}
+
+// ReceiptStatusPayload is a server-to-client receipt event. Outbox identity
+// refers to this receipt event so the recipient device can acknowledge it.
+type ReceiptStatusPayload struct {
+	OutboxType   OutboxType `json:"outboxType"`
+	OutboxID     int64      `json:"outboxId"`
+	ReceiptType  string     `json:"receiptType"`
+	SenderID     string     `json:"senderId"`
+	ClientMsgID  string     `json:"clientMsgId"`
+	ReaderUserID string     `json:"readerUserId"`
+	DeliveredAt  int64      `json:"deliveredAt,omitempty"`
+	ReadAt       int64      `json:"readAt,omitempty"`
 }

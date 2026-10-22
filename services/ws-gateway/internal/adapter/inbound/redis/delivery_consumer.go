@@ -126,17 +126,69 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 	if err != nil {
 		return decodedDelivery{}, err
 	}
-	var payload wsframe.MessageRecvPayload
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return decodedDelivery{}, err
-	}
-	payload.OutboxID = outboxID
-	payload.OutboxType = wsframe.OutboxType(typ)
-	body, err := json.Marshal(payload)
+	eventType, err := get("event_type")
 	if err != nil {
-		return decodedDelivery{}, err
+		// Entries already pending when Relay is upgraded predate event_type.
+		// Receipt payloads carry their own explicit discriminator.
+		var discriminator struct {
+			ReceiptType string `json:"receiptType"`
+		}
+		if json.Unmarshal([]byte(raw), &discriminator) != nil {
+			return decodedDelivery{}, err
+		}
+		eventType = "NEW_MESSAGE"
+		if discriminator.ReceiptType != "" {
+			eventType = "RECEIPT"
+		}
 	}
-	envelope := wsframe.Envelope{Type: wsframe.TypeMessageRecv, TS: payload.TS, Payload: body}
+	var envelope wsframe.Envelope
+	switch eventType {
+	case "NEW_MESSAGE":
+		var payload wsframe.MessageRecvPayload
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return decodedDelivery{}, err
+		}
+		payload.OutboxID = outboxID
+		payload.OutboxType = wsframe.OutboxType(typ)
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return decodedDelivery{}, err
+		}
+		envelope = wsframe.Envelope{Type: wsframe.TypeMessageRecv, TS: payload.TS, Payload: body}
+	case "RECEIPT":
+		var payload wsframe.ReceiptStatusPayload
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return decodedDelivery{}, err
+		}
+		if payload.ClientMsgID == "" || payload.SenderID == "" || payload.ReaderUserID == "" {
+			return decodedDelivery{}, fmt.Errorf("receipt payload is missing message or user identity")
+		}
+		switch payload.ReceiptType {
+		case "delivered":
+			if payload.DeliveredAt <= 0 {
+				return decodedDelivery{}, fmt.Errorf("delivery receipt is missing deliveredAt")
+			}
+		case "read":
+			if payload.ReadAt <= 0 {
+				return decodedDelivery{}, fmt.Errorf("read receipt is missing readAt")
+			}
+		default:
+			return decodedDelivery{}, fmt.Errorf("unsupported receipt type %q", payload.ReceiptType)
+		}
+		payload.OutboxID = outboxID
+		payload.OutboxType = wsframe.OutboxType(typ)
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return decodedDelivery{}, err
+		}
+		ts := payload.DeliveredAt
+		if payload.ReadAt > 0 {
+			ts = payload.ReadAt
+		}
+		envelope = wsframe.Envelope{Type: wsframe.TypeReceiptStatus, TS: ts, Payload: body}
+	default:
+		return decodedDelivery{}, fmt.Errorf("unsupported outbox event type %q", eventType)
+	}
 	return decodedDelivery{connID: connID, deviceID: device, outboxID: outboxID, outboxType: typ, envelope: envelope}, nil
 }
 
