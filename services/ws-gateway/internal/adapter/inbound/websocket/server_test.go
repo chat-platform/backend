@@ -14,6 +14,8 @@ import (
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/gorilla/websocket"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type fakeOperations struct {
@@ -24,6 +26,8 @@ type fakeOperations struct {
 	removed         bool
 	registerErr     error
 	sendErr         error
+	deliveredErr    error
+	readErr         error
 	activeCheck     func() bool
 	activeCalls     int
 	removedCh       chan struct{}
@@ -82,14 +86,14 @@ func (f *fakeOperations) MarkDelivered(_ context.Context, identity domain.Identi
 	if f.deliveredCh != nil {
 		close(f.deliveredCh)
 	}
-	return nil
+	return f.deliveredErr
 }
 func (f *fakeOperations) MarkRead(_ context.Context, _ domain.Identity, outboxType string, outboxID, readAt int64) error {
 	f.readReceipt = wsframe.ReadReceiptPayload{OutboxType: wsframe.OutboxType(outboxType), OutboxID: outboxID, ReadAt: readAt}
 	if f.readCh != nil {
 		close(f.readCh)
 	}
-	return nil
+	return f.readErr
 }
 
 func TestConnectionAuthSendAndAck(t *testing.T) {
@@ -149,7 +153,8 @@ func TestConnectionAuthSendAndAck(t *testing.T) {
 }
 
 func TestInvalidTokenIsRejected(t *testing.T) {
-	logger, err := logging.New(io.Discard, logging.Config{})
+	var logs lockedLogBuffer
+	logger, err := logging.New(&logs, logging.Config{Level: "debug", Format: "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,14 +179,22 @@ func TestInvalidTokenIsRejected(t *testing.T) {
 	if operations.registered {
 		t.Fatal("invalid identity was registered")
 	}
+	logOutput := logs.String()
+	if strings.Count(logOutput, "websocket operation rejected or canceled") != 1 {
+		t.Fatalf("invalid authentication should be logged once, logs=%s", logOutput)
+	}
+	if strings.Contains(logOutput, "invalid-token") {
+		t.Fatalf("log leaked bearer token: %s", logOutput)
+	}
 }
 
 func TestMalformedFrameAndSendFailureReturnErrorFrames(t *testing.T) {
-	logger, err := logging.New(io.Discard, logging.Config{})
+	var logs lockedLogBuffer
+	logger, err := logging.New(&logs, logging.Config{Level: "debug", Format: "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	operations := &fakeOperations{sendErr: errors.New("message service unavailable")}
+	operations := &fakeOperations{sendErr: status.Error(codes.Internal, "message service unavailable")}
 	httpServer := httptest.NewServer(NewServer(operations, logger, NewHub()))
 	defer httpServer.Close()
 
@@ -220,6 +233,80 @@ func TestMalformedFrameAndSendFailureReturnErrorFrames(t *testing.T) {
 	}
 	if failed.Type != "error" || failed.ID != send.ID {
 		t.Fatalf("unexpected send failure response: %+v", failed)
+	}
+	logOutput := logs.String()
+	if strings.Count(logOutput, "websocket operation failed") != 1 || !strings.Contains(logOutput, `"operation":"send message"`) || !strings.Contains(logOutput, `"grpc_code":"Internal"`) {
+		t.Fatalf("send failure should have one boundary log, logs=%s", logOutput)
+	}
+	if strings.Contains(logOutput, `"content"`) || strings.Contains(logOutput, "hello") {
+		t.Fatalf("log leaked message content: %s", logOutput)
+	}
+}
+
+func TestReceiptFailuresAreLoggedAtWebSocketBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		frameType string
+		operation string
+		payload   any
+		configure func(*fakeOperations)
+	}{
+		{
+			name:      "delivered",
+			frameType: wsframe.TypeReceiptDelivered,
+			operation: "record delivered receipt",
+			payload:   wsframe.DeliveryReceiptPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 42},
+			configure: func(ops *fakeOperations) { ops.deliveredErr = status.Error(codes.Internal, "write failed") },
+		},
+		{
+			name:      "read",
+			frameType: wsframe.TypeReceiptRead,
+			operation: "record read receipt",
+			payload:   wsframe.ReadReceiptPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 42, ReadAt: 1770000000123},
+			configure: func(ops *fakeOperations) { ops.readErr = status.Error(codes.Internal, "write failed") },
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs lockedLogBuffer
+			logger, err := logging.New(&logs, logging.Config{Level: "debug", Format: "json"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			operations := &fakeOperations{}
+			test.configure(operations)
+			server := httptest.NewServer(NewServer(operations, logger, NewHub()))
+			defer server.Close()
+			conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}); err != nil {
+				t.Fatal(err)
+			}
+			var authAck wsframe.Envelope
+			if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
+				t.Fatalf("auth ack=(%+v,%v)", authAck, err)
+			}
+			if err := conn.WriteJSON(wsframe.Envelope{Type: test.frameType, ID: "receipt-request", Payload: mustJSON(t, test.payload)}); err != nil {
+				t.Fatal(err)
+			}
+			var response wsframe.Envelope
+			if err := conn.ReadJSON(&response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Type != "error" || response.ID != "receipt-request" {
+				t.Fatalf("unexpected receipt failure frame: %+v", response)
+			}
+			logOutput := logs.String()
+			if strings.Count(logOutput, "websocket operation failed") != 1 ||
+				!strings.Contains(logOutput, `"operation":"`+test.operation+`"`) ||
+				!strings.Contains(logOutput, `"grpc_code":"Internal"`) ||
+				!strings.Contains(logOutput, `"outbox_id":42`) ||
+				!strings.Contains(logOutput, `"outbox_type":"direct"`) {
+				t.Fatalf("receipt failure should have one contextual boundary log, logs=%s", logOutput)
+			}
+		})
 	}
 }
 

@@ -43,6 +43,8 @@ func New(service *app.Service) *Server {
 	v1.Add(GET, "/profile/me", s.profile)
 	v1.Add(HEAD, "/profile/me", s.profile)
 	v1.Add(PUT, "/profile/name", s.setName)
+	v1.Add(PUT, "/devices/push-token", s.setPushToken)
+	v1.Add(DELETE, "/devices/push-token", s.clearPushToken)
 	v1.Add(POST, "/chats/direct", s.directChat)
 	v1.Add(GET, "/chats/groups", s.groupChats)
 	v1.Add(POST, "/groups", s.createGroup)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -74,19 +77,25 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	token, err := readAuthToken(conn, s.logger, request.Context(), request.RemoteAddr)
+	token, err := readAuthToken(conn, request.Context())
 	if err != nil {
+		if request.Context().Err() == nil && !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+			s.logOperationFailure(request.Context(), "read websocket auth frame", err, "remote_addr", request.RemoteAddr)
+		}
 		writeClose(conn, s.logger, request.Context(), websocket.ClosePolicyViolation, "valid auth frame required")
 		return
 	}
 	identity, err := s.operations.Authenticate(request.Context(), token)
 	if err != nil {
+		s.logOperationFailure(request.Context(), "authenticate websocket", err, "remote_addr", request.RemoteAddr)
 		writeClose(conn, s.logger, request.Context(), websocket.ClosePolicyViolation, "valid session token required")
 		return
 	}
 	connectionID := uuid.NewString()
 	connection, err := s.operations.Register(request.Context(), identity, connectionID)
 	if err != nil {
+		s.logOperationFailure(request.Context(), "register websocket connection", err,
+			"user_id", identity.UserID, "device_id", identity.DeviceID, "conn_id", connectionID)
 		writeClose(conn, s.logger, request.Context(), websocket.CloseInternalServerErr, "connection registration failed")
 		return
 	}
@@ -96,7 +105,9 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if err := s.operations.Unregister(ctx, identity.DeviceID, connection); err != nil {
-			// The gateway logs the underlying registry failure with connection context.
+			s.logOperationFailure(ctx, "unregister websocket connection", err,
+				"user_id", identity.UserID, "device_id", identity.DeviceID,
+				"ws_node", connection.NodeID, "conn_id", connection.ConnID)
 		}
 		s.logger.Info(ctx, "websocket connection closed",
 			"user_id", identity.UserID, "device_id", identity.DeviceID,
@@ -105,7 +116,13 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	active, err := s.operations.IsSessionActive(request.Context(), token)
 	if err != nil || !active {
 		if err != nil {
-			s.logger.Warn(request.Context(), "could not confirm websocket session after registration", "error", err, "session_id", identity.SessionID)
+			s.logOperationFailure(request.Context(), "revalidate websocket session", err,
+				"user_id", identity.UserID, "device_id", identity.DeviceID,
+				"session_id", identity.SessionID, "conn_id", connection.ConnID)
+		} else {
+			s.logger.Debug(request.Context(), "websocket session is no longer active",
+				"user_id", identity.UserID, "device_id", identity.DeviceID,
+				"session_id", identity.SessionID, "conn_id", connection.ConnID)
 		}
 		writeClose(conn, s.logger, request.Context(), websocket.ClosePolicyViolation, "session is no longer active")
 		return
@@ -127,25 +144,21 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	defer cancel()
 	conn.SetPongHandler(func(string) error {
 		if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
-			s.logger.Error(ctx, "could not extend websocket read deadline", "error", err,
-				"device_id", identity.DeviceID, "conn_id", connection.ConnID)
-			return err
+			return fmt.Errorf("extend websocket read deadline: %w", err)
 		}
 		registered, err := s.operations.Refresh(ctx, identity.DeviceID, connection)
 		if err != nil {
 			return err
 		}
 		if !registered {
-			s.logger.Warn(ctx, "websocket connection no longer owns registry entry",
-				"device_id", identity.DeviceID, "conn_id", connection.ConnID)
-			return errors.New("websocket connection no longer owns registry entry")
+			return domain.ErrConnectionSuperseded
 		}
 		active, err := s.operations.IsSessionActive(ctx, token)
 		if err != nil {
 			return err
 		}
 		if !active {
-			return errors.New("websocket session has been revoked")
+			return fmt.Errorf("%w: websocket session has been revoked", domain.ErrInvalidIdentity)
 		}
 		return nil
 	})
@@ -155,7 +168,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) && request.Context().Err() == nil {
-				s.logger.Warn(request.Context(), "websocket read ended unexpectedly", "error", err,
+				s.logOperationFailure(request.Context(), "read websocket frame", err,
 					"user_id", identity.UserID, "device_id", identity.DeviceID, "conn_id", connection.ConnID)
 			} else {
 				s.logger.Info(request.Context(), "websocket client disconnected",
@@ -181,10 +194,16 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			var receipt wsframe.DeliveryReceiptPayload
 			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &receipt) != nil || receipt.OutboxID <= 0 ||
 				(receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) {
+				s.logger.Warn(ctx, "websocket client sent an invalid delivered receipt",
+					"request_id", envelope.ID, "device_id", identity.DeviceID)
 				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.delivered requires a valid outboxType and positive outboxId")
 				continue
 			}
 			if err := s.operations.MarkDelivered(ctx, identity, string(receipt.OutboxType), receipt.OutboxID); err != nil {
+				s.logOperationFailure(ctx, "record delivered receipt", err,
+					"request_id", envelope.ID, "user_id", identity.UserID,
+					"device_id", identity.DeviceID, "outbox_type", receipt.OutboxType,
+					"outbox_id", receipt.OutboxID)
 				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "delivery receipt could not be recorded")
 				continue
 			}
@@ -196,10 +215,16 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			if len(envelope.Payload) == 0 || decodeErr != nil ||
 				(receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) ||
 				receipt.OutboxID <= 0 || receipt.ReadAt <= 0 {
+				s.logger.Warn(ctx, "websocket client sent an invalid read receipt",
+					"request_id", envelope.ID, "device_id", identity.DeviceID)
 				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.read requires a valid outboxType, positive outboxId, and positive readAt")
 				continue
 			}
 			if err := s.operations.MarkRead(ctx, identity, string(receipt.OutboxType), receipt.OutboxID, receipt.ReadAt); err != nil {
+				s.logOperationFailure(ctx, "record read receipt", err,
+					"request_id", envelope.ID, "user_id", identity.UserID,
+					"device_id", identity.DeviceID, "outbox_type", receipt.OutboxType,
+					"outbox_id", receipt.OutboxID)
 				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "read receipt could not be recorded")
 			}
 			continue
@@ -223,6 +248,10 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			ChatID: payload.ChatID, ClientMsgID: payload.ClientMsgID, Content: payload.Content,
 		})
 		if err != nil {
+			s.logOperationFailure(ctx, "send message", err,
+				"request_id", envelope.ID, "user_id", identity.UserID,
+				"device_id", identity.DeviceID, "chat_id", payload.ChatID,
+				"client_msg_id", payload.ClientMsgID)
 			s.writeError(ctx, socket, envelope.ID, "send_failed", "message was not accepted")
 			continue
 		}
@@ -251,14 +280,15 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func readAuthToken(conn *websocket.Conn, logger logging.Logger, ctx context.Context, remoteAddr string) (string, error) {
+func readAuthToken(conn *websocket.Conn, ctx context.Context) (string, error) {
 	invalid := func(err error) (string, error) {
-		logger.Warn(ctx, "websocket connection sent an invalid auth frame", "error", err,
-			"remote_addr", remoteAddr)
-		return "", domain.ErrInvalidIdentity
+		return "", fmt.Errorf("%w: %w", domain.ErrMalformedAuthFrame, err)
 	}
 	_, data, err := conn.ReadMessage()
 	if err != nil {
+		if ctx.Err() != nil || websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+			return "", err
+		}
 		return invalid(err)
 	}
 	var envelope wsframe.Envelope
@@ -281,6 +311,29 @@ func readAuthToken(conn *websocket.Conn, logger logging.Logger, ctx context.Cont
 	return payload.Token, nil
 }
 
+func (s *Server) logOperationFailure(ctx context.Context, operation string, err error, fields ...any) {
+	if err == nil {
+		return
+	}
+	args := []any{"operation", operation, "error", err}
+	if code := status.Code(err); code != codes.Unknown {
+		args = append(args, "grpc_code", code.String())
+	}
+	args = append(args, fields...)
+	switch {
+	case errors.Is(err, domain.ErrMalformedAuthFrame):
+		s.logger.Warn(ctx, "websocket client request rejected", args...)
+	case errors.Is(err, domain.ErrInvalidIdentity), errors.Is(err, context.Canceled):
+		s.logger.Debug(ctx, "websocket operation rejected or canceled", args...)
+	case errors.Is(err, domain.ErrInvalidMessage), errors.Is(err, domain.ErrConnectionSuperseded),
+		status.Code(err) == codes.InvalidArgument, status.Code(err) == codes.PermissionDenied,
+		status.Code(err) == codes.NotFound, status.Code(err) == codes.FailedPrecondition:
+		s.logger.Warn(ctx, "websocket operation rejected", args...)
+	default:
+		s.logger.Error(ctx, "websocket operation failed", args...)
+	}
+}
+
 func (s *Server) RevokeConnection(ctx context.Context, connection domain.Connection) {
 	active := s.hub.CloseConnection(connection)
 	if active == nil {
@@ -289,11 +342,7 @@ func (s *Server) RevokeConnection(ctx context.Context, connection domain.Connect
 	if err := active.Socket.Close(); err != nil {
 		s.logger.Warn(ctx, "could not close revoked websocket", "error", err, "session_id", connection.SessionID, "conn_id", active.ID)
 	}
-	unregisterCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	if err := s.operations.Unregister(unregisterCtx, active.DeviceID, active.Connection); err != nil {
-		s.logger.Warn(unregisterCtx, "could not remove revoked websocket registry entry", "error", err, "session_id", connection.SessionID, "device_id", active.DeviceID)
-	}
+	// ServeHTTP owns registry cleanup and logs any failure once after Close unblocks its read loop.
 }
 
 func (s *Server) pingLoop(ctx context.Context, conn *safeSocket) {
@@ -306,7 +355,9 @@ func (s *Server) pingLoop(ctx context.Context, conn *safeSocket) {
 		case <-ticker.C:
 			err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
 			if err != nil {
-				s.logger.Warn(ctx, "could not send websocket heartbeat", "error", err)
+				if ctx.Err() == nil {
+					_ = conn.Close()
+				}
 				return
 			}
 		}

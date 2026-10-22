@@ -3,6 +3,7 @@ package coreapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
@@ -28,12 +29,12 @@ func (v *SessionValidator) ValidateSession(ctx context.Context, token string) (s
 	response, err := v.client.ValidateSession(ctx, &sessionv1.ValidateSessionRequest{})
 	if err != nil {
 		if code := status.Code(err); code == codes.Unauthenticated || code == codes.PermissionDenied {
-			return sessiontoken.Claims{}, domain.ErrInvalidIdentity
+			return sessiontoken.Claims{}, fmt.Errorf("%w: Core API rejected session validation: %w", domain.ErrInvalidIdentity, err)
 		}
-		return sessiontoken.Claims{}, err
+		return sessiontoken.Claims{}, fmt.Errorf("Core API ValidateSession RPC: %w", err)
 	}
 	if response == nil {
-		return sessiontoken.Claims{}, errors.New("Core API returned an empty session validation response")
+		return sessiontoken.Claims{}, errors.New("Core API ValidateSession RPC returned an empty response")
 	}
 	return sessiontoken.Claims{
 		SessionID: response.GetSessionId(), UserID: response.GetUserId(), DeviceID: response.GetDeviceId(),

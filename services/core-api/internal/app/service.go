@@ -49,6 +49,8 @@ type Repository interface {
 	CompleteOTP(context.Context, string, string, string, string, string, time.Time) (User, Device, Session, error)
 	GetProfile(context.Context, string) (User, error)
 	SetDisplayName(context.Context, string, string) error
+	SetPushToken(context.Context, string, string) error
+	ClearPushToken(context.Context, string) error
 	GetOrCreateDirectChat(context.Context, string, string) (string, error)
 	ListGroupChats(context.Context, string) ([]GroupChat, error)
 	CreateGroup(context.Context, string, string, []string) (string, error)
@@ -182,6 +184,30 @@ func (s *Service) Profile(ctx context.Context, userID string) (User, error) {
 func (s *Service) SetDisplayName(ctx context.Context, userID, name string) error {
 	name = strings.TrimSpace(name)
 	return s.repo.SetDisplayName(ctx, userID, name)
+}
+
+func (s *Service) SetPushToken(ctx context.Context, deviceID, token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" || len(token) > 4096 {
+		return ErrInvalidRequest
+	}
+	if err := s.repo.SetPushToken(ctx, deviceID, token); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return ErrNotFound
+		}
+		return ErrUnavailable
+	}
+	return nil
+}
+
+func (s *Service) ClearPushToken(ctx context.Context, deviceID string) error {
+	if err := s.repo.ClearPushToken(ctx, deviceID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return ErrNotFound
+		}
+		return ErrUnavailable
+	}
+	return nil
 }
 func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string, error) {
 	phone = strings.TrimSpace(phone)

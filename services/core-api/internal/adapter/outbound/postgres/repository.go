@@ -83,6 +83,28 @@ func (r *Repository) SetDisplayName(ctx context.Context, userID, name string) er
 	}
 	return nil
 }
+
+func (r *Repository) SetPushToken(ctx context.Context, deviceID, token string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE device SET push_token = $2 WHERE device_id = $1 AND revoked_at IS NULL`, deviceID, token)
+	if err != nil {
+		return fmt.Errorf("set device push token: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return app.ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) ClearPushToken(ctx context.Context, deviceID string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE device SET push_token = NULL WHERE device_id = $1 AND revoked_at IS NULL`, deviceID)
+	if err != nil {
+		return fmt.Errorf("clear device push token: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return app.ErrNotFound
+	}
+	return nil
+}
 func (r *Repository) GetOrCreateDirectChat(ctx context.Context, userID, phone string) (string, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

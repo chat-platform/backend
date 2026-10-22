@@ -45,6 +45,8 @@ func (r *repoFake) SetDisplayName(_ context.Context, _ string, name string) erro
 	r.user.DisplayName = name
 	return nil
 }
+func (r *repoFake) SetPushToken(context.Context, string, string) error { return nil }
+func (r *repoFake) ClearPushToken(context.Context, string) error       { return nil }
 func (r *repoFake) GetOrCreateDirectChat(context.Context, string, string) (string, error) {
 	return "chat-1", nil
 }

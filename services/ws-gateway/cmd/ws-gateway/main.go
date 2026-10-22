@@ -67,8 +67,8 @@ func main() {
 		os.Exit(1)
 	}
 	sessionAuthenticator := authadapter.New([]byte(cfg.JWTSecret), registry, coreapiadapter.NewSessionValidator(sessionv1.NewSessionServiceClient(coreAPIConn)))
-	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn), logger.With("component", "message_service_client"))
-	operations := app.New(cfg.NodeID, registry, messageService, logger.With("component", "gateway"), sessionAuthenticator)
+	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn))
+	operations := app.New(cfg.NodeID, registry, messageService, sessionAuthenticator)
 	hub := wsadapter.NewHub()
 	consumer := deliveryadapter.NewDeliveryConsumer(redisClient, cfg.NodeID, hub, logger.With("component", "delivery_consumer"))
 	consumerFailed := make(chan error, 1)

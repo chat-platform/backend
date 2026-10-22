@@ -87,7 +87,7 @@ func TestHeartbeatRevalidatesWhenActiveCacheEntryExpires(t *testing.T) {
 	}
 	status.status = sessiontoken.StatusMissing // The capped status TTL elapsed.
 	validator.err = domain.ErrInvalidIdentity  // Core API's Postgres check says revoked.
-	if active, err := authenticator.IsSessionActive(context.Background(), token); err != nil || active {
+	if active, err := authenticator.IsSessionActive(context.Background(), token); active || !errors.Is(err, domain.ErrInvalidIdentity) {
 		t.Fatalf("revoked session after cache expiry result=(%v,%v)", active, err)
 	}
 }
@@ -114,6 +114,8 @@ func TestAuthenticateRejectsInvalidAndExpiredTokens(t *testing.T) {
 	validator := &validatorStub{}
 	if _, err := New(secret, status, validator).Authenticate(context.Background(), "not-a-token"); err == nil {
 		t.Fatal("invalid token was accepted")
+	} else if !errors.Is(err, domain.ErrInvalidIdentity) || !errors.Is(err, sessiontoken.ErrInvalidToken) {
+		t.Fatalf("invalid token causes were not preserved: %v", err)
 	}
 	expired := sessiontoken.Claims{SessionID: "sid", UserID: "user", DeviceID: "device", IssuedAt: time.Now().Add(-2 * time.Hour).Unix(), ExpiresAt: time.Now().Add(-time.Hour).Unix()}
 	token, err := sessiontoken.Sign(expired, secret)

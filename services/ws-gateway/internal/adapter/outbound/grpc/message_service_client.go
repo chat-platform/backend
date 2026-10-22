@@ -2,21 +2,18 @@ package grpcadapter
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
-	"github.com/chat-platform/backend/shared/pkg/logging"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type messageServiceClient struct {
 	client messagev1.MessageServiceClient
-	logger logging.Logger
 }
 
-func NewMessageServiceClient(client messagev1.MessageServiceClient, logger logging.Logger) *messageServiceClient {
-	return &messageServiceClient{client: client, logger: logger}
+func NewMessageServiceClient(client messagev1.MessageServiceClient) *messageServiceClient {
+	return &messageServiceClient{client: client}
 }
 
 func (s *messageServiceClient) SendMessage(ctx context.Context, command domain.SendMessage) (domain.MessageAck, error) {
@@ -25,13 +22,7 @@ func (s *messageServiceClient) SendMessage(ctx context.Context, command domain.S
 		ClientMsgId: command.ClientMsgID, Content: command.Content,
 	})
 	if err != nil {
-		code := status.Code(err)
-		if code == codes.Unavailable || code == codes.DeadlineExceeded {
-			s.logger.Error(ctx, "message service RPC could not be completed", "error", err,
-				"sender_id", command.SenderID, "device_id", command.DeviceID,
-				"chat_id", command.ChatID, "client_msg_id", command.ClientMsgID)
-		}
-		return domain.MessageAck{}, err
+		return domain.MessageAck{}, fmt.Errorf("message service SendMessage RPC: %w", err)
 	}
 	return domain.MessageAck{ClientMsgID: response.GetClientMsgId(), TimestampMS: response.GetTsUnixMilli()}, nil
 }
@@ -39,15 +30,15 @@ func (s *messageServiceClient) SendMessage(ctx context.Context, command domain.S
 func (s *messageServiceClient) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {
 	_, err := s.client.MarkDelivered(ctx, &messagev1.MarkDeliveredRequest{DeviceId: deviceID, OutboxType: outboxType, OutboxId: outboxID})
 	if err != nil {
-		if code := status.Code(err); code == codes.Unavailable || code == codes.DeadlineExceeded {
-			s.logger.Error(ctx, "message service delivery receipt RPC could not be completed", "error", err, "device_id", deviceID, "outbox_id", outboxID)
-		}
-		return err
+		return fmt.Errorf("message service MarkDelivered RPC: %w", err)
 	}
 	return nil
 }
 
 func (s *messageServiceClient) MarkRead(ctx context.Context, deviceID, outboxType string, outboxID, readAt int64) error {
 	_, err := s.client.MarkRead(ctx, &messagev1.MarkReadRequest{DeviceId: deviceID, OutboxType: outboxType, OutboxId: outboxID, ReadAt: readAt})
-	return err
+	if err != nil {
+		return fmt.Errorf("message service MarkRead RPC: %w", err)
+	}
+	return nil
 }

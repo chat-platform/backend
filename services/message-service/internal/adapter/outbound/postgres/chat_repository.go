@@ -29,6 +29,7 @@ func NewChatRepository(pool *pgxpool.Pool, logger logging.Logger) *ChatRepositor
 type messagePayload struct {
 	ChatID      string `json:"chatId"`
 	SenderID    string `json:"senderId"`
+	SenderPhone string `json:"senderPhone,omitempty"`
 	ClientMsgID string `json:"clientMsgId"`
 	Content     string `json:"content"`
 	TS          int64  `json:"ts"`
@@ -89,7 +90,11 @@ func (r *ChatRepository) EnqueueDirectMessageEvent(
 	if len(recipients) == 0 {
 		return domain.MessageAck{}, domain.ErrNoRecipients
 	}
-	timestampMS, payload, err := encodeMessagePayload(message)
+	var senderPhone string
+	if err := r.pool.QueryRow(ctx, `SELECT phone FROM users WHERE user_id = $1`, message.SenderID).Scan(&senderPhone); err != nil {
+		return domain.MessageAck{}, fmt.Errorf("load sender phone for message payload: %w", err)
+	}
+	timestampMS, payload, err := encodeMessagePayload(message, senderPhone)
 	if err != nil {
 		return domain.MessageAck{}, err
 	}
@@ -149,7 +154,7 @@ func (r *ChatRepository) EnqueueDirectMessageEvent(
 }
 
 func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message domain.SendMessage) (domain.MessageAck, error) {
-	timestampMS, payload, err := encodeMessagePayload(message)
+	timestampMS, payload, err := encodeMessagePayload(message, "")
 	if err != nil {
 		return domain.MessageAck{}, err
 	}
@@ -189,11 +194,12 @@ func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message d
 	return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, nil
 }
 
-func encodeMessagePayload(message domain.SendMessage) (int64, []byte, error) {
+func encodeMessagePayload(message domain.SendMessage, senderPhone string) (int64, []byte, error) {
 	timestampMS := time.Now().UnixMilli()
 	payload, err := json.Marshal(messagePayload{
 		ChatID:      message.ChatID,
 		SenderID:    message.SenderID,
+		SenderPhone: senderPhone,
 		ClientMsgID: message.ClientMsgID,
 		Content:     message.Content,
 		TS:          timestampMS,
@@ -245,7 +251,7 @@ func (r *ChatRepository) MarkDelivered(ctx context.Context, deviceID string, out
 	}
 	defer tx.Rollback(ctx)
 	var senderID, clientMsgID, eventType, readerID string
-	query := fmt.Sprintf(`SELECT %s.sender_id::text, %s.client_msg_id::text, %s.event_type, outbox.recipient_id::text
+	query := fmt.Sprintf(`SELECT %s::text, %s::text, %s, outbox.recipient_id::text
 		FROM %s AS outbox %s WHERE outbox.id=$1 AND outbox.device_id=$2 AND outbox.delivered_at IS NULL
 		FOR UPDATE OF outbox`, receiptSenderExpr(outboxType), receiptClientMsgExpr(outboxType), receiptTypeExpr(outboxType), table, eventJoin)
 	if err := tx.QueryRow(ctx, query, outboxID, deviceID).Scan(&senderID, &clientMsgID, &eventType, &readerID); errors.Is(err, pgx.ErrNoRows) {
@@ -320,7 +326,7 @@ func (r *ChatRepository) MarkRead(ctx context.Context, receipt domain.ReadReceip
 func enqueueReceiptForSender(ctx context.Context, tx pgx.Tx, eventSenderID, recipientID, clientMsgID string, payload []byte) error {
 	_, err := tx.Exec(ctx, `INSERT INTO direct_outbox
 		(sender_id, client_msg_id, recipient_id, device_id, event_type, payload)
-		SELECT $1::uuid, $3::uuid, $2::uuid, d.device_id, 'RECEIPT', $4
+		SELECT $1::uuid, $3::uuid, $2::uuid, d.device_id, 'RECEIPT', $4::text
 		FROM device d WHERE d.user_id=$2::uuid AND d.revoked_at IS NULL`, eventSenderID, recipientID, clientMsgID, string(payload))
 	if err != nil {
 		return fmt.Errorf("enqueue receipt for sender devices: %w", err)

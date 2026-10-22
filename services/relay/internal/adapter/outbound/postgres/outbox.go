@@ -30,18 +30,20 @@ func (r *OutboxRepository) ClaimBatch(ctx context.Context, outboxType string, ba
 	}
 	defer tx.Rollback(ctx)
 	payloadExpr := "outbox.payload"
+	eventTypeExpr := "outbox.event_type"
 	if outboxType == "group" {
 		payloadExpr = "event.payload"
+		eventTypeExpr = "event.event_type"
 	}
 	query := fmt.Sprintf(`WITH candidates AS (
-		SELECT outbox.id, %s AS payload FROM %s AS outbox
+		SELECT outbox.id, %s AS payload, %s AS event_type FROM %s AS outbox
 		%s
 		WHERE outbox.dispatched_at IS NULL AND (outbox.claim_expiry IS NULL OR outbox.claim_expiry <= now())
 		ORDER BY outbox.id LIMIT $1 FOR UPDATE OF outbox SKIP LOCKED
 		)
 		UPDATE %s AS outbox SET claim_expiry = now() + $2 * interval '1 microsecond'
 		FROM candidates WHERE outbox.id = candidates.id
-		RETURNING outbox.id, outbox.device_id::text, candidates.payload`, payloadExpr, table, groupJoin(outboxType), table)
+		RETURNING outbox.id, outbox.device_id::text, candidates.payload, candidates.event_type`, payloadExpr, eventTypeExpr, table, groupJoin(outboxType), table)
 	rows, err := tx.Query(ctx, query, batchSize, lease.Microseconds())
 	if err != nil {
 		return nil, fmt.Errorf("claim %s outbox rows: %w", outboxType, err)
@@ -49,7 +51,7 @@ func (r *OutboxRepository) ClaimBatch(ctx context.Context, outboxType string, ba
 	events := make([]domain.OutboxEvent, 0, batchSize)
 	for rows.Next() {
 		var e domain.OutboxEvent
-		if err := rows.Scan(&e.ID, &e.DeviceID, &e.Payload); err != nil {
+		if err := rows.Scan(&e.ID, &e.DeviceID, &e.Payload, &e.EventType); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan direct outbox row: %w", err)
 		}

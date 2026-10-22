@@ -107,5 +107,21 @@ services:
       redis:
         condition: service_healthy
 
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: notification-service
+    environment:
+      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
+      REDIS_ADDR: redis:6379
+      NOTIFICATION_COALESCE_WINDOW: 5s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
