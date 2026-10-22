@@ -65,36 +65,23 @@ make proto       # generate gRPC stubs into shared/gen
 make tidy        # sync Go workspace / modules
 ```
 
-Postgres migrations and seeds run only when its data volume is first created.
-For an existing local volume, apply the new session schema once with:
+The single baseline migration at `shared/migrations/000001_init.up.sql`
+creates the current schema for a new, empty database. The down migration drops
+that complete schema. Compose applies the baseline and development seed only
+when it initializes a new Postgres data volume.
+
+The baseline is not an incremental migration and must not be applied to an
+existing database. Existing databases created with an earlier migration set
+already have their own schema and data; preserve those volumes. To recreate a
+local development database from the current baseline, first make sure its data
+can be discarded, then reset the Compose volume:
 
 ```sh
-docker compose exec -T postgres psql -U messenger -d messenger \
-  -f /docker-entrypoint-initdb.d/migrations/000003_core_api_sessions.up.sql
+docker compose down -v
+docker compose up --build -d
 ```
 
-Apply the Phase 4B cleanup indexes to an existing volume with:
-
-```sh
-docker compose exec -T postgres psql -U messenger -d messenger \
-  -f /docker-entrypoint-initdb.d/migrations/000004_direct_outbox_sync_retention.up.sql
-```
-
-Convert an existing direct outbox payload column to the current `TEXT` schema
-with:
-
-```sh
-docker compose exec -T postgres psql -U messenger -d messenger \
-  -f /docker-entrypoint-initdb.d/migrations/000008_direct_outbox_payload_text.up.sql
-```
-
-If an existing database has the unused `originating_device_id` column on
-`direct_outbox`, remove it with:
-
-```sh
-docker compose exec -T postgres psql -U messenger -d messenger \
-  -f /docker-entrypoint-initdb.d/migrations/000009_drop_direct_outbox_originating_device_id.up.sql
-```
+The `down -v` command permanently deletes the Compose-managed database volume.
 
 Core API listens on `http://localhost:8081`. Request and verify a development
 OTP (`000000`) for each phone number:

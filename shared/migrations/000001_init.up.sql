@@ -1,5 +1,5 @@
--- Phase 0 schema: tables Message Service and Relay need for 1:1 send.
--- Group tables, sessions, blocks, and media are deferred.
+-- Baseline schema for a new database. Keep this file aligned with the current
+-- application schema; existing databases must not apply it again.
 
 CREATE TABLE users (
     user_id UUID PRIMARY KEY,
@@ -20,10 +20,22 @@ CREATE TABLE device (
     device_name TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at TIMESTAMPTZ,
-    revoked_at TIMESTAMPTZ
+    revoked_at TIMESTAMPTZ,
+    push_token TEXT
 );
 
 CREATE INDEX device_user_id_idx ON device (user_id);
+
+CREATE TABLE session (
+    session_id UUID PRIMARY KEY,
+    device_id UUID NOT NULL REFERENCES device (device_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX session_device_id_idx ON session (device_id, expires_at DESC);
+CREATE INDEX session_active_idx ON session (session_id) WHERE revoked_at IS NULL;
 
 CREATE TABLE chat (
     chat_id UUID PRIMARY KEY,
@@ -54,13 +66,51 @@ CREATE TABLE direct_outbox (
     recipient_id UUID NOT NULL REFERENCES users (user_id),
     device_id UUID NOT NULL REFERENCES device (device_id),
     event_type TEXT NOT NULL,
-    payload TEXT NOT NULL, -- Transport-only payload; no inner querying, so not JSONB as of now. avoiding JSONB parsing overhead
+    payload TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     routed_to TEXT CHECK (routed_to IN ('WS', 'NOTIF')),-- Consider ENUM later for more compact storage.
     dispatched_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
-    UNIQUE (sender_id, client_msg_id, device_id)
+    claim_expiry TIMESTAMPTZ,
+    attempt_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX direct_outbox_device_id_idx ON direct_outbox (device_id, id);
 CREATE INDEX direct_outbox_undispatched_idx ON direct_outbox (id) WHERE dispatched_at IS NULL;
+CREATE INDEX direct_outbox_claim_expiry_idx
+    ON direct_outbox (claim_expiry, id)
+    WHERE dispatched_at IS NULL;
+CREATE INDEX direct_outbox_expiry_cleanup_idx ON direct_outbox (created_at);
+CREATE UNIQUE INDEX direct_outbox_message_idempotency_idx
+    ON direct_outbox (sender_id, client_msg_id, device_id)
+    WHERE event_type = 'NEW_MESSAGE';
+
+CREATE TABLE group_event (
+    event_id BIGSERIAL PRIMARY KEY,
+    chat_id UUID NOT NULL REFERENCES chat (chat_id),
+    sender_id UUID NOT NULL REFERENCES users (user_id),
+    client_msg_id UUID NOT NULL,
+    event_type TEXT NOT NULL,
+    payload TEXT NOT NULL,-- Transport-only payload; no inner querying, so not JSONB as of now. avoiding JSONB parsing overhead
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (sender_id, client_msg_id)
+);
+
+CREATE INDEX group_event_chat_id_event_id_idx ON group_event (chat_id, event_id);
+
+CREATE TABLE group_outbox (
+    id BIGSERIAL PRIMARY KEY,
+    event_id BIGINT NOT NULL REFERENCES group_event (event_id) ON DELETE CASCADE,
+    recipient_id UUID NOT NULL REFERENCES users (user_id),
+    device_id UUID NOT NULL REFERENCES device (device_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    routed_to TEXT CHECK (routed_to IN ('WS', 'NOTIF')),
+    dispatched_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
+    claim_expiry TIMESTAMPTZ,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (event_id, device_id)
+);
+
+CREATE INDEX group_outbox_device_id_idx ON group_outbox (device_id, id);
+CREATE INDEX group_outbox_undispatched_idx ON group_outbox (id) WHERE dispatched_at IS NULL;
