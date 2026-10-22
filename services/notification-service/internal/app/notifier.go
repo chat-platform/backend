@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/chat-platform/backend/shared/pkg/logging"
@@ -19,8 +20,11 @@ type Push struct {
 	ChatID   string
 }
 
+var ErrTokenUnregistered = errors.New("push token is no longer registered")
+
 type TokenRepository interface {
 	PushToken(context.Context, string) (token, platform string, err error)
+	ClearPushTokenIfCurrent(context.Context, string, string) error
 }
 
 type Sender interface {
@@ -47,6 +51,13 @@ func (n *Notifier) Send(ctx context.Context, hint PushHint) error {
 		return nil
 	}
 	if err := n.sender.Send(ctx, Push{DeviceID: hint.DeviceID, Platform: platform, Token: token, ChatID: hint.ChatID}); err != nil {
+		if errors.Is(err, ErrTokenUnregistered) {
+			if clearErr := n.tokens.ClearPushTokenIfCurrent(ctx, hint.DeviceID, token); clearErr != nil {
+				return fmt.Errorf("clear unregistered push token for device %s: %w", hint.DeviceID, clearErr)
+			}
+			n.logger.Warn(ctx, "unregistered push token cleared", "device_id", hint.DeviceID)
+			return nil
+		}
 		return fmt.Errorf("send push hint for device %s: %w", hint.DeviceID, err)
 	}
 	return nil

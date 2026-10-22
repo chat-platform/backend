@@ -23,3 +23,11 @@ func (r *TokenRepository) PushToken(ctx context.Context, deviceID string) (strin
 	}
 	return token, platform, nil
 }
+
+func (r *TokenRepository) ClearPushTokenIfCurrent(ctx context.Context, deviceID, token string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE device SET push_token = NULL WHERE device_id = $1 AND push_token = $2`, deviceID, token)
+	if err != nil {
+		return fmt.Errorf("clear stale device push token: %w", err)
+	}
+	return nil
+}
