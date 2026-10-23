@@ -179,6 +179,25 @@ func (r *Repository) GetOrCreateDirectChat(ctx context.Context, userID, phone st
 	return chatID, nil
 }
 
+func (r *Repository) GetDirectChatPeer(ctx context.Context, userID, chatID string) (string, error) {
+	var peerID string
+	err := r.pool.QueryRow(ctx, `
+		SELECT peer.user_id::text
+		FROM chat c
+		JOIN chat_membership member ON member.chat_id = c.chat_id AND member.user_id = $2
+		JOIN chat_membership peer ON peer.chat_id = c.chat_id AND peer.user_id <> $2
+		WHERE c.chat_id = $1 AND c.type = 'DIRECT' AND c.deleted_at IS NULL
+		  AND (SELECT count(*) FROM chat_membership cm WHERE cm.chat_id = c.chat_id) = 2
+		LIMIT 1`, chatID, userID).Scan(&peerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", app.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("get direct chat peer: %w", err)
+	}
+	return peerID, nil
+}
+
 func (r *Repository) RevokeSession(ctx context.Context, sessionID string, at time.Time) error {
 	_, err := r.pool.Exec(ctx, `UPDATE session SET revoked_at = COALESCE(revoked_at, $2) WHERE session_id = $1`, sessionID, at)
 	if err != nil {

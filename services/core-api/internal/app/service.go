@@ -52,6 +52,7 @@ type Repository interface {
 	SetPushToken(context.Context, string, string) error
 	ClearPushToken(context.Context, string) error
 	GetOrCreateDirectChat(context.Context, string, string) (string, error)
+	GetDirectChatPeer(context.Context, string, string) (string, error)
 	ListGroupChats(context.Context, string) ([]GroupChat, error)
 	CreateGroup(context.Context, string, string, []string) (string, error)
 	UpdateGroup(context.Context, string, string, *string, *string) error
@@ -217,6 +218,23 @@ func (s *Service) ClearPushToken(ctx context.Context, deviceID string) error {
 func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string, error) {
 	phone = strings.TrimSpace(phone)
 	return s.repo.GetOrCreateDirectChat(ctx, userID, phone)
+}
+
+// DirectChatPeer returns the other participant only when userID is an active
+// member of the requested direct chat. The repository intentionally reports
+// unauthorized and missing chats as the same not-found result.
+func (s *Service) DirectChatPeer(ctx context.Context, userID, chatID string) (string, error) {
+	if _, err := uuid.Parse(chatID); err != nil {
+		return "", ErrNotFound
+	}
+	peerID, err := s.repo.GetDirectChatPeer(ctx, userID, chatID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return "", ErrNotFound
+		}
+		return "", ErrUnavailable
+	}
+	return peerID, nil
 }
 
 func (s *Service) Sync(ctx context.Context, claims sessiontoken.Claims, directCursor, groupCursor int64, limit int) (SyncResponse, error) {
