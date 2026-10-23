@@ -52,6 +52,7 @@ type Repository interface {
 	SetPushToken(context.Context, string, string) error
 	ClearPushToken(context.Context, string) error
 	GetOrCreateDirectChat(context.Context, string, string) (string, error)
+	GetDirectChatPeer(context.Context, string, string) (string, error)
 	ListGroupChats(context.Context, string) ([]GroupChat, error)
 	CreateGroup(context.Context, string, string, []string) (string, error)
 	UpdateGroup(context.Context, string, string, *string, *string) error
@@ -62,6 +63,11 @@ type Repository interface {
 	SessionActive(context.Context, sessiontoken.Claims, time.Time) (bool, error)
 	ListDirectEvents(context.Context, string, int64, int) ([]SyncEvent, error)
 	ListGroupEvents(context.Context, string, int64, int) ([]SyncEvent, error)
+}
+
+type PresenceRepository interface {
+	GetLastSeen(context.Context, string) (*time.Time, error)
+	UpdateLastSeen(context.Context, string, time.Time) error
 }
 
 type SessionCache interface {
@@ -214,6 +220,23 @@ func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string,
 	return s.repo.GetOrCreateDirectChat(ctx, userID, phone)
 }
 
+// DirectChatPeer returns the other participant only when userID is an active
+// member of the requested direct chat. The repository intentionally reports
+// unauthorized and missing chats as the same not-found result.
+func (s *Service) DirectChatPeer(ctx context.Context, userID, chatID string) (string, error) {
+	if _, err := uuid.Parse(chatID); err != nil {
+		return "", ErrNotFound
+	}
+	peerID, err := s.repo.GetDirectChatPeer(ctx, userID, chatID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return "", ErrNotFound
+		}
+		return "", ErrUnavailable
+	}
+	return peerID, nil
+}
+
 func (s *Service) Sync(ctx context.Context, claims sessiontoken.Claims, directCursor, groupCursor int64, limit int) (SyncResponse, error) {
 	if directCursor < 0 || groupCursor < 0 || limit < 1 || limit > 500 {
 		return SyncResponse{}, ErrInvalidRequest
@@ -230,6 +253,35 @@ func (s *Service) Sync(ctx context.Context, claims sessiontoken.Claims, directCu
 		Direct: makeSyncPage(directEvents, directCursor, limit),
 		Group:  makeSyncPage(groupEvents, groupCursor, limit),
 	}, nil
+}
+
+func (s *Service) GetLastSeen(ctx context.Context, userID string) (*time.Time, error) {
+	if _, err := uuid.Parse(userID); err != nil {
+		return nil, ErrInvalidRequest
+	}
+	repo, ok := s.repo.(PresenceRepository)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	lastSeen, err := repo.GetLastSeen(ctx, userID)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	return lastSeen, nil
+}
+
+func (s *Service) UpdateLastSeen(ctx context.Context, userID string, lastSeen time.Time) error {
+	if _, err := uuid.Parse(userID); err != nil || lastSeen.IsZero() {
+		return ErrInvalidRequest
+	}
+	repo, ok := s.repo.(PresenceRepository)
+	if !ok {
+		return ErrUnavailable
+	}
+	if err := repo.UpdateLastSeen(ctx, userID, lastSeen.UTC()); err != nil {
+		return ErrUnavailable
+	}
+	return nil
 }
 
 func makeSyncPage(events []SyncEvent, cursor int64, limit int) SyncPage {

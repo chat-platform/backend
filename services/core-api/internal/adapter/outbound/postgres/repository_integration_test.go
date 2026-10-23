@@ -50,11 +50,12 @@ func testRepository(t *testing.T) (*Repository, *pgxpool.Pool) {
 	}
 	t.Cleanup(pool.Close)
 	_, err = pool.Exec(ctx, `
-CREATE TABLE users(user_id UUID PRIMARY KEY, phone TEXT NOT NULL UNIQUE, display_name TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE users(user_id UUID PRIMARY KEY, phone TEXT NOT NULL UNIQUE, display_name TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_seen_at TIMESTAMPTZ);
 CREATE TABLE device(device_id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(user_id),platform TEXT NOT NULL,is_primary BOOLEAN NOT NULL DEFAULT true,device_name TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),last_seen_at TIMESTAMPTZ,revoked_at TIMESTAMPTZ);
 CREATE TABLE session(session_id UUID PRIMARY KEY,device_id UUID NOT NULL REFERENCES device(device_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),expires_at TIMESTAMPTZ NOT NULL,revoked_at TIMESTAMPTZ);
 CREATE TABLE chat(chat_id UUID PRIMARY KEY,type TEXT NOT NULL,name TEXT,profile_pic TEXT,created_by UUID REFERENCES users(user_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),deleted_at TIMESTAMPTZ);
 CREATE TABLE chat_membership(chat_id UUID NOT NULL REFERENCES chat(chat_id),user_id UUID NOT NULL REFERENCES users(user_id),role TEXT NOT NULL DEFAULT 'member',joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),member_tag TEXT,PRIMARY KEY(chat_id,user_id));
+CREATE TABLE user_blocks(blocker_id UUID NOT NULL REFERENCES users(user_id),blocked_id UUID NOT NULL REFERENCES users(user_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(blocker_id,blocked_id));
 CREATE TABLE direct_outbox(id BIGSERIAL PRIMARY KEY,device_id UUID NOT NULL,event_type TEXT NOT NULL,payload TEXT NOT NULL);
 CREATE TABLE group_event(event_id BIGINT PRIMARY KEY,event_type TEXT NOT NULL,payload TEXT NOT NULL);
 CREATE TABLE group_outbox(id BIGSERIAL PRIMARY KEY,event_id BIGINT NOT NULL REFERENCES group_event(event_id),device_id UUID NOT NULL);`)
@@ -62,6 +63,30 @@ CREATE TABLE group_outbox(id BIGSERIAL PRIMARY KEY,event_id BIGINT NOT NULL REFE
 		t.Fatal(err)
 	}
 	return New(pool), pool
+}
+
+func TestConditionalLastSeen(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	userA := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15550000101')`, userA); err != nil {
+		t.Fatal(err)
+	}
+	if lastSeen, err := repo.GetLastSeen(ctx, userA); err != nil || lastSeen != nil {
+		t.Fatalf("initial last-seen=(%v,%v)", lastSeen, err)
+	}
+	newer := time.Now().UTC().Truncate(time.Millisecond)
+	older := newer.Add(-time.Minute)
+	if err := repo.UpdateLastSeen(ctx, userA, newer); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateLastSeen(ctx, userA, older); err != nil {
+		t.Fatal(err)
+	}
+	lastSeen, err := repo.GetLastSeen(ctx, userA)
+	if err != nil || lastSeen == nil || !lastSeen.Equal(newer) {
+		t.Fatalf("conditional last-seen=(%v,%v), want %v", lastSeen, err, newer)
+	}
 }
 
 func TestCompleteOTPCreateAndReuseAccountDeviceAndRevokeSession(t *testing.T) {
@@ -124,6 +149,34 @@ func TestGetOrCreateDirectChatIsIdempotent(t *testing.T) {
 	var chats int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM chat WHERE type='DIRECT'`).Scan(&chats); err != nil || chats != 1 {
 		t.Fatalf("direct chat count=(%d,%v)", chats, err)
+	}
+}
+
+func TestGetDirectChatPeerRequiresActiveDirectChatMembership(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	member, peer, outsider := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	_, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15550000201'),($2,'+15550000202'),($3,'+15550000203')`, member, peer, outsider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatID, err := repo.GetOrCreateDirectChat(ctx, member, "+15550000202")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetDirectChatPeer(ctx, member, chatID)
+	if err != nil || got != peer {
+		t.Fatalf("member peer=(%q,%v), want %q", got, err, peer)
+	}
+	if _, err := repo.GetDirectChatPeer(ctx, outsider, chatID); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("outsider lookup error=%v, want not found", err)
+	}
+	groupID, err := repo.CreateGroup(ctx, member, "test group", []string{peer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetDirectChatPeer(ctx, member, groupID); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("group lookup error=%v, want not found", err)
 	}
 }
 

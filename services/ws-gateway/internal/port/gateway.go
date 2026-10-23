@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"time"
 
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 )
@@ -21,4 +22,22 @@ type ConnectionRegistry interface {
 type SessionAuthenticator interface {
 	Authenticate(context.Context, string) (domain.Identity, error)
 	IsSessionActive(context.Context, string) (bool, error)
+}
+
+type PresenceStore interface {
+	RegisterConnection(context.Context, string, string) (bool, error)
+	RefreshConnection(context.Context, string, string) (bool, error)
+	RemoveConnection(context.Context, string, string) (bool, error)
+	IsOnline(context.Context, string) (bool, error)
+	Subscribe(context.Context, string, string) error
+	Unsubscribe(context.Context, string, string) error
+	UnsubscribeAll(context.Context, string) error
+	CachedLastSeen(context.Context, string) (*time.Time, error)
+	CacheLastSeen(context.Context, string, time.Time) error
+	Publish(context.Context, domain.Presence) error
+}
+
+type PresenceCoreAPI interface {
+	GetLastSeen(context.Context, string, string) (*time.Time, error)
+	UpdateLastSeen(context.Context, string, time.Time) error
 }

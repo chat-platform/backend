@@ -26,6 +26,7 @@ username
 display_name
 profile_pic_media_id → profile_pic_media.ppic_id
 about (usually used for statuses like 'At work', 'Away, leave a msg',etc)
+last_seen_at (nullable; updated only on a detected user-level offline transition)
 created_at
 updated_at
 
@@ -195,7 +196,7 @@ delivery can cause out-of-order events, so this cursor model does not provide
 a strict no-loss ordering guarantee.
 
 # Other
-## Redis - WS registruy
+## Redis - WS registry
     key: ws:conn:{device_id}
     value: { ws_node, conn_id }
     TTL:   refreshed on heartbeat (e.g. 90s, 3× heartbeat cadence)
@@ -204,4 +205,25 @@ a strict no-loss ordering guarantee.
         - Explicit DEL on clean disconnect.
         - Unclean disconnect: TTL expires the key; no reaper needed.
         - Device-to-user mapping is in Postgres (device table), not here.
-```
+
+## Redis - Presence
+
+- `presence:conn:{userUUID}:{connectionId}` → connection marker, TTL 60s.
+- `presence:user:{userUUID}` → Set of connection IDs; liveness checks validate
+  each TTL key and remove stale references.
+- `presence:subscribers:{userUUID}` → Set of subscribed connection IDs.
+- `presence:subscriptions:{connectionId}` → Set of target user IDs, used to
+  remove subscriptions when a connection closes or expires.
+- `presence:last_seen:{userUUID}` → short-lived cache of durable
+  `users.last_seen_at`.
+- `presence:updates` → shared Redis Pub/Sub channel consumed once per Gateway.
+
+The Redis deployment must enable keyevent expiry notifications with
+`notify-keyspace-events Ex`. Gateways subscribe to
+`__keyevent@0__:expired` and ignore expired keys outside the
+`presence:conn:` prefix. Docker Compose configures this on its Redis service;
+other deployments must apply the equivalent server configuration.
+
+`user_blocks` stores block relationships for messaging behavior. Presence
+visibility currently requires an authenticated user but is not restricted by
+shared-chat membership or block relationships.

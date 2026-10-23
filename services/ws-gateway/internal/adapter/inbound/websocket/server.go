@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
@@ -19,21 +20,24 @@ import (
 )
 
 const (
-	authTimeout    = 10 * time.Second
-	heartbeatEvery = 20 * time.Second
-	readTimeout    = 60 * time.Second
-	maxFrameBytes  = 1 << 20
+	authTimeout   = 10 * time.Second
+	readTimeout   = 60 * time.Second
+	maxFrameBytes = 1 << 20
 )
 
 type Operations interface {
 	Authenticate(context.Context, string) (domain.Identity, error)
 	IsSessionActive(context.Context, string) (bool, error)
 	Register(context.Context, domain.Identity, string) (domain.Connection, error)
-	Refresh(context.Context, string, domain.Connection) (bool, error)
-	Unregister(context.Context, string, domain.Connection) error
+	Refresh(context.Context, string, string, domain.Connection) (bool, error)
+	Unregister(context.Context, string, string, domain.Connection) error
 	Send(context.Context, domain.Identity, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, domain.Identity, string, int64) error
 	MarkRead(context.Context, domain.Identity, string, int64, int64) error
+	SubscribePresence(context.Context, string, string) error
+	UnsubscribePresence(context.Context, string, string) error
+	GetPresence(context.Context, string, string) (domain.Presence, error)
+	PresenceExpired(context.Context, string) error
 }
 
 type Server struct {
@@ -49,7 +53,7 @@ func NewServer(operations Operations, logger logging.Logger, hub *Hub) *Server {
 		operations:        operations,
 		hub:               hub,
 		logger:            logger,
-		heartbeatInterval: heartbeatEvery,
+		heartbeatInterval: config.HeartbeatInterval,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: 10 * time.Second,
 		},
@@ -100,11 +104,11 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	s.hub.RegisterAuthenticated(connectionID, identity.SessionID, identity.DeviceID, connection, socket)
-	defer s.hub.Remove(connection.ConnID, socket)
 	defer func() {
+		s.hub.Remove(connection.ConnID, socket)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := s.operations.Unregister(ctx, identity.DeviceID, connection); err != nil {
+		if err := s.operations.Unregister(ctx, identity.DeviceID, identity.UserID, connection); err != nil {
 			s.logOperationFailure(ctx, "unregister websocket connection", err,
 				"user_id", identity.UserID, "device_id", identity.DeviceID,
 				"ws_node", connection.NodeID, "conn_id", connection.ConnID)
@@ -146,7 +150,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
 			return fmt.Errorf("extend websocket read deadline: %w", err)
 		}
-		registered, err := s.operations.Refresh(ctx, identity.DeviceID, connection)
+		registered, err := s.operations.Refresh(ctx, identity.DeviceID, identity.UserID, connection)
 		if err != nil {
 			return err
 		}
@@ -227,6 +231,68 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 					"outbox_id", receipt.OutboxID)
 				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "read receipt could not be recorded")
 			}
+			continue
+		}
+		if envelope.Type == wsframe.TypePresenceSubscribe {
+			var request wsframe.PresenceTargetPayload
+			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &request) != nil || strings.TrimSpace(request.TargetUserID) == "" {
+				s.writeError(ctx, socket, envelope.ID, "invalid_presence_request", "presence.subscribe requires targetUserId")
+				continue
+			}
+			if err := s.operations.SubscribePresence(ctx, connection.ConnID, request.TargetUserID); err != nil {
+				s.logOperationFailure(ctx, "subscribe to presence", err, "target_user_id", request.TargetUserID, "conn_id", connection.ConnID)
+				s.writeError(ctx, socket, envelope.ID, "presence_forbidden", "presence is unavailable for this user")
+				continue
+			}
+			if err := s.hub.SubscribePresence(connection.ConnID, request.TargetUserID); err != nil {
+				_ = s.operations.UnsubscribePresence(ctx, connection.ConnID, request.TargetUserID)
+				s.writeError(ctx, socket, envelope.ID, "connection_closed", "websocket connection is no longer active")
+				continue
+			}
+			presence, err := s.operations.GetPresence(ctx, token, request.TargetUserID)
+			if err != nil {
+				s.hub.UnsubscribePresence(connection.ConnID, request.TargetUserID)
+				_ = s.operations.UnsubscribePresence(ctx, connection.ConnID, request.TargetUserID)
+				s.logOperationFailure(ctx, "read presence snapshot", err, "target_user_id", request.TargetUserID)
+				s.writeError(ctx, socket, envelope.ID, "presence_unavailable", "presence snapshot is unavailable")
+				continue
+			}
+			payload := marshalPayload(ctx, s.logger, wsframe.PresencePayload{UserID: presence.UserID, Status: presence.Status, LastSeen: presence.LastSeen})
+			if err := socket.WriteJSON(wsframe.Envelope{Type: wsframe.TypePresenceSnapshot, ID: envelope.ID, TS: time.Now().UnixMilli(), Payload: payload}); err != nil {
+				s.logOperationFailure(ctx, "write presence snapshot", err, "target_user_id", request.TargetUserID)
+				return
+			}
+			continue
+		}
+		if envelope.Type == wsframe.TypePresenceUnsubscribe {
+			var request wsframe.PresenceTargetPayload
+			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &request) != nil || strings.TrimSpace(request.TargetUserID) == "" {
+				s.writeError(ctx, socket, envelope.ID, "invalid_presence_request", "presence.unsubscribe requires targetUserId")
+				continue
+			}
+			s.hub.UnsubscribePresence(connection.ConnID, request.TargetUserID)
+			if err := s.operations.UnsubscribePresence(ctx, connection.ConnID, request.TargetUserID); err != nil {
+				s.writeError(ctx, socket, envelope.ID, "presence_unsubscribe_failed", "presence subscription could not be removed")
+				continue
+			}
+			payload := marshalPayload(ctx, s.logger, wsframe.PresenceTargetPayload{TargetUserID: request.TargetUserID})
+			_ = socket.WriteJSON(wsframe.Envelope{Type: "presence.unsubscribed", ID: envelope.ID, TS: time.Now().UnixMilli(), Payload: payload})
+			continue
+		}
+		if envelope.Type == wsframe.TypePresenceGet {
+			var request wsframe.PresenceTargetPayload
+			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &request) != nil || strings.TrimSpace(request.TargetUserID) == "" {
+				s.writeError(ctx, socket, envelope.ID, "invalid_presence_request", "presence.get requires targetUserId")
+				continue
+			}
+			presence, err := s.operations.GetPresence(ctx, token, request.TargetUserID)
+			if err != nil {
+				s.logOperationFailure(ctx, "query presence", err, "target_user_id", request.TargetUserID)
+				s.writeError(ctx, socket, envelope.ID, "presence_unavailable", "presence is unavailable for this user")
+				continue
+			}
+			payload := marshalPayload(ctx, s.logger, wsframe.PresencePayload{UserID: presence.UserID, Status: presence.Status, LastSeen: presence.LastSeen})
+			_ = socket.WriteJSON(wsframe.Envelope{Type: wsframe.TypePresenceSnapshot, ID: envelope.ID, TS: time.Now().UnixMilli(), Payload: payload})
 			continue
 		}
 		if envelope.Type != wsframe.TypeMessageSend {

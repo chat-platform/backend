@@ -11,15 +11,20 @@ type Envelope struct {
 }
 
 const (
-	TypeAuth             = "auth"
-	TypeAuthOK           = "auth_ok"
-	TypeMessageSend      = "message.send"
-	TypeMessageAck       = "message.ack"
-	TypeMessageRecv      = "message.recv"
-	TypeReceiptStatus    = "receipt.status"
-	TypeSyncReady        = "sync.ready"
-	TypeReceiptDelivered = "receipt.delivered"
-	TypeReceiptRead      = "receipt.read"
+	TypeAuth                = "auth"
+	TypeAuthOK              = "auth_ok"
+	TypeMessageSend         = "message.send"
+	TypeMessageAck          = "message.ack"
+	TypeMessageRecv         = "message.recv"
+	TypeReceiptStatus       = "receipt.status"
+	TypeSyncReady           = "sync.ready"
+	TypeReceiptDelivered    = "receipt.delivered"
+	TypeReceiptRead         = "receipt.read"
+	TypePresenceSubscribe   = "presence.subscribe"
+	TypePresenceUnsubscribe = "presence.unsubscribe"
+	TypePresenceGet         = "presence.get"
+	TypePresenceSnapshot    = "presence.snapshot"
+	TypePresenceUpdate      = "presence.update"
 )
 
 type OutboxType string
@@ -64,6 +69,16 @@ type ReadReceiptPayload struct {
 	OutboxType OutboxType `json:"outboxType"`
 	OutboxID   int64      `json:"outboxId"`
 	ReadAt     int64      `json:"readAt"`
+}
+
+type PresenceTargetPayload struct {
+	TargetUserID string `json:"targetUserId"`
+}
+
+type PresencePayload struct {
+	UserID   string `json:"userId"`
+	Status   string `json:"status"`
+	LastSeen string `json:"lastSeen,omitempty"`
 }
 
 // ReceiptStatusPayload is a server-to-client receipt event. Outbox identity

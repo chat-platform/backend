@@ -50,6 +50,9 @@ func (r *repoFake) ClearPushToken(context.Context, string) error       { return 
 func (r *repoFake) GetOrCreateDirectChat(context.Context, string, string) (string, error) {
 	return "chat-1", nil
 }
+func (r *repoFake) GetDirectChatPeer(context.Context, string, string) (string, error) {
+	return "peer-1", nil
+}
 func (r *repoFake) ListGroupChats(context.Context, string) ([]GroupChat, error) { return nil, nil }
 func (r *repoFake) CreateGroup(context.Context, string, string, []string) (string, error) {
 	return "group-1", nil
@@ -100,6 +103,9 @@ func (r *repoFake) ListGroupEvents(_ context.Context, deviceID string, cursor in
 	}
 	return events, nil
 }
+
+func (r *repoFake) GetLastSeen(context.Context, string) (*time.Time, error) { return nil, nil }
+func (r *repoFake) UpdateLastSeen(context.Context, string, time.Time) error { return nil }
 
 func TestSyncUsesDeviceCursorAndPagesWithOneLookahead(t *testing.T) {
 	repo := &repoFake{syncEvents: []SyncEvent{
