@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/port"
 	"github.com/google/uuid"
@@ -65,7 +66,7 @@ func (g *Gateway) Register(ctx context.Context, identity domain.Identity, connID
 		}
 		if newlyOnline {
 			if err := g.presence.Publish(ctx, domain.Presence{UserID: identity.UserID, Status: "online"}); err != nil {
-				_ = g.cleanupPresenceConnection(ctx, identity.UserID, connID)
+				_ = g.cleanupPresenceConnection(ctx, identity.UserID, connID, time.Now().UTC())
 				_ = g.registry.Unregister(ctx, identity.DeviceID, connection)
 				return domain.Connection{}, fmt.Errorf("publish online presence: %w", err)
 			}
@@ -92,7 +93,7 @@ func (g *Gateway) Refresh(ctx context.Context, deviceID, userID string, connecti
 func (g *Gateway) Unregister(ctx context.Context, deviceID, userID string, connection domain.Connection) error {
 	var cleanupErr error
 	if g.presence != nil {
-		cleanupErr = g.cleanupPresenceConnection(ctx, userID, connection.ConnID)
+		cleanupErr = g.cleanupPresenceConnection(ctx, userID, connection.ConnID, time.Now().UTC())
 	}
 	if err := g.registry.Unregister(ctx, deviceID, connection); err != nil {
 		return errors.Join(cleanupErr, fmt.Errorf("unregister websocket connection: %w", err))
@@ -100,22 +101,21 @@ func (g *Gateway) Unregister(ctx context.Context, deviceID, userID string, conne
 	return cleanupErr
 }
 
-func (g *Gateway) cleanupPresenceConnection(ctx context.Context, userID, connID string) error {
+func (g *Gateway) cleanupPresenceConnection(ctx context.Context, userID, connID string, lastSeenAt time.Time) error {
 	offline, err := g.presence.RemoveConnection(ctx, userID, connID)
 	if !offline {
 		return err
 	}
-	detectedAt := time.Now().UTC()
 	failures := []error{err}
 	if g.coreAPI != nil {
-		if err := g.coreAPI.UpdateLastSeen(ctx, userID, detectedAt); err != nil {
+		if err := g.coreAPI.UpdateLastSeen(ctx, userID, lastSeenAt); err != nil {
 			failures = append(failures, fmt.Errorf("persist last-seen: %w", err))
 		}
 	}
-	if err := g.presence.CacheLastSeen(ctx, userID, detectedAt); err != nil {
+	if err := g.presence.CacheLastSeen(ctx, userID, lastSeenAt); err != nil {
 		failures = append(failures, err)
 	}
-	if err := g.presence.Publish(ctx, domain.Presence{UserID: userID, Status: "offline", LastSeen: detectedAt.Format(time.RFC3339Nano)}); err != nil {
+	if err := g.presence.Publish(ctx, domain.Presence{UserID: userID, Status: "offline", LastSeen: lastSeenAt.Format(time.RFC3339Nano)}); err != nil {
 		failures = append(failures, err)
 	}
 	return errors.Join(failures...)
@@ -126,7 +126,9 @@ func (g *Gateway) PresenceExpired(ctx context.Context, key string) error {
 	if !ok {
 		return nil
 	}
-	return g.cleanupPresenceConnection(ctx, userID, connID)
+	processedAt := time.Now().UTC()
+	lastSeenAt := processedAt.Add(-config.HeartbeatInterval)
+	return g.cleanupPresenceConnection(ctx, userID, connID, lastSeenAt)
 }
 
 func (g *Gateway) AuthorizePresence(ctx context.Context, token, targetUserID string) error {

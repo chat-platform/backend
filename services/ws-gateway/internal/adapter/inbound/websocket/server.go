@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
@@ -19,10 +20,9 @@ import (
 )
 
 const (
-	authTimeout    = 10 * time.Second
-	heartbeatEvery = 19 * time.Second
-	readTimeout    = 60 * time.Second
-	maxFrameBytes  = 1 << 20
+	authTimeout   = 10 * time.Second
+	readTimeout   = 60 * time.Second
+	maxFrameBytes = 1 << 20
 )
 
 type Operations interface {
@@ -53,7 +53,7 @@ func NewServer(operations Operations, logger logging.Logger, hub *Hub) *Server {
 		operations:        operations,
 		hub:               hub,
 		logger:            logger,
-		heartbeatInterval: heartbeatEvery,
+		heartbeatInterval: config.HeartbeatInterval,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: 10 * time.Second,
 		},

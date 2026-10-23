@@ -529,65 +529,77 @@ does not wipe local state.
 
 ## 5. Presence
 
-### 5.1 Connection tracking and heartbeat
+### 5.1 Registry
 
-Each authenticated WebSocket connection receives a unique UUID and a Redis
-key `presence:conn:{userUUID}:{connectionId}` with a 60-second TTL. Its ID is
-also added to `presence:user:{userUUID}`. The Gateway pings every 19 seconds
-and refreshes both the existing device routing registration and presence TTL
-only after receiving a valid WebSocket pong.
+Each live device has a Redis key:
 
-Redis expiry notifications must be enabled with
-`notify-keyspace-events Ex` in deployment configuration. Each Gateway
-subscribes to `__keyevent@0__:expired` and filters for the `presence:conn:`
-prefix. The user and connection UUIDs are parsed from the expired key name.
+    ws:conn:{device_id} → {ws_node, conn_id}
 
-### 5.2 Cleanup and online transitions
+TTL is refreshed on every heartbeat. A clean disconnect deletes the key.
+An unclean one lets it expire.
 
-Graceful WebSocket close and Redis expiry notification call the same
-connection-specific cleanup function. It removes only the targeted
-connection, removes subscriptions using the reverse index, checks remaining
-connection TTL keys, and processes offline if none remain. Duplicate cleanup
-is safe. Ordinary Redis operations are used without Lua; races may produce
-duplicate or out-of-order updates and are accepted for best-effort presence.
+Liveness = key exists. There is no per-user structure in Redis; the
+device list comes from Postgres (`device` table), and Redis only says
+which of those devices currently have a live socket.
 
-The first observed live connection produces an online update. The last
-connection's cleanup records the Gateway's server-side offline-detection time
-as `users.last_seen_at` through Core API, updates the Redis cache, and
-publishes an offline update. Persistence is attempted once with a conditional
-SQL update that prevents older timestamps from replacing newer values.
+### 5.2 Online / offline
 
-### 5.3 Presence authorization and queries
+- **Online** = the user has at least one device whose `ws:conn:{device_id}`
+  key exists.
+- **Last seen** = `max(device.last_seen_at)` across the user's devices,
+  read from Postgres. Updated on disconnect (and periodically during a
+  long-lived connection).
 
-Presence access requires an authenticated user and a shared, active direct
-chat. Presence is hidden if either user has blocked the other. Online state
-comes from the Redis user connection set and live TTL keys. Online queries do
-not read last-seen data. Offline queries use the Redis last-seen cache and
-fall back to Core API on a cache miss.
+### 5.3 Heartbeat
 
-### 5.4 Subscriptions and delivery
+Gateway pings; client pongs; missed pongs mark the socket dead.
+TODO. Decide cadence (e.g. 30s) and TTL (e.g. 90s = 3× cadence).
 
-`presence.subscribe` first authorizes the requester and registers the
-connection in `presence:subscribers:{targetUserID}` and
-`presence:subscriptions:{connectionID}`, then reads and returns a fresh
-snapshot. Repeated subscriptions are idempotent. Unsubscribe and connection
-cleanup remove both directions of the index.
+### 5.4 Presence fan-out
 
-Each Gateway has one Redis Pub/Sub subscription to `presence:updates`; it
-forwards received events only to locally subscribed WebSocket connections.
-No per-user or per-client Redis Pub/Sub subscriptions, Streams, acknowledgments,
-replay, or retry queues are used. The client refreshes with
-`presence.subscribe` every two minutes while the chat is open and unsubscribes
-when leaving. Failed or timed-out refreshes hide the indicator until a valid
-snapshot or update arrives.
+TODO. Who gets notified when a user goes online/offline:
+- Only contacts with an open chat?
+- Only contacts currently subscribed to presence?
+- Debounce: a user flipping between networks shouldn't spam contacts.
 
-### 5.5 Deferred reliability work
+### 5.5 Write amplification
 
-Periodic reconciliation of missed expiry notifications is deferred. There is
-no presence verification index or periodic scan in this phase. Comprehensive
-Redis failure recovery is also deferred: automatic Redis reconnection does
-not guarantee restoration of routing registrations, presence registrations,
-Pub/Sub subscriptions, or Stream consumers. Track that as separate work.
+Presence changes are frequent. Pushing every flip live to every contact
+is expensive. TODO: batch or debounce — e.g. coalesce per-contact
+presence updates over a short window before fan-out.
+
+### 5.6 Registration failures and recovery
+
+The Gateway writes `ws:conn:{device_id}` on connect. If the write fails
+(Redis unreachable(network partition)), the connection is still accepted — a device that
+can send is better than one that can neither send nor connect. It
+degrades to send-only until registration succeeds.
+
+**Queue.** Each Gateway keeps an in-memory queue of connections whose
+registry write failed or is pending. In-memory is sufficient: if the
+Gateway crashes, the sockets die with it, and the entries become
+meaningless.
+
+**Re-registration on Redis recovery.** When Redis becomes reachable,
+the Gateway drains the queue. For each connection:
+
+1. Ping the client, wait for a pong within the heartbeat timeout.
+2. On pong: write `ws:conn:{device_id}`. The connection becomes routable.
+3. On timeout: drop the socket. The client's next reconnect handles it.
+
+**Why the ping-pong.** During a Redis partition, a client connected to
+Gateway A (unregistered) may also reconnect to Gateway B (registered)
+once its socket to A drops. If Gateway A later re-registers without
+checking, it overwrites B's entry with a stale `ws_node` — a phantom
+routing target. The ping-pong confirms the client is still on A before
+writing.
+
+**Reuse the heartbeat ping.** The check reuses the existing heartbeat
+ping/pong — no new frame type needed.
+
+**Stagger the drain.** At scale, draining every Gateway's queue at once
+produces a Redis write spike on recovery. Stagger the drain (random
+offset within a window) or rate-limit writes per Gateway.
 
 ---
 

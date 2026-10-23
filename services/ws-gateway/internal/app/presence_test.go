@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 )
 
@@ -128,11 +129,16 @@ func TestPresenceConnectionTransitionsAndLastSeenWrite(t *testing.T) {
 	if len(core.updates) != 0 || len(store.events) != 1 {
 		t.Fatalf("one remaining connection caused offline: updates=%v events=%+v", core.updates, store.events)
 	}
+	gracefulStart := time.Now().UTC()
 	if err := gateway.Unregister(context.Background(), identity.DeviceID, identity.UserID, second); err != nil {
 		t.Fatal(err)
 	}
+	gracefulEnd := time.Now().UTC()
 	if len(core.updates) != 1 || len(store.events) != 2 || store.events[1].Status != "offline" || store.events[1].LastSeen == "" {
 		t.Fatalf("final disconnect updates=%v events=%+v", core.updates, store.events)
+	}
+	if got := core.updates[0]; got.Before(gracefulStart) || got.After(gracefulEnd) {
+		t.Fatalf("graceful last_seen_at=%s, want processing time within [%s, %s]", got, gracefulStart, gracefulEnd)
 	}
 	if err := gateway.Unregister(context.Background(), identity.DeviceID, identity.UserID, second); err != nil {
 		t.Fatal(err)
@@ -161,14 +167,19 @@ func TestPresenceExpiryUsesSharedConnectionCleanup(t *testing.T) {
 	store.connections[presenceTestUserA] = map[string]bool{"22222222-2222-4222-8222-222222222222": true}
 	core := &presenceCoreFake{}
 	gateway := NewWithPresence("node", registryStub{}, nil, nil, store, core)
+	expiryStart := time.Now().UTC()
 	if err := gateway.PresenceExpired(context.Background(), "ws:conn:device"); err != nil {
 		t.Fatal(err)
 	}
 	if err := gateway.PresenceExpired(context.Background(), "presence:conn:"+presenceTestUserA+":22222222-2222-4222-8222-222222222222"); err != nil {
 		t.Fatal(err)
 	}
+	expiryEnd := time.Now().UTC()
 	if len(core.updates) != 1 || len(store.events) != 1 || store.events[0].Status != "offline" {
 		t.Fatalf("expiry cleanup updates=%v events=%+v", core.updates, store.events)
+	}
+	if got, earliest, latest := core.updates[0], expiryStart.Add(-config.HeartbeatInterval), expiryEnd.Add(-config.HeartbeatInterval); got.Before(earliest) || got.After(latest) {
+		t.Fatalf("expiry last_seen_at=%s, want processing time minus %s within [%s, %s]", got, config.HeartbeatInterval, earliest, latest)
 	}
 }
 

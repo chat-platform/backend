@@ -3,9 +3,12 @@ package config
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/chat-platform/backend/shared/pkg/logging"
 )
+
+const HeartbeatInterval = 20 * time.Second
 
 type Config struct {
 	ListenAddr         string

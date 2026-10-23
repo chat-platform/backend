@@ -125,8 +125,7 @@ Redis before registering the socket. Logout revokes the session and closes
 its active sockets.
 
 - First frame must carry the session token from `/auth/otp/verify`.
-- Server pings every 19 seconds; only a valid pong refreshes the 60-second
-  device-routing and presence TTLs. Missing pongs mark the socket dead.
+- Server pings periodically; missing pongs mark the socket dead.
 - Each device opens its own socket. A user is online if any socket
   is live.
 - On disconnect, client reconnects and runs the HTTP sync (see 5.3)
@@ -136,7 +135,7 @@ its active sockets.
 
 ```json
 {
-  "type": "message.send" | "message.recv" | "typing" | "presence.subscribe" | "presence.update" | "receipt" | ...,
+  "type": "message.send" | "message.recv" | "typing" | "presence" | "receipt" | ...,
   "id": "<client-generated id>",//for idempotency
   "ts": 1699999999,
   "payload": { ... }
@@ -154,11 +153,7 @@ its active sockets.
 | `sync.ready` | C → S | `{}` | Sent after HTTP sync completes; Gateway flushes buffered events and resumes live delivery. |
 | `receipt.read` | C → S | `{ outboxType, outboxId, readAt }` | Recipient has read one message; the server resolves the exact delivered event and forwards a RECEIPT event to its sender's devices. |
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |
-| `presence.subscribe` | C → S | `{ targetUserId }` | Authenticated; subscribes idempotently and returns a fresh `presence.snapshot`. Subscription is registered before the snapshot read. |
-| `presence.unsubscribe` | C → S | `{ targetUserId }` | Removes this connection's subscription. |
-| `presence.get` | C → S | `{ targetUserId }` | Optional one-time authenticated query; returns `presence.snapshot`. |
-| `presence.snapshot` | S → C | `{ userId, status, lastSeen? }` | Initial or refreshed snapshot. Online snapshots omit `lastSeen`. |
-| `presence.update` | S → C | `{ userId, status, lastSeen? }` | Best-effort update pushed to subscribed clients only. |
+| `presence` | S → C | `{ userId, status, lastSeen }` | Pushed on change. |
 | `group.*` | S → C | `{ groupId, ... }` | Member added, admin promoted, etc. |
 
 Reconnect sync is not a WS event — it goes over HTTP (`/v1/sync`).
@@ -172,22 +167,6 @@ Reliability:
 - WS is treated as lossy; anything important is recoverable via `/sync`.
 - Client sends carry `clientMsgId`; server deduplicates on it.
 - Server persists the message, then acks the sender, then fans out.
-
-Presence subscription and refresh:
-
-```text
-Client opens chat → presence.subscribe { targetUserId }
-                 ← presence.snapshot { userId, status, lastSeen? }
-Client refreshes every 2 minutes while chat remains open via presence.subscribe
-                 ← fresh presence.snapshot
-Client leaves chat → presence.unsubscribe { targetUserId }
-```
-
-Presence frames use the same envelope as other WebSocket operations. The
-Gateway authorizes access through shared direct-chat membership and block
-state. If a client refresh fails or times out, it hides the indicator until a
-later successful snapshot or valid `presence.update`. The Gateway does not
-run a per-subscription refresh timer.
 
 ## 5. Core Flows
 
