@@ -17,6 +17,7 @@ import (
 	httpadapter "github.com/chat-platform/backend/services/core-api/internal/adapter/inbound/http"
 	postgresadapter "github.com/chat-platform/backend/services/core-api/internal/adapter/outbound/postgres"
 	redisadapter "github.com/chat-platform/backend/services/core-api/internal/adapter/outbound/redis"
+	s3adapter "github.com/chat-platform/backend/services/core-api/internal/adapter/outbound/s3"
 	"github.com/chat-platform/backend/services/core-api/internal/app"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -47,8 +48,22 @@ func main() {
 	if err != nil || ttl <= 0 {
 		log.Fatal("SESSION_TTL must be a positive duration")
 	}
-	service := app.New(postgresadapter.New(pool), redisadapter.NewSessionCache(redisClient), app.Config{
-		OTPCode: env("DEV_OTP_CODE", "000000"), Secret: secret, SessionTTL: ttl,
+	mediaTTL, err := time.ParseDuration(env("MEDIA_URL_TTL", "5m"))
+	if err != nil || mediaTTL < time.Second || mediaTTL > 7*24*time.Hour {
+		log.Fatal("MEDIA_URL_TTL must be between 1 second and 7 days")
+	}
+	mediaSigner, err := s3adapter.New(
+		env("MEDIA_S3_ENDPOINT", "https://s3."+env("MEDIA_S3_REGION", "us-east-1")+".amazonaws.com"),
+		env("MEDIA_S3_REGION", "us-east-1"),
+		env("MEDIA_S3_BUCKET", ""),
+		env("MEDIA_S3_ACCESS_KEY", ""),
+		env("MEDIA_S3_SECRET_KEY", ""),
+	)
+	if err != nil {
+		log.Fatalf("configure media storage: %v", err)
+	}
+	service := app.NewWithMedia(postgresadapter.New(pool), redisadapter.NewSessionCache(redisClient), mediaSigner, app.Config{
+		OTPCode: env("DEV_OTP_CODE", "000000"), Secret: secret, SessionTTL: ttl, MediaURLTTL: mediaTTL,
 	})
 	httpServer := &http.Server{Addr: env("LISTEN_ADDR", ":8081"), Handler: httpadapter.New(service), ReadHeaderTimeout: 5 * time.Second}
 	grpcListener, err := net.Listen("tcp", env("GRPC_ADDR", ":50052"))

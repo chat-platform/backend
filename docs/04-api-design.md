@@ -88,8 +88,17 @@ Conventions:
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/v1/media` | Upload; returns media ID. |
-| `GET` | `/v1/media/{id}` | Download / signed URL. |
+| `POST` | `/v1/media/upload-url` | Returns an opaque media ID and a short-lived signed PUT URL. |
+| `GET` | `/v1/media/{id}/download-url` | Returns a short-lived signed GET URL. |
+
+Upload requests provide `category` (`image`, `audio`, `video`, or
+`document`), `size` in bytes, and `contentType`. Limits are 5 MiB for
+images/audio, 10 MiB for video, and 15 MiB for documents. The signed PUT
+binds the declared content type and exact content length. Upload/download
+URLs expire after five minutes by default (`MEDIA_URL_TTL`). The API never
+proxies media bytes or stores a media row. Clients carry the media ID and
+media details in the encrypted message payload. Any authenticated client
+holding the opaque media ID may request a download URL.
 
 ### Sync
 
