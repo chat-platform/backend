@@ -14,7 +14,8 @@ schema live in `shared/`.
 ## Current Status
 
 Phases 1–3 and Phase 4A are complete. Phase 4B provides direct-message
-reconnect sync and offline recovery.
+reconnect sync and offline recovery. Backend online/offline presence is
+implemented in the WS Gateway with best-effort Redis Pub/Sub delivery.
 
 ## Architecture
 
@@ -43,7 +44,7 @@ Firebase Cloud Messaging (FCM), using silent data-only push-to-sync hints.
 
 ### Cache
 
-Redis (WS connection registry).
+Redis (WS connection registry, presence indexes, Pub/Sub, Streams, and cache).
 
 ### Infrastructure
 
@@ -81,10 +82,12 @@ contain only `type=sync` and an opaque `chatId`; clients fetch message data from
 the sync API. The Firebase project must have APNs configured for iOS, and web
 clients must be configured for Firebase Cloud Messaging.
 
-The single baseline migration at `shared/migrations/000001_init.up.sql`
-creates the current schema for a new, empty database. The down migration drops
-that complete schema. Compose applies the baseline and development seed only
-when it initializes a new Postgres data volume.
+The baseline migration at `shared/migrations/000001_init.up.sql` creates the
+initial schema. Incremental migrations, including
+`shared/migrations/000002_presence.up.sql`, are applied in filename order when
+Compose initializes a new Postgres data volume. Existing databases must apply
+new incremental migrations separately; never reapply the baseline migration
+to an existing database.
 
 The baseline is not an incremental migration and must not be applied to an
 existing database. Existing databases created with an earlier migration set
@@ -140,6 +143,19 @@ deferred.
 The `proto` target requires `protoc`, `protoc-gen-go`, and
 `protoc-gen-go-grpc` on `PATH`. The database migration and dev seed run only
 when Postgres initializes a new data volume; `make down` preserves that volume.
+
+Redis key expiry notifications are required for presence cleanup. Compose
+starts Redis with `notify-keyspace-events Ex`. When using an externally managed
+or locally running Redis, configure the server with the equivalent setting and
+verify it with `redis-cli CONFIG GET notify-keyspace-events`. The Gateway
+listens to `__keyevent@0__:expired` and filters for `presence:conn:` keys.
+
+After WebSocket authentication, clients can send
+`presence.subscribe` with `{ "targetUserId": "<user UUID>" }` to receive a
+`presence.snapshot` and subsequent `presence.update` frames. Refresh every two
+minutes while the chat is open by sending another `presence.subscribe`; send
+`presence.unsubscribe` when leaving. A failed or timed-out refresh should hide
+the indicator until a valid snapshot or update arrives.
 
 Seeded DIRECT chat (Phase 0 fixtures):
 

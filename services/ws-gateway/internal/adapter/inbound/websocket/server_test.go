@@ -30,12 +30,16 @@ type fakeOperations struct {
 	readErr         error
 	activeCheck     func() bool
 	activeCalls     int
+	refreshCalls    int
+	refreshCh       chan struct{}
 	removedCh       chan struct{}
 	delivered       []int64
 	deliveredCh     chan struct{}
 	deliveredDevice string
 	readReceipt     wsframe.ReadReceiptPayload
 	readCh          chan struct{}
+	presenceTargets []string
+	unsubTargets    []string
 }
 
 func (f *fakeOperations) Register(_ context.Context, identity domain.Identity, connID string) (domain.Connection, error) {
@@ -62,16 +66,129 @@ func (f *fakeOperations) IsSessionActive(context.Context, string) (bool, error) 
 	return true, nil
 }
 
-func (f *fakeOperations) Refresh(context.Context, string, domain.Connection) (bool, error) {
+func (f *fakeOperations) Refresh(context.Context, string, string, domain.Connection) (bool, error) {
+	f.refreshCalls++
+	if f.refreshCh != nil {
+		select {
+		case f.refreshCh <- struct{}{}:
+		default:
+		}
+	}
 	return true, nil
 }
-func (f *fakeOperations) Unregister(context.Context, string, domain.Connection) error {
+func (f *fakeOperations) Unregister(context.Context, string, string, domain.Connection) error {
 	f.removed = true
 	if f.removedCh != nil {
 		close(f.removedCh)
 	}
 	return nil
 }
+func (f *fakeOperations) SubscribePresence(_ context.Context, _ string, _ string, target string) error {
+	f.presenceTargets = append(f.presenceTargets, target)
+	return nil
+}
+func (f *fakeOperations) UnsubscribePresence(_ context.Context, _ string, target string) error {
+	f.unsubTargets = append(f.unsubTargets, target)
+	return nil
+}
+func (f *fakeOperations) GetPresence(_ context.Context, _, target string) (domain.Presence, error) {
+	return domain.Presence{UserID: target, Status: "offline"}, nil
+}
+
+func TestPresenceSubscribeReturnsSnapshotAndUnsubscribeCleansState(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := &fakeOperations{}
+	hub := NewHub()
+	httpServer := httptest.NewServer(NewServer(operations, logger, hub))
+	defer httpServer.Close()
+	url := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	var response wsframe.Envelope
+	if err := conn.ReadJSON(&response); err != nil || response.Type != wsframe.TypeAuthOK {
+		t.Fatalf("auth response=%+v err=%v", response, err)
+	}
+	target := "22222222-2222-4222-8222-222222222222"
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypePresenceSubscribe, ID: "sub-1", Payload: json.RawMessage(`{"targetUserId":"` + target + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Type != wsframe.TypePresenceSnapshot || response.ID != "sub-1" {
+		t.Fatalf("presence snapshot response=%+v", response)
+	}
+	var snapshot wsframe.PresencePayload
+	if err := json.Unmarshal(response.Payload, &snapshot); err != nil || snapshot.UserID != target || snapshot.Status != "offline" {
+		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
+	}
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypePresenceUnsubscribe, ID: "unsub-1", Payload: json.RawMessage(`{"targetUserId":"` + target + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&response); err != nil || response.Type != "presence.unsubscribed" {
+		t.Fatalf("unsubscribe response=%+v err=%v", response, err)
+	}
+	if len(operations.presenceTargets) != 1 || operations.presenceTargets[0] != target || len(operations.unsubTargets) != 1 || operations.unsubTargets[0] != target {
+		t.Fatalf("presence operations subscribe=%v unsubscribe=%v", operations.presenceTargets, operations.unsubTargets)
+	}
+}
+
+func TestPresenceTTLRefreshRequiresAWebSocketPong(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := &fakeOperations{refreshCh: make(chan struct{}, 1)}
+	server := NewServer(operations, logger, NewHub())
+	server.heartbeatInterval = 20 * time.Millisecond
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	url := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	pingReceived := make(chan struct{}, 1)
+	conn.SetPingHandler(func(string) error {
+		pingReceived <- struct{}{}
+		return nil // Deliberately withhold the pong.
+	})
+	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeAuth, Payload: json.RawMessage(`{"token":"valid-test-token"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	var response wsframe.Envelope
+	if err := conn.ReadJSON(&response); err != nil || response.Type != wsframe.TypeAuthOK {
+		t.Fatalf("auth response=%+v err=%v", response, err)
+	}
+	go func() { _, _, _ = conn.ReadMessage() }()
+	select {
+	case <-pingReceived:
+	case <-time.After(time.Second):
+		t.Fatal("server did not send a ping")
+	}
+	if operations.refreshCalls != 0 {
+		t.Fatalf("presence TTL refreshed after ping without pong: %d", operations.refreshCalls)
+	}
+	if err := conn.WriteControl(websocket.PongMessage, []byte("valid"), time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-operations.refreshCh:
+	case <-time.After(time.Second):
+		t.Fatal("valid pong did not refresh the connection TTL")
+	}
+}
+func (f *fakeOperations) PresenceExpired(context.Context, string) error { return nil }
 func (f *fakeOperations) Send(_ context.Context, identity domain.Identity, command domain.SendMessage) (domain.MessageAck, error) {
 	f.identity = identity
 	f.command = command

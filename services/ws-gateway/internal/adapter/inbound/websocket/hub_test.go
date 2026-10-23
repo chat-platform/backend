@@ -56,6 +56,48 @@ func TestHubReportsMissingConnection(t *testing.T) {
 		t.Fatalf("err=%v, want ErrConnectionGone", err)
 	}
 }
+
+func TestHubPresenceDeliveryIsScopedToLocalSubscriptions(t *testing.T) {
+	h := NewHub()
+	first, second := &captureSocket{}, &captureSocket{}
+	h.Register("conn-a", first)
+	h.Register("conn-b", second)
+	if err := h.SubscribePresence("conn-a", "user-b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.SubscribePresence("conn-a", "user-b"); err != nil {
+		t.Fatal(err)
+	}
+	h.DeliverPresence(context.Background(), domain.Presence{UserID: "user-b", Status: "online"})
+	if len(first.values) != 1 || first.values[0].Type != wsframe.TypePresenceUpdate {
+		t.Fatalf("subscribed socket frames=%+v", first.values)
+	}
+	if len(second.values) != 0 {
+		t.Fatalf("unsubscribed socket received presence: %+v", second.values)
+	}
+	h.UnsubscribePresence("conn-a", "user-b")
+	h.DeliverPresence(context.Background(), domain.Presence{UserID: "user-b", Status: "offline"})
+	if len(first.values) != 1 {
+		t.Fatalf("unsubscribed socket received another update: %+v", first.values)
+	}
+}
+
+func TestHubConnectionCloseCleansLocalPresenceSubscriptions(t *testing.T) {
+	h := NewHub()
+	socket := &captureSocket{}
+	connection := domain.Connection{NodeID: "node", ConnID: "conn", SessionID: "session"}
+	h.RegisterAuthenticated(connection.ConnID, connection.SessionID, "device", connection, socket)
+	if err := h.SubscribePresence(connection.ConnID, "user-b"); err != nil {
+		t.Fatal(err)
+	}
+	if h.CloseConnection(connection) == nil {
+		t.Fatal("expected connection to close")
+	}
+	h.DeliverPresence(context.Background(), domain.Presence{UserID: "user-b", Status: "offline"})
+	if len(socket.values) != 0 {
+		t.Fatalf("closed socket received presence: %+v", socket.values)
+	}
+}
 func TestHubRemoveDoesNotRemoveReplacement(t *testing.T) {
 	h := NewHub()
 	oldSocket, newSocket := &captureSocket{}, &captureSocket{}

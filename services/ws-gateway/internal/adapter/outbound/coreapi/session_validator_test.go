@@ -19,6 +19,15 @@ type sessionClientFunc func(context.Context, *sessionv1.ValidateSessionRequest, 
 func (f sessionClientFunc) ValidateSession(ctx context.Context, request *sessionv1.ValidateSessionRequest, opts ...grpc.CallOption) (*sessionv1.ValidateSessionResponse, error) {
 	return f(ctx, request, opts...)
 }
+func (f sessionClientFunc) CheckPresenceAccess(context.Context, *sessionv1.CheckPresenceAccessRequest, ...grpc.CallOption) (*sessionv1.CheckPresenceAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "unused")
+}
+func (f sessionClientFunc) GetLastSeen(context.Context, *sessionv1.GetLastSeenRequest, ...grpc.CallOption) (*sessionv1.GetLastSeenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "unused")
+}
+func (f sessionClientFunc) UpdateLastSeen(context.Context, *sessionv1.UpdateLastSeenRequest, ...grpc.CallOption) (*sessionv1.UpdateLastSeenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "unused")
+}
 
 func TestValidateSessionSendsBearerAndDecodesClaims(t *testing.T) {
 	want := sessiontoken.Claims{SessionID: "sid", UserID: "user", DeviceID: "device", IssuedAt: 10, ExpiresAt: 20}

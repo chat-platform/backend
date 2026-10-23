@@ -37,3 +37,9 @@ type Connection struct {
 	ConnID    string
 	SessionID string
 }
+
+type Presence struct {
+	UserID   string `json:"userId"`
+	Status   string `json:"status"`
+	LastSeen string `json:"lastSeen,omitempty"`
+}

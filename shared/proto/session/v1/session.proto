@@ -6,6 +6,9 @@ option go_package = "github.com/chat-platform/backend/shared/gen/session/v1;sess
 
 service SessionService {
   rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
+  rpc CheckPresenceAccess(CheckPresenceAccessRequest) returns (CheckPresenceAccessResponse);
+  rpc GetLastSeen(GetLastSeenRequest) returns (GetLastSeenResponse);
+  rpc UpdateLastSeen(UpdateLastSeenRequest) returns (UpdateLastSeenResponse);
 }
 
 message ValidateSessionRequest {}
@@ -17,3 +20,28 @@ message ValidateSessionResponse {
   int64 issued_at = 4;
   int64 expires_at = 5;
 }
+
+message CheckPresenceAccessRequest {
+  string target_user_id = 1;
+}
+
+message CheckPresenceAccessResponse {}
+
+message GetLastSeenRequest {
+  string target_user_id = 1;
+}
+
+message GetLastSeenResponse {
+  bool has_last_seen = 1;
+  int64 last_seen_unix_milli = 2;
+}
+
+// UpdateLastSeen is an internal Gateway-to-Core-API operation. It is
+// idempotent and conditionally persists only timestamps newer than the value
+// already stored for the user.
+message UpdateLastSeenRequest {
+  string user_id = 1;
+  int64 last_seen_unix_milli = 2;
+}
+
+message UpdateLastSeenResponse {}

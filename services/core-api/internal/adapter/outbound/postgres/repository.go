@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -105,6 +106,55 @@ func (r *Repository) ClearPushToken(ctx context.Context, deviceID string) error 
 	}
 	return nil
 }
+
+func (r *Repository) CanViewPresence(ctx context.Context, requesterID, targetID string) (bool, error) {
+	var allowed bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM chat c
+			JOIN chat_membership requester ON requester.chat_id = c.chat_id AND requester.user_id = $1
+			JOIN chat_membership target ON target.chat_id = c.chat_id AND target.user_id = $2
+			WHERE c.type = 'DIRECT' AND c.deleted_at IS NULL
+		) AND NOT EXISTS (
+			SELECT 1 FROM user_blocks
+			WHERE (blocker_id = $1 AND blocked_id = $2)
+			   OR (blocker_id = $2 AND blocked_id = $1)
+		)`, requesterID, targetID).Scan(&allowed)
+	if err != nil {
+		return false, fmt.Errorf("check presence access: %w", err)
+	}
+	return allowed, nil
+}
+
+func (r *Repository) GetLastSeen(ctx context.Context, userID string) (*time.Time, error) {
+	var value sql.NullTime
+	err := r.pool.QueryRow(ctx, `SELECT last_seen_at FROM users WHERE user_id = $1`, userID).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, app.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user last seen: %w", err)
+	}
+	if !value.Valid {
+		return nil, nil
+	}
+	lastSeen := value.Time
+	return &lastSeen, nil
+}
+
+func (r *Repository) UpdateLastSeen(ctx context.Context, userID string, lastSeen time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE users
+		SET last_seen_at = $2
+		WHERE user_id = $1
+		  AND (last_seen_at IS NULL OR last_seen_at < $2)`, userID, lastSeen)
+	if err != nil {
+		return fmt.Errorf("update user last seen: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) GetOrCreateDirectChat(ctx context.Context, userID, phone string) (string, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

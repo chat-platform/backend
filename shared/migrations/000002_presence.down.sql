@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS user_blocks;
+ALTER TABLE users DROP COLUMN IF EXISTS last_seen_at;

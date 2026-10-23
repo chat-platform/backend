@@ -101,6 +101,10 @@ func (r *repoFake) ListGroupEvents(_ context.Context, deviceID string, cursor in
 	return events, nil
 }
 
+func (r *repoFake) CanViewPresence(context.Context, string, string) (bool, error) { return true, nil }
+func (r *repoFake) GetLastSeen(context.Context, string) (*time.Time, error)       { return nil, nil }
+func (r *repoFake) UpdateLastSeen(context.Context, string, time.Time) error       { return nil }
+
 func TestSyncUsesDeviceCursorAndPagesWithOneLookahead(t *testing.T) {
 	repo := &repoFake{syncEvents: []SyncEvent{
 		{OutboxID: 4, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"text":"four"}`)},

@@ -62,13 +62,15 @@ func main() {
 	defer coreAPIConn.Close()
 
 	registry := redisadapter.NewConnectionRegistry(redisClient)
+	presenceRegistry := redisadapter.NewPresenceRegistry(redisClient)
 	if len(cfg.JWTSecret) < 32 {
 		logger.Error(ctx, "JWT_SECRET must contain at least 32 bytes")
 		os.Exit(1)
 	}
 	sessionAuthenticator := authadapter.New([]byte(cfg.JWTSecret), registry, coreapiadapter.NewSessionValidator(sessionv1.NewSessionServiceClient(coreAPIConn)))
 	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn))
-	operations := app.New(cfg.NodeID, registry, messageService, sessionAuthenticator)
+	presenceCoreAPI := coreapiadapter.NewPresenceClient(sessionv1.NewSessionServiceClient(coreAPIConn))
+	operations := app.NewWithPresence(cfg.NodeID, registry, messageService, sessionAuthenticator, presenceRegistry, presenceCoreAPI)
 	hub := wsadapter.NewHub()
 	consumer := deliveryadapter.NewDeliveryConsumer(redisClient, cfg.NodeID, hub, logger.With("component", "delivery_consumer"))
 	consumerFailed := make(chan error, 1)
@@ -77,6 +79,12 @@ func main() {
 			logger.Error(ctx, "websocket delivery consumer stopped unexpectedly", "error", err, "node_id", cfg.NodeID)
 			consumerFailed <- err
 			stop()
+		}
+	}()
+	presenceConsumer := deliveryadapter.NewPresenceConsumer(redisClient, hub, operations, logger.With("component", "presence_consumer"))
+	go func() {
+		if err := presenceConsumer.Run(ctx); err != nil && ctx.Err() == nil {
+			logger.Error(ctx, "presence Redis consumer stopped unexpectedly", "error", err, "node_id", cfg.NodeID)
 		}
 	}()
 	mux := http.NewServeMux()

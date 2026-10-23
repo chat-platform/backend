@@ -64,6 +64,12 @@ type Repository interface {
 	ListGroupEvents(context.Context, string, int64, int) ([]SyncEvent, error)
 }
 
+type PresenceRepository interface {
+	CanViewPresence(context.Context, string, string) (bool, error)
+	GetLastSeen(context.Context, string) (*time.Time, error)
+	UpdateLastSeen(context.Context, string, time.Time) error
+}
+
 type SessionCache interface {
 	SetActive(context.Context, string, time.Duration) error
 	SetRevoked(context.Context, string, time.Duration) error
@@ -230,6 +236,61 @@ func (s *Service) Sync(ctx context.Context, claims sessiontoken.Claims, directCu
 		Direct: makeSyncPage(directEvents, directCursor, limit),
 		Group:  makeSyncPage(groupEvents, groupCursor, limit),
 	}, nil
+}
+
+func (s *Service) CheckPresenceAccess(ctx context.Context, requesterID, targetID string) error {
+	requesterID = strings.TrimSpace(requesterID)
+	targetID = strings.TrimSpace(targetID)
+	if _, err := uuid.Parse(requesterID); err != nil {
+		return ErrInvalidRequest
+	}
+	if _, err := uuid.Parse(targetID); err != nil {
+		return ErrInvalidRequest
+	}
+	if requesterID == targetID {
+		return nil
+	}
+	repo, ok := s.repo.(PresenceRepository)
+	if !ok {
+		return ErrUnavailable
+	}
+	allowed, err := repo.CanViewPresence(ctx, requesterID, targetID)
+	if err != nil {
+		return ErrUnavailable
+	}
+	if !allowed {
+		return ErrForbidden
+	}
+	return nil
+}
+
+func (s *Service) GetLastSeen(ctx context.Context, userID string) (*time.Time, error) {
+	if _, err := uuid.Parse(userID); err != nil {
+		return nil, ErrInvalidRequest
+	}
+	repo, ok := s.repo.(PresenceRepository)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	lastSeen, err := repo.GetLastSeen(ctx, userID)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	return lastSeen, nil
+}
+
+func (s *Service) UpdateLastSeen(ctx context.Context, userID string, lastSeen time.Time) error {
+	if _, err := uuid.Parse(userID); err != nil || lastSeen.IsZero() {
+		return ErrInvalidRequest
+	}
+	repo, ok := s.repo.(PresenceRepository)
+	if !ok {
+		return ErrUnavailable
+	}
+	if err := repo.UpdateLastSeen(ctx, userID, lastSeen.UTC()); err != nil {
+		return ErrUnavailable
+	}
+	return nil
 }
 
 func makeSyncPage(events []SyncEvent, cursor int64, limit int) SyncPage {

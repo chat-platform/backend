@@ -12,8 +12,8 @@ The system has five logical planes:
   node dies, its clients must reconnect, the registry entry expires, and
   sync catches them up. That property drives the non-sticky routing
   decision in `04-api-design.md`.
-- **Storage** — Postgres (metadata + delivery state), Redis (registry +
-  streams + cache), object storage (media).
+- **Storage** — Postgres (metadata + delivery state), Redis (registry,
+  presence, streams + cache), object storage (media).
 - **Clients** — mobile/web apps, each device with its own WS connection
   and its own sync cursor.
 
@@ -162,7 +162,7 @@ they're combined into a single "HTTP API."
 | Store | Role | Durability |
 |---|---|---|
 | Postgres | Metadata + delivery state: users, chats, direct_outbox, group_outbox, group_event, blocks, devices, sessions | Durable, replicated |
-| Redis | WS registry, streams (relay→WS, relay→notif), ephemeral cache | Not durable; loss tolerable |
+| Redis | WS registry, presence, Pub/Sub, streams (relay→WS, relay→notif), ephemeral cache | Not durable; loss tolerable |
 | Object storage | Media blobs | Durable |
 
 ## 5. Core Data Flows
@@ -234,10 +234,17 @@ client, from the stream of RECEIPT events.
   up.
 - WS Gateway dies: registry entry expires; clients reconnect to a new
   node; sync catches them up.
-- Redis dies: registry rebuilds as clients reconnect; streams refill
-  from outbox on next drain.
+- Redis dies: routing and presence state may be lost; streams refill from
+  outbox on next drain. Reconnection alone does not restore every registration.
 - Postgres primary dies: failover; writes briefly blocked; reads from
   replica if configured.
+
+Presence uses TTL connection keys and indexes in the shared Redis database.
+Gateways consume `presence:updates` through one Pub/Sub subscription each and
+process expiry events from `__keyevent@0__:expired`. Redis must be configured
+with `notify-keyspace-events Ex`. Presence and subscription restoration after
+Redis state loss is deferred; automatic client reconnection alone does not
+rebuild that state.
 
 TODO:
 Details in `08-reliability.md`.

@@ -53,8 +53,10 @@ type deliveryKey struct {
 }
 
 type Hub struct {
-	mu      sync.RWMutex
-	entries map[string]*socketEntry
+	mu                    sync.RWMutex
+	entries               map[string]*socketEntry
+	presenceSubscribers   map[string]map[string]struct{}
+	presenceSubscriptions map[string]map[string]struct{}
 }
 
 type ActiveSocket struct {
@@ -63,7 +65,13 @@ type ActiveSocket struct {
 	Socket       socketWriter
 }
 
-func NewHub() *Hub { return &Hub{entries: make(map[string]*socketEntry)} }
+func NewHub() *Hub {
+	return &Hub{
+		entries:               make(map[string]*socketEntry),
+		presenceSubscribers:   make(map[string]map[string]struct{}),
+		presenceSubscriptions: make(map[string]map[string]struct{}),
+	}
+}
 
 func (h *Hub) Register(id string, socket socketWriter) {
 	h.RegisterAuthenticated(id, "", "", domain.Connection{}, socket)
@@ -86,8 +94,72 @@ func (h *Hub) Remove(id string, socket socketWriter) {
 	h.mu.Lock()
 	if entry := h.entries[id]; entry != nil && entry.socket == socket {
 		delete(h.entries, id)
+		h.removePresenceSubscriptionsLocked(id)
 	}
 	h.mu.Unlock()
+}
+
+func (h *Hub) SubscribePresence(connectionID, targetUserID string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.entries[connectionID] == nil {
+		return ErrConnectionGone
+	}
+	if h.presenceSubscribers[targetUserID] == nil {
+		h.presenceSubscribers[targetUserID] = make(map[string]struct{})
+	}
+	h.presenceSubscribers[targetUserID][connectionID] = struct{}{}
+	if h.presenceSubscriptions[connectionID] == nil {
+		h.presenceSubscriptions[connectionID] = make(map[string]struct{})
+	}
+	h.presenceSubscriptions[connectionID][targetUserID] = struct{}{}
+	return nil
+}
+
+func (h *Hub) UnsubscribePresence(connectionID, targetUserID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if subscribers := h.presenceSubscribers[targetUserID]; subscribers != nil {
+		delete(subscribers, connectionID)
+		if len(subscribers) == 0 {
+			delete(h.presenceSubscribers, targetUserID)
+		}
+	}
+	if subscriptions := h.presenceSubscriptions[connectionID]; subscriptions != nil {
+		delete(subscriptions, targetUserID)
+		if len(subscriptions) == 0 {
+			delete(h.presenceSubscriptions, connectionID)
+		}
+	}
+}
+
+func (h *Hub) DeliverPresence(ctx context.Context, presence domain.Presence) {
+	h.mu.RLock()
+	connectionIDs := make([]string, 0, len(h.presenceSubscribers[presence.UserID]))
+	for connectionID := range h.presenceSubscribers[presence.UserID] {
+		connectionIDs = append(connectionIDs, connectionID)
+	}
+	h.mu.RUnlock()
+	payload, _ := json.Marshal(wsframe.PresencePayload{UserID: presence.UserID, Status: presence.Status, LastSeen: presence.LastSeen})
+	envelope := wsframe.Envelope{
+		Type: wsframe.TypePresenceUpdate, TS: time.Now().UnixMilli(),
+		Payload: payload,
+	}
+	for _, connectionID := range connectionIDs {
+		_ = h.Deliver(ctx, connectionID, envelope)
+	}
+}
+
+func (h *Hub) removePresenceSubscriptionsLocked(connectionID string) {
+	for targetUserID := range h.presenceSubscriptions[connectionID] {
+		if subscribers := h.presenceSubscribers[targetUserID]; subscribers != nil {
+			delete(subscribers, connectionID)
+			if len(subscribers) == 0 {
+				delete(h.presenceSubscribers, targetUserID)
+			}
+		}
+	}
+	delete(h.presenceSubscriptions, connectionID)
 }
 
 func (h *Hub) CloseConnection(connection domain.Connection) *ActiveSocket {
@@ -98,6 +170,7 @@ func (h *Hub) CloseConnection(connection domain.Connection) *ActiveSocket {
 		return nil
 	}
 	delete(h.entries, connection.ConnID)
+	h.removePresenceSubscriptionsLocked(connection.ConnID)
 	return &ActiveSocket{ID: connection.ConnID, DeviceID: entry.deviceID, Connection: entry.connection, Socket: entry.socket}
 }
 

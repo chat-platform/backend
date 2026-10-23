@@ -50,11 +50,12 @@ func testRepository(t *testing.T) (*Repository, *pgxpool.Pool) {
 	}
 	t.Cleanup(pool.Close)
 	_, err = pool.Exec(ctx, `
-CREATE TABLE users(user_id UUID PRIMARY KEY, phone TEXT NOT NULL UNIQUE, display_name TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE users(user_id UUID PRIMARY KEY, phone TEXT NOT NULL UNIQUE, display_name TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_seen_at TIMESTAMPTZ);
 CREATE TABLE device(device_id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(user_id),platform TEXT NOT NULL,is_primary BOOLEAN NOT NULL DEFAULT true,device_name TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),last_seen_at TIMESTAMPTZ,revoked_at TIMESTAMPTZ);
 CREATE TABLE session(session_id UUID PRIMARY KEY,device_id UUID NOT NULL REFERENCES device(device_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),expires_at TIMESTAMPTZ NOT NULL,revoked_at TIMESTAMPTZ);
 CREATE TABLE chat(chat_id UUID PRIMARY KEY,type TEXT NOT NULL,name TEXT,profile_pic TEXT,created_by UUID REFERENCES users(user_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),deleted_at TIMESTAMPTZ);
 CREATE TABLE chat_membership(chat_id UUID NOT NULL REFERENCES chat(chat_id),user_id UUID NOT NULL REFERENCES users(user_id),role TEXT NOT NULL DEFAULT 'member',joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),member_tag TEXT,PRIMARY KEY(chat_id,user_id));
+CREATE TABLE user_blocks(blocker_id UUID NOT NULL REFERENCES users(user_id),blocked_id UUID NOT NULL REFERENCES users(user_id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(blocker_id,blocked_id));
 CREATE TABLE direct_outbox(id BIGSERIAL PRIMARY KEY,device_id UUID NOT NULL,event_type TEXT NOT NULL,payload TEXT NOT NULL);
 CREATE TABLE group_event(event_id BIGINT PRIMARY KEY,event_type TEXT NOT NULL,payload TEXT NOT NULL);
 CREATE TABLE group_outbox(id BIGSERIAL PRIMARY KEY,event_id BIGINT NOT NULL REFERENCES group_event(event_id),device_id UUID NOT NULL);`)
@@ -62,6 +63,51 @@ CREATE TABLE group_outbox(id BIGSERIAL PRIMARY KEY,event_id BIGINT NOT NULL REFE
 		t.Fatal(err)
 	}
 	return New(pool), pool
+}
+
+func TestPresenceAuthorizationAndConditionalLastSeen(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	userA, userB, userC, chatID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15550000101'),($2,'+15550000102'),($3,'+15550000103')`, userA, userB, userC); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO chat(chat_id,type) VALUES($1,'DIRECT')`, chatID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO chat_membership(chat_id,user_id) VALUES($1,$2),($1,$3)`, chatID, userA, userB); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := repo.CanViewPresence(ctx, userA, userB)
+	if err != nil || !allowed {
+		t.Fatalf("shared direct chat presence access=(%v,%v)", allowed, err)
+	}
+	allowed, err = repo.CanViewPresence(ctx, userA, userC)
+	if err != nil || allowed {
+		t.Fatalf("unrelated user presence access=(%v,%v)", allowed, err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_blocks(blocker_id,blocked_id) VALUES($1,$2)`, userB, userA); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err = repo.CanViewPresence(ctx, userA, userB)
+	if err != nil || allowed {
+		t.Fatalf("blocked users presence access=(%v,%v)", allowed, err)
+	}
+	if lastSeen, err := repo.GetLastSeen(ctx, userA); err != nil || lastSeen != nil {
+		t.Fatalf("initial last-seen=(%v,%v)", lastSeen, err)
+	}
+	newer := time.Now().UTC().Truncate(time.Millisecond)
+	older := newer.Add(-time.Minute)
+	if err := repo.UpdateLastSeen(ctx, userA, newer); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateLastSeen(ctx, userA, older); err != nil {
+		t.Fatal(err)
+	}
+	lastSeen, err := repo.GetLastSeen(ctx, userA)
+	if err != nil || lastSeen == nil || !lastSeen.Equal(newer) {
+		t.Fatalf("conditional last-seen=(%v,%v), want %v", lastSeen, err, newer)
+	}
 }
 
 func TestCompleteOTPCreateAndReuseAccountDeviceAndRevokeSession(t *testing.T) {
