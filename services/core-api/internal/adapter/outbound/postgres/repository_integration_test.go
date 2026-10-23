@@ -152,6 +152,34 @@ func TestGetOrCreateDirectChatIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestGetDirectChatPeerRequiresActiveDirectChatMembership(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	member, peer, outsider := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	_, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15550000201'),($2,'+15550000202'),($3,'+15550000203')`, member, peer, outsider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatID, err := repo.GetOrCreateDirectChat(ctx, member, "+15550000202")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetDirectChatPeer(ctx, member, chatID)
+	if err != nil || got != peer {
+		t.Fatalf("member peer=(%q,%v), want %q", got, err, peer)
+	}
+	if _, err := repo.GetDirectChatPeer(ctx, outsider, chatID); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("outsider lookup error=%v, want not found", err)
+	}
+	groupID, err := repo.CreateGroup(ctx, member, "test group", []string{peer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetDirectChatPeer(ctx, member, groupID); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("group lookup error=%v, want not found", err)
+	}
+}
+
 func TestCreateAndManageGroupMembershipTransactionally(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()

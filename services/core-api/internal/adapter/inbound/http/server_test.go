@@ -29,6 +29,8 @@ type sessionRepoStub struct {
 	pushDevice       string
 	pushToken        string
 	clearedDevice    string
+	peerLookupUser   string
+	peerLookupChat   string
 }
 
 func (r *sessionRepoStub) CompleteOTP(context.Context, string, string, string, string, string, time.Time) (app.User, app.Device, app.Session, error) {
@@ -48,6 +50,10 @@ func (r *sessionRepoStub) ClearPushToken(_ context.Context, device string) error
 }
 func (r *sessionRepoStub) GetOrCreateDirectChat(context.Context, string, string) (string, error) {
 	return "", nil
+}
+func (r *sessionRepoStub) GetDirectChatPeer(_ context.Context, userID, chatID string) (string, error) {
+	r.peerLookupUser, r.peerLookupChat = userID, chatID
+	return "peer-user", nil
 }
 func (r *sessionRepoStub) ListGroupChats(context.Context, string) ([]app.GroupChat, error) {
 	return nil, nil
@@ -211,6 +217,34 @@ func TestSyncRequiresBearerAndUsesAuthenticatedDevice(t *testing.T) {
 	}
 	if len(page.Direct.Events) != 1 || page.Direct.NextCursor != 12 || page.Direct.HasMore || len(page.Group.Events) != 1 || page.Group.NextCursor != 9 {
 		t.Fatalf("unexpected sync page: %+v", page)
+	}
+}
+
+func TestDirectChatPeerRequiresAuthenticationAndReturnsPeer(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	secret := []byte("a sufficiently long test signing secret 123456")
+	claims := sessiontoken.Claims{SessionID: "sid", UserID: "member-user", DeviceID: "device-a", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	token, err := sessiontoken.Sign(claims, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &sessionRepoStub{active: true}
+	server := New(app.New(repo, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }}))
+	unauthorized := httptest.NewRecorder()
+	server.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/v1/chats/direct/123e4567-e89b-12d3-a456-426614174000/peer", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status=%d, want 401", unauthorized.Code)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/chats/direct/123e4567-e89b-12d3-a456-426614174000/peer", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	var response map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusOK || response["peerUserId"] != "peer-user" || repo.peerLookupUser != claims.UserID || repo.peerLookupChat != "123e4567-e89b-12d3-a456-426614174000" {
+		t.Fatalf("status=%d response=%v peer lookup=(%q,%q)", recorder.Code, response, repo.peerLookupUser, repo.peerLookupChat)
 	}
 }
 
