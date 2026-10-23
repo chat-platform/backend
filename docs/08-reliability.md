@@ -150,11 +150,16 @@ building HA infrastructure; self-hosting it is a topic for later (see
 
 **Impact:**
 - **Registry (`ws:conn:*`):** Lost. No device appears online.
+- **Presence (`presence:*`):** Connection and subscription indexes may be lost.
 - **Streams (`ws:deliver:*`, `notif:stream`):** In-flight entries lost.
 - **Heartbeats:** Fail; keys expire faster.
 
 **Recovery:**
 - Registry rebuilds as clients reconnect and re-register.
+- Presence registrations and subscriptions are not reconstructed by automatic
+  Redis reconnection. Comprehensive restoration is deferred; do not assume
+  routing indexes, Pub/Sub subscriptions, or Stream consumers are restored just
+  because the Redis client reconnects.
 - Streams: undelivered frames are lost. The retry scan (`07` §2.4)
   finds dispatched-but-undelivered rows and re-dispatches them.
   Not-yet-dispatched rows are re-XADDed on the next Relay poll.
@@ -256,12 +261,14 @@ message is acceptable for the same reason.
 
 ### 4.4 Presence
 
-Best-effort. Stale presence is possible:
-- Heartbeat hasn't expired yet after a clean disconnect.
-- The registry may not reflect a device that just went offline.
-
-The product accepts stale presence as the cost of avoiding synchronous
-presence updates across the system.
+Best-effort. Graceful disconnects and Redis TTL-expiry notifications use the
+same connection-specific cleanup path. Keyspace notifications are not durable;
+periodic reconciliation is deferred, so a missed expiry notification may leave
+stale connection references or last-seen data until another operation cleans
+them up. Concurrent disconnect/reconnect operations may produce duplicate or
+out-of-order updates. Clients refresh snapshots every two minutes while a chat
+is open and hide the indicator after a failed refresh until a later valid
+snapshot or update.
 
 ## 5. Failure Detection and Response
 
