@@ -65,33 +65,12 @@ CREATE TABLE group_outbox(id BIGSERIAL PRIMARY KEY,event_id BIGINT NOT NULL REFE
 	return New(pool), pool
 }
 
-func TestPresenceAuthorizationAndConditionalLastSeen(t *testing.T) {
+func TestConditionalLastSeen(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
-	userA, userB, userC, chatID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15550000101'),($2,'+15550000102'),($3,'+15550000103')`, userA, userB, userC); err != nil {
+	userA := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15550000101')`, userA); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO chat(chat_id,type) VALUES($1,'DIRECT')`, chatID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO chat_membership(chat_id,user_id) VALUES($1,$2),($1,$3)`, chatID, userA, userB); err != nil {
-		t.Fatal(err)
-	}
-	allowed, err := repo.CanViewPresence(ctx, userA, userB)
-	if err != nil || !allowed {
-		t.Fatalf("shared direct chat presence access=(%v,%v)", allowed, err)
-	}
-	allowed, err = repo.CanViewPresence(ctx, userA, userC)
-	if err != nil || allowed {
-		t.Fatalf("unrelated user presence access=(%v,%v)", allowed, err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO user_blocks(blocker_id,blocked_id) VALUES($1,$2)`, userB, userA); err != nil {
-		t.Fatal(err)
-	}
-	allowed, err = repo.CanViewPresence(ctx, userA, userB)
-	if err != nil || allowed {
-		t.Fatalf("blocked users presence access=(%v,%v)", allowed, err)
 	}
 	if lastSeen, err := repo.GetLastSeen(ctx, userA); err != nil || lastSeen != nil {
 		t.Fatalf("initial last-seen=(%v,%v)", lastSeen, err)

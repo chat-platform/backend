@@ -182,11 +182,11 @@ Client refreshes every 2 minutes while chat remains open via presence.subscribe
 Client leaves chat → presence.unsubscribe { targetUserId }
 ```
 
-Presence frames use the same envelope as other WebSocket operations. The
-Gateway authorizes access through shared direct-chat membership and block
-state. If a client refresh fails or times out, it hides the indicator until a
-later successful snapshot or valid `presence.update`. The Gateway does not
-run a per-subscription refresh timer.
+Presence frames use the same envelope as other WebSocket operations. Any
+authenticated user may view any user's presence; shared-chat membership and
+block state do not restrict visibility for now. If a client refresh fails or
+times out, it hides the indicator until a later successful snapshot or valid
+`presence.update`. The Gateway does not run a per-subscription refresh timer.
 
 ## 5. Core Flows
 

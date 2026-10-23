@@ -6,7 +6,6 @@ option go_package = "github.com/chat-platform/backend/shared/gen/session/v1;sess
 
 service SessionService {
   rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
-  rpc CheckPresenceAccess(CheckPresenceAccessRequest) returns (CheckPresenceAccessResponse);
   rpc GetLastSeen(GetLastSeenRequest) returns (GetLastSeenResponse);
   rpc UpdateLastSeen(UpdateLastSeenRequest) returns (UpdateLastSeenResponse);
 }
@@ -20,12 +19,6 @@ message ValidateSessionResponse {
   int64 issued_at = 4;
   int64 expires_at = 5;
 }
-
-message CheckPresenceAccessRequest {
-  string target_user_id = 1;
-}
-
-message CheckPresenceAccessResponse {}
 
 message GetLastSeenRequest {
   string target_user_id = 1;

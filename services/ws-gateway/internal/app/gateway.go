@@ -131,21 +131,15 @@ func (g *Gateway) PresenceExpired(ctx context.Context, key string) error {
 	return g.cleanupPresenceConnection(ctx, userID, connID, lastSeenAt)
 }
 
-func (g *Gateway) AuthorizePresence(ctx context.Context, token, targetUserID string) error {
+func validatePresenceTarget(targetUserID string) error {
 	if _, err := uuid.Parse(targetUserID); err != nil {
 		return domain.ErrInvalidMessage
-	}
-	if g.coreAPI == nil {
-		return errors.New("presence authorization is not configured")
-	}
-	if err := g.coreAPI.AuthorizePresence(ctx, token, targetUserID); err != nil {
-		return fmt.Errorf("authorize presence access: %w", err)
 	}
 	return nil
 }
 
-func (g *Gateway) SubscribePresence(ctx context.Context, token, connID, targetUserID string) error {
-	if err := g.AuthorizePresence(ctx, token, targetUserID); err != nil {
+func (g *Gateway) SubscribePresence(ctx context.Context, connID, targetUserID string) error {
+	if err := validatePresenceTarget(targetUserID); err != nil {
 		return err
 	}
 	if err := g.presence.Subscribe(ctx, targetUserID, connID); err != nil {
@@ -162,7 +156,7 @@ func (g *Gateway) UnsubscribePresence(ctx context.Context, connID, targetUserID 
 }
 
 func (g *Gateway) GetPresence(ctx context.Context, token, targetUserID string) (domain.Presence, error) {
-	if err := g.AuthorizePresence(ctx, token, targetUserID); err != nil {
+	if err := validatePresenceTarget(targetUserID); err != nil {
 		return domain.Presence{}, err
 	}
 	return g.readPresence(ctx, token, targetUserID)

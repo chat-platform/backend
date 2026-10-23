@@ -20,7 +20,6 @@ type SessionOperations interface {
 }
 
 type PresenceOperations interface {
-	CheckPresenceAccess(context.Context, string, string) error
 	GetLastSeen(context.Context, string) (*time.Time, error)
 	UpdateLastSeen(context.Context, string, time.Time) error
 }
@@ -45,26 +44,11 @@ func (s *SessionServer) ValidateSession(ctx context.Context, _ *sessionv1.Valida
 	}, nil
 }
 
-func (s *SessionServer) CheckPresenceAccess(ctx context.Context, request *sessionv1.CheckPresenceAccessRequest) (*sessionv1.CheckPresenceAccessResponse, error) {
-	claims, err := s.authenticate(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.presenceOperations().CheckPresenceAccess(ctx, claims.UserID, request.GetTargetUserId()); err != nil {
-		return nil, mapPresenceError(err)
-	}
-	return &sessionv1.CheckPresenceAccessResponse{}, nil
-}
-
 func (s *SessionServer) GetLastSeen(ctx context.Context, request *sessionv1.GetLastSeenRequest) (*sessionv1.GetLastSeenResponse, error) {
-	claims, err := s.authenticate(ctx)
-	if err != nil {
+	if _, err := s.authenticate(ctx); err != nil {
 		return nil, err
 	}
 	presenceOps := s.presenceOperations()
-	if err := presenceOps.CheckPresenceAccess(ctx, claims.UserID, request.GetTargetUserId()); err != nil {
-		return nil, mapPresenceError(err)
-	}
 	lastSeen, err := presenceOps.GetLastSeen(ctx, request.GetTargetUserId())
 	if err != nil {
 		return nil, mapPresenceError(err)

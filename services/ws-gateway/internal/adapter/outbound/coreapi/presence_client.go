@@ -17,15 +17,6 @@ func NewPresenceClient(client sessionv1.SessionServiceClient) *PresenceClient {
 	return &PresenceClient{client: client}
 }
 
-func (c *PresenceClient) AuthorizePresence(ctx context.Context, token, targetUserID string) error {
-	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
-	_, err := c.client.CheckPresenceAccess(ctx, &sessionv1.CheckPresenceAccessRequest{TargetUserId: targetUserID})
-	if err != nil {
-		return fmt.Errorf("Core API presence authorization RPC: %w", err)
-	}
-	return nil
-}
-
 func (c *PresenceClient) GetLastSeen(ctx context.Context, token, targetUserID string) (*time.Time, error) {
 	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
 	response, err := c.client.GetLastSeen(ctx, &sessionv1.GetLastSeenRequest{TargetUserId: targetUserID})

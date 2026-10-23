@@ -107,26 +107,6 @@ func (r *Repository) ClearPushToken(ctx context.Context, deviceID string) error 
 	return nil
 }
 
-func (r *Repository) CanViewPresence(ctx context.Context, requesterID, targetID string) (bool, error) {
-	var allowed bool
-	err := r.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM chat c
-			JOIN chat_membership requester ON requester.chat_id = c.chat_id AND requester.user_id = $1
-			JOIN chat_membership target ON target.chat_id = c.chat_id AND target.user_id = $2
-			WHERE c.type = 'DIRECT' AND c.deleted_at IS NULL
-		) AND NOT EXISTS (
-			SELECT 1 FROM user_blocks
-			WHERE (blocker_id = $1 AND blocked_id = $2)
-			   OR (blocker_id = $2 AND blocked_id = $1)
-		)`, requesterID, targetID).Scan(&allowed)
-	if err != nil {
-		return false, fmt.Errorf("check presence access: %w", err)
-	}
-	return allowed, nil
-}
-
 func (r *Repository) GetLastSeen(ctx context.Context, userID string) (*time.Time, error) {
 	var value sql.NullTime
 	err := r.pool.QueryRow(ctx, `SELECT last_seen_at FROM users WHERE user_id = $1`, userID).Scan(&value)

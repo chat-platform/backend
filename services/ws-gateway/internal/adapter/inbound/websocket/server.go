@@ -34,7 +34,7 @@ type Operations interface {
 	Send(context.Context, domain.Identity, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, domain.Identity, string, int64) error
 	MarkRead(context.Context, domain.Identity, string, int64, int64) error
-	SubscribePresence(context.Context, string, string, string) error
+	SubscribePresence(context.Context, string, string) error
 	UnsubscribePresence(context.Context, string, string) error
 	GetPresence(context.Context, string, string) (domain.Presence, error)
 	PresenceExpired(context.Context, string) error
@@ -239,7 +239,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				s.writeError(ctx, socket, envelope.ID, "invalid_presence_request", "presence.subscribe requires targetUserId")
 				continue
 			}
-			if err := s.operations.SubscribePresence(ctx, token, connection.ConnID, request.TargetUserID); err != nil {
+			if err := s.operations.SubscribePresence(ctx, connection.ConnID, request.TargetUserID); err != nil {
 				s.logOperationFailure(ctx, "subscribe to presence", err, "target_user_id", request.TargetUserID, "conn_id", connection.ConnID)
 				s.writeError(ctx, socket, envelope.ID, "presence_forbidden", "presence is unavailable for this user")
 				continue

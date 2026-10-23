@@ -133,86 +133,6 @@ func (x *ValidateSessionResponse) GetExpiresAt() int64 {
 	return 0
 }
 
-type CheckPresenceAccessRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TargetUserId  string                 `protobuf:"bytes,1,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CheckPresenceAccessRequest) Reset() {
-	*x = CheckPresenceAccessRequest{}
-	mi := &file_session_v1_session_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CheckPresenceAccessRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CheckPresenceAccessRequest) ProtoMessage() {}
-
-func (x *CheckPresenceAccessRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_session_v1_session_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CheckPresenceAccessRequest.ProtoReflect.Descriptor instead.
-func (*CheckPresenceAccessRequest) Descriptor() ([]byte, []int) {
-	return file_session_v1_session_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *CheckPresenceAccessRequest) GetTargetUserId() string {
-	if x != nil {
-		return x.TargetUserId
-	}
-	return ""
-}
-
-type CheckPresenceAccessResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CheckPresenceAccessResponse) Reset() {
-	*x = CheckPresenceAccessResponse{}
-	mi := &file_session_v1_session_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CheckPresenceAccessResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CheckPresenceAccessResponse) ProtoMessage() {}
-
-func (x *CheckPresenceAccessResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_session_v1_session_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CheckPresenceAccessResponse.ProtoReflect.Descriptor instead.
-func (*CheckPresenceAccessResponse) Descriptor() ([]byte, []int) {
-	return file_session_v1_session_proto_rawDescGZIP(), []int{3}
-}
-
 type GetLastSeenRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TargetUserId  string                 `protobuf:"bytes,1,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
@@ -222,7 +142,7 @@ type GetLastSeenRequest struct {
 
 func (x *GetLastSeenRequest) Reset() {
 	*x = GetLastSeenRequest{}
-	mi := &file_session_v1_session_proto_msgTypes[4]
+	mi := &file_session_v1_session_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -234,7 +154,7 @@ func (x *GetLastSeenRequest) String() string {
 func (*GetLastSeenRequest) ProtoMessage() {}
 
 func (x *GetLastSeenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_session_v1_session_proto_msgTypes[4]
+	mi := &file_session_v1_session_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -247,7 +167,7 @@ func (x *GetLastSeenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLastSeenRequest.ProtoReflect.Descriptor instead.
 func (*GetLastSeenRequest) Descriptor() ([]byte, []int) {
-	return file_session_v1_session_proto_rawDescGZIP(), []int{4}
+	return file_session_v1_session_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetLastSeenRequest) GetTargetUserId() string {
@@ -267,7 +187,7 @@ type GetLastSeenResponse struct {
 
 func (x *GetLastSeenResponse) Reset() {
 	*x = GetLastSeenResponse{}
-	mi := &file_session_v1_session_proto_msgTypes[5]
+	mi := &file_session_v1_session_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -279,7 +199,7 @@ func (x *GetLastSeenResponse) String() string {
 func (*GetLastSeenResponse) ProtoMessage() {}
 
 func (x *GetLastSeenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_session_v1_session_proto_msgTypes[5]
+	mi := &file_session_v1_session_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -292,7 +212,7 @@ func (x *GetLastSeenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLastSeenResponse.ProtoReflect.Descriptor instead.
 func (*GetLastSeenResponse) Descriptor() ([]byte, []int) {
-	return file_session_v1_session_proto_rawDescGZIP(), []int{5}
+	return file_session_v1_session_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetLastSeenResponse) GetHasLastSeen() bool {
@@ -322,7 +242,7 @@ type UpdateLastSeenRequest struct {
 
 func (x *UpdateLastSeenRequest) Reset() {
 	*x = UpdateLastSeenRequest{}
-	mi := &file_session_v1_session_proto_msgTypes[6]
+	mi := &file_session_v1_session_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -334,7 +254,7 @@ func (x *UpdateLastSeenRequest) String() string {
 func (*UpdateLastSeenRequest) ProtoMessage() {}
 
 func (x *UpdateLastSeenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_session_v1_session_proto_msgTypes[6]
+	mi := &file_session_v1_session_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -347,7 +267,7 @@ func (x *UpdateLastSeenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLastSeenRequest.ProtoReflect.Descriptor instead.
 func (*UpdateLastSeenRequest) Descriptor() ([]byte, []int) {
-	return file_session_v1_session_proto_rawDescGZIP(), []int{6}
+	return file_session_v1_session_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *UpdateLastSeenRequest) GetUserId() string {
@@ -372,7 +292,7 @@ type UpdateLastSeenResponse struct {
 
 func (x *UpdateLastSeenResponse) Reset() {
 	*x = UpdateLastSeenResponse{}
-	mi := &file_session_v1_session_proto_msgTypes[7]
+	mi := &file_session_v1_session_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -384,7 +304,7 @@ func (x *UpdateLastSeenResponse) String() string {
 func (*UpdateLastSeenResponse) ProtoMessage() {}
 
 func (x *UpdateLastSeenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_session_v1_session_proto_msgTypes[7]
+	mi := &file_session_v1_session_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -397,7 +317,7 @@ func (x *UpdateLastSeenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLastSeenResponse.ProtoReflect.Descriptor instead.
 func (*UpdateLastSeenResponse) Descriptor() ([]byte, []int) {
-	return file_session_v1_session_proto_rawDescGZIP(), []int{7}
+	return file_session_v1_session_proto_rawDescGZIP(), []int{5}
 }
 
 var File_session_v1_session_proto protoreflect.FileDescriptor
@@ -414,10 +334,7 @@ const file_session_v1_session_proto_rawDesc = "" +
 	"\tdevice_id\x18\x03 \x01(\tR\bdeviceId\x12\x1b\n" +
 	"\tissued_at\x18\x04 \x01(\x03R\bissuedAt\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x05 \x01(\x03R\texpiresAt\"B\n" +
-	"\x1aCheckPresenceAccessRequest\x12$\n" +
-	"\x0etarget_user_id\x18\x01 \x01(\tR\ftargetUserId\"\x1d\n" +
-	"\x1bCheckPresenceAccessResponse\":\n" +
+	"expires_at\x18\x05 \x01(\x03R\texpiresAt\":\n" +
 	"\x12GetLastSeenRequest\x12$\n" +
 	"\x0etarget_user_id\x18\x01 \x01(\tR\ftargetUserId\"j\n" +
 	"\x13GetLastSeenResponse\x12\"\n" +
@@ -426,10 +343,9 @@ const file_session_v1_session_proto_rawDesc = "" +
 	"\x15UpdateLastSeenRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12/\n" +
 	"\x14last_seen_unix_milli\x18\x02 \x01(\x03R\x11lastSeenUnixMilli\"\x18\n" +
-	"\x16UpdateLastSeenResponse2\xfd\x02\n" +
+	"\x16UpdateLastSeenResponse2\x95\x02\n" +
 	"\x0eSessionService\x12Z\n" +
-	"\x0fValidateSession\x12\".session.v1.ValidateSessionRequest\x1a#.session.v1.ValidateSessionResponse\x12f\n" +
-	"\x13CheckPresenceAccess\x12&.session.v1.CheckPresenceAccessRequest\x1a'.session.v1.CheckPresenceAccessResponse\x12N\n" +
+	"\x0fValidateSession\x12\".session.v1.ValidateSessionRequest\x1a#.session.v1.ValidateSessionResponse\x12N\n" +
 	"\vGetLastSeen\x12\x1e.session.v1.GetLastSeenRequest\x1a\x1f.session.v1.GetLastSeenResponse\x12W\n" +
 	"\x0eUpdateLastSeen\x12!.session.v1.UpdateLastSeenRequest\x1a\".session.v1.UpdateLastSeenResponseBBZ@github.com/chat-platform/backend/shared/gen/session/v1;sessionv1b\x06proto3"
 
@@ -445,28 +361,24 @@ func file_session_v1_session_proto_rawDescGZIP() []byte {
 	return file_session_v1_session_proto_rawDescData
 }
 
-var file_session_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_session_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_session_v1_session_proto_goTypes = []any{
-	(*ValidateSessionRequest)(nil),      // 0: session.v1.ValidateSessionRequest
-	(*ValidateSessionResponse)(nil),     // 1: session.v1.ValidateSessionResponse
-	(*CheckPresenceAccessRequest)(nil),  // 2: session.v1.CheckPresenceAccessRequest
-	(*CheckPresenceAccessResponse)(nil), // 3: session.v1.CheckPresenceAccessResponse
-	(*GetLastSeenRequest)(nil),          // 4: session.v1.GetLastSeenRequest
-	(*GetLastSeenResponse)(nil),         // 5: session.v1.GetLastSeenResponse
-	(*UpdateLastSeenRequest)(nil),       // 6: session.v1.UpdateLastSeenRequest
-	(*UpdateLastSeenResponse)(nil),      // 7: session.v1.UpdateLastSeenResponse
+	(*ValidateSessionRequest)(nil),  // 0: session.v1.ValidateSessionRequest
+	(*ValidateSessionResponse)(nil), // 1: session.v1.ValidateSessionResponse
+	(*GetLastSeenRequest)(nil),      // 2: session.v1.GetLastSeenRequest
+	(*GetLastSeenResponse)(nil),     // 3: session.v1.GetLastSeenResponse
+	(*UpdateLastSeenRequest)(nil),   // 4: session.v1.UpdateLastSeenRequest
+	(*UpdateLastSeenResponse)(nil),  // 5: session.v1.UpdateLastSeenResponse
 }
 var file_session_v1_session_proto_depIdxs = []int32{
 	0, // 0: session.v1.SessionService.ValidateSession:input_type -> session.v1.ValidateSessionRequest
-	2, // 1: session.v1.SessionService.CheckPresenceAccess:input_type -> session.v1.CheckPresenceAccessRequest
-	4, // 2: session.v1.SessionService.GetLastSeen:input_type -> session.v1.GetLastSeenRequest
-	6, // 3: session.v1.SessionService.UpdateLastSeen:input_type -> session.v1.UpdateLastSeenRequest
-	1, // 4: session.v1.SessionService.ValidateSession:output_type -> session.v1.ValidateSessionResponse
-	3, // 5: session.v1.SessionService.CheckPresenceAccess:output_type -> session.v1.CheckPresenceAccessResponse
-	5, // 6: session.v1.SessionService.GetLastSeen:output_type -> session.v1.GetLastSeenResponse
-	7, // 7: session.v1.SessionService.UpdateLastSeen:output_type -> session.v1.UpdateLastSeenResponse
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
+	2, // 1: session.v1.SessionService.GetLastSeen:input_type -> session.v1.GetLastSeenRequest
+	4, // 2: session.v1.SessionService.UpdateLastSeen:input_type -> session.v1.UpdateLastSeenRequest
+	1, // 3: session.v1.SessionService.ValidateSession:output_type -> session.v1.ValidateSessionResponse
+	3, // 4: session.v1.SessionService.GetLastSeen:output_type -> session.v1.GetLastSeenResponse
+	5, // 5: session.v1.SessionService.UpdateLastSeen:output_type -> session.v1.UpdateLastSeenResponse
+	3, // [3:6] is the sub-list for method output_type
+	0, // [0:3] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -483,7 +395,7 @@ func file_session_v1_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_session_v1_session_proto_rawDesc), len(file_session_v1_session_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

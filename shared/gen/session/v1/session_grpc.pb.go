@@ -19,10 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SessionService_ValidateSession_FullMethodName     = "/session.v1.SessionService/ValidateSession"
-	SessionService_CheckPresenceAccess_FullMethodName = "/session.v1.SessionService/CheckPresenceAccess"
-	SessionService_GetLastSeen_FullMethodName         = "/session.v1.SessionService/GetLastSeen"
-	SessionService_UpdateLastSeen_FullMethodName      = "/session.v1.SessionService/UpdateLastSeen"
+	SessionService_ValidateSession_FullMethodName = "/session.v1.SessionService/ValidateSession"
+	SessionService_GetLastSeen_FullMethodName     = "/session.v1.SessionService/GetLastSeen"
+	SessionService_UpdateLastSeen_FullMethodName  = "/session.v1.SessionService/UpdateLastSeen"
 )
 
 // SessionServiceClient is the client API for SessionService service.
@@ -30,7 +29,6 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SessionServiceClient interface {
 	ValidateSession(ctx context.Context, in *ValidateSessionRequest, opts ...grpc.CallOption) (*ValidateSessionResponse, error)
-	CheckPresenceAccess(ctx context.Context, in *CheckPresenceAccessRequest, opts ...grpc.CallOption) (*CheckPresenceAccessResponse, error)
 	GetLastSeen(ctx context.Context, in *GetLastSeenRequest, opts ...grpc.CallOption) (*GetLastSeenResponse, error)
 	UpdateLastSeen(ctx context.Context, in *UpdateLastSeenRequest, opts ...grpc.CallOption) (*UpdateLastSeenResponse, error)
 }
@@ -47,16 +45,6 @@ func (c *sessionServiceClient) ValidateSession(ctx context.Context, in *Validate
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ValidateSessionResponse)
 	err := c.cc.Invoke(ctx, SessionService_ValidateSession_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *sessionServiceClient) CheckPresenceAccess(ctx context.Context, in *CheckPresenceAccessRequest, opts ...grpc.CallOption) (*CheckPresenceAccessResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CheckPresenceAccessResponse)
-	err := c.cc.Invoke(ctx, SessionService_CheckPresenceAccess_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +76,6 @@ func (c *sessionServiceClient) UpdateLastSeen(ctx context.Context, in *UpdateLas
 // for forward compatibility.
 type SessionServiceServer interface {
 	ValidateSession(context.Context, *ValidateSessionRequest) (*ValidateSessionResponse, error)
-	CheckPresenceAccess(context.Context, *CheckPresenceAccessRequest) (*CheckPresenceAccessResponse, error)
 	GetLastSeen(context.Context, *GetLastSeenRequest) (*GetLastSeenResponse, error)
 	UpdateLastSeen(context.Context, *UpdateLastSeenRequest) (*UpdateLastSeenResponse, error)
 	mustEmbedUnimplementedSessionServiceServer()
@@ -103,9 +90,6 @@ type UnimplementedSessionServiceServer struct{}
 
 func (UnimplementedSessionServiceServer) ValidateSession(context.Context, *ValidateSessionRequest) (*ValidateSessionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateSession not implemented")
-}
-func (UnimplementedSessionServiceServer) CheckPresenceAccess(context.Context, *CheckPresenceAccessRequest) (*CheckPresenceAccessResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CheckPresenceAccess not implemented")
 }
 func (UnimplementedSessionServiceServer) GetLastSeen(context.Context, *GetLastSeenRequest) (*GetLastSeenResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetLastSeen not implemented")
@@ -148,24 +132,6 @@ func _SessionService_ValidateSession_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SessionServiceServer).ValidateSession(ctx, req.(*ValidateSessionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _SessionService_CheckPresenceAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CheckPresenceAccessRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SessionServiceServer).CheckPresenceAccess(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: SessionService_CheckPresenceAccess_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SessionServiceServer).CheckPresenceAccess(ctx, req.(*CheckPresenceAccessRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -216,10 +182,6 @@ var SessionService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidateSession",
 			Handler:    _SessionService_ValidateSession_Handler,
-		},
-		{
-			MethodName: "CheckPresenceAccess",
-			Handler:    _SessionService_CheckPresenceAccess_Handler,
 		},
 		{
 			MethodName: "GetLastSeen",

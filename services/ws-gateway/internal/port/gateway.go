@@ -38,7 +38,6 @@ type PresenceStore interface {
 }
 
 type PresenceCoreAPI interface {
-	AuthorizePresence(context.Context, string, string) error
 	GetLastSeen(context.Context, string, string) (*time.Time, error)
 	UpdateLastSeen(context.Context, string, time.Time) error
 }

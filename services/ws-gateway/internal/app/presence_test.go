@@ -82,22 +82,13 @@ func (p *presenceStoreFake) Publish(_ context.Context, event domain.Presence) er
 }
 
 type presenceCoreFake struct {
-	trace          *[]string
-	lastSeen       *time.Time
-	authorizeErr   error
-	updateErr      error
-	authorizeCalls int
-	lastSeenCalls  int
-	updates        []time.Time
+	trace         *[]string
+	lastSeen      *time.Time
+	updateErr     error
+	lastSeenCalls int
+	updates       []time.Time
 }
 
-func (p *presenceCoreFake) AuthorizePresence(context.Context, string, string) error {
-	p.authorizeCalls++
-	if p.trace != nil {
-		*p.trace = append(*p.trace, "authorize")
-	}
-	return p.authorizeErr
-}
 func (p *presenceCoreFake) GetLastSeen(context.Context, string, string) (*time.Time, error) {
 	p.lastSeenCalls++
 	return p.lastSeen, nil
@@ -198,7 +189,7 @@ func TestSubscribeRegistersBeforeReadingFreshPresenceSnapshot(t *testing.T) {
 	store.trace = &trace
 	core := &presenceCoreFake{trace: &trace}
 	gateway := NewWithPresence("node", registryStub{}, nil, nil, store, core)
-	if err := gateway.SubscribePresence(context.Background(), "token", "conn-a", presenceTestUserB); err != nil {
+	if err := gateway.SubscribePresence(context.Background(), "conn-a", presenceTestUserB); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := gateway.GetPresence(context.Background(), "token", presenceTestUserB)
@@ -208,7 +199,7 @@ func TestSubscribeRegistersBeforeReadingFreshPresenceSnapshot(t *testing.T) {
 	if snapshot.Status != "offline" {
 		t.Fatalf("snapshot=%+v", snapshot)
 	}
-	want := []string{"authorize", "subscribe", "authorize", "is_online"}
+	want := []string{"subscribe", "is_online"}
 	if len(trace) != len(want) {
 		t.Fatalf("ordering trace=%v, want %v", trace, want)
 	}

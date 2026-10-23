@@ -83,7 +83,7 @@ func (f *fakeOperations) Unregister(context.Context, string, string, domain.Conn
 	}
 	return nil
 }
-func (f *fakeOperations) SubscribePresence(_ context.Context, _ string, _ string, target string) error {
+func (f *fakeOperations) SubscribePresence(_ context.Context, _ string, target string) error {
 	f.presenceTargets = append(f.presenceTargets, target)
 	return nil
 }

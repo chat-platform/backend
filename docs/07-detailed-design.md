@@ -559,11 +559,11 @@ SQL update that prevents older timestamps from replacing newer values.
 
 ### 5.3 Presence authorization and queries
 
-Presence access requires an authenticated user and a shared, active direct
-chat. Presence is hidden if either user has blocked the other. Online state
-comes from the Redis user connection set and live TTL keys. Online queries do
-not read last-seen data. Offline queries use the Redis last-seen cache and
-fall back to Core API on a cache miss.
+Any authenticated user may view any user's presence; shared-chat membership
+and block state do not restrict visibility for now. Online state comes from
+the Redis user connection set and live TTL keys. Online queries do not read
+last-seen data. Offline queries use the Redis last-seen cache and fall back
+to Core API on a cache miss.
 
 ### 5.4 Subscriptions and delivery
 

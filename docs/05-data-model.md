@@ -224,6 +224,6 @@ The Redis deployment must enable keyevent expiry notifications with
 `presence:conn:` prefix. Docker Compose configures this on its Redis service;
 other deployments must apply the equivalent server configuration.
 
-`user_blocks` stores block relationships used by presence authorization.
-Presence is available only between users sharing a direct chat, and is hidden
-when either user has blocked the other.
+`user_blocks` stores block relationships for messaging behavior. Presence
+visibility currently requires an authenticated user but is not restricted by
+shared-chat membership or block relationships.
