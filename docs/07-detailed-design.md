@@ -319,50 +319,33 @@ server-side read state — the client aggregates.
 ### 3.1 Delivery receipt
 
 After applying an event and durably persisting its cursor, a device sends
-`receipt.delivered { outboxId }`. The Gateway passes the authenticated
-device ID and outbox ID to Message Service. Server:
-
-1. Marks the corresponding outbox row (in direct_outbox or
-   group_outbox) as delivered:
-     UPDATE <table> SET delivered_at = now()
-     WHERE id = ? AND device_id = ? AND delivered_at IS NULL
-
-   Idempotent via `delivered_at IS NULL`.
-
-2. Writes a RECEIPT event into direct_outbox, addressed to the
-   sender's devices. This is how the sender learns the message was
-   delivered.
+`receipt.delivered { chatId, messageSenderId, clientMsgId, outboxType,
+outboxId }`. The Gateway adds the authenticated user ID for the internal RPC,
+which becomes `receiptSenderId` in the forwarded status. Message Service marks
+a matching outbox row delivered when it is still retained for that device. If
+retention removed the row, it still forwards the receipt. A present RECEIPT
+source event is acknowledged without producing a nested delivery receipt.
 
 ### 3.2 Read receipt
 
 Triggered when the user (recipient) opens the chat. The client sends one
-`receipt.read` per message it has read, addressed to that message's
-sender:
+`receipt.read { chatId, messageSenderId, clientMsgId }`. It sends no source
+outbox identity or timestamp. The server generates a UTC RFC3339 `timestamp`
+and writes RECEIPT rows to `direct_outbox` for the message sender's active
+devices. The receipt rows carry `chat_id` with a foreign key to `chat`. The
+server does not look up or mutate the original message.
 
-    receipt.read { outboxType, outboxId, readAt }
+Both receipt types are relayed as
+`{ receiptType, chatId, messageSenderId, clientMsgId, receiptSenderId,
+timestamp }`; relay preserves the stored timestamp. Clients match the local
+message and validate the receipt sender against the direct peer or group
+member list, then apply status idempotently per recipient. Read status does
+not downgrade to delivered.
 
-The server does not store read state: there is no `msg_seen_status`, and
-no `read_at` column on the outbox.
-
-Read is represented as a **new event**, not a mutation of the original
-delivery row. For each `receipt.read`, the handler writes RECEIPT rows
-into `direct_outbox`, addressed to the sender's devices:
-
-- DIRECT chat: one `direct_outbox` row per device of the peer,
-  `event_type = RECEIPT`,
-  `payload = { senderId, clientMsgId, readAt, readerUserId }`.
-- GROUP chat: same — addressed to the original sender, so one
-  `direct_outbox` row per device of that user.
-
-Per-message (not a range): the client sends one receipt per message. The
-outbox type and ID identify the exact source event. Message Service
-checks that the authenticated device was a recipient, then derives the
-sender and message ID from the stored outbox row. The sender's devices
-apply each receipt to the matching message (identified by
-`senderId, clientMsgId`).
-
-If multiple devices of the same reader send receipts for the same
-message, the sender's client applies the first and ignores duplicates.
+Backend receipt handling does not check chat membership or verify that
+`clientMsgId` is valid or belongs to the supplied chat or message sender. Foreign keys
+enforce chat and user existence when receipt outbox rows are inserted; the
+relationship checks are performed by clients.
 
 Read state is per-user, aggregated client-side (see `06` §6).
 
@@ -503,7 +486,7 @@ Sequence on reconnect:
 
 1. Client opens WS and authenticates; Gateway registers the socket and buffers live deliveries.
 2. Client pages `/v1/sync?since_direct=<cursor>&limit=<n>` over HTTP.
-3. Client applies each event, persists its cursor, and sends `receipt.delivered { outboxId }`.
+3. Client applies each event, persists its cursor, and sends `receipt.delivered` with chat, message, and outbox identity.
 4. After all pages are exhausted, client sends `sync.ready` over WS.
 5. Gateway flushes buffered events by outbox ID, then streams live deliveries.
 
@@ -673,8 +656,8 @@ Summary table:
 |---|---|---|
 | message.send | `(sender_id, client_msg_id)` | unique index on outbox tables |
 | outbox delivery | outbox `id`s (cursors) | client-side cursor |
-| receipt.delivered | `(sender_id, client_msg_id, device_id)` + `IS NULL` | outbox `delivered_at` |
-| receipt.read | (no state) | client-side first-receipt-wins |
+| receipt.delivered | source outbox ID and authenticated device ID when retained | `delivered_at`; clients apply forwarded status idempotently |
+| receipt.read | no server deduplication state | client-side per-recipient monotonic status |
 | XAUTOCLAIM redelivery | outbox `id` | client cursor dedupe |
 
 TODO: any event type not covered.

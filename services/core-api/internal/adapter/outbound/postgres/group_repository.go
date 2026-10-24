@@ -14,7 +14,8 @@ import (
 
 func (r *Repository) ListGroupChats(ctx context.Context, userID string) ([]app.GroupChat, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.chat_id::text, c.name, c.profile_pic, c.updated_at
+		SELECT c.chat_id::text, c.name, c.profile_pic, c.updated_at,
+			ARRAY(SELECT cm.user_id::text FROM chat_membership cm WHERE cm.chat_id=c.chat_id ORDER BY cm.user_id)
 		FROM chat c
 		JOIN chat_membership m ON m.chat_id = c.chat_id
 		WHERE m.user_id = $1 AND c.type = 'GROUP' AND c.deleted_at IS NULL
@@ -27,7 +28,7 @@ func (r *Repository) ListGroupChats(ctx context.Context, userID string) ([]app.G
 	for rows.Next() {
 		var chat app.GroupChat
 		var picture pgtype.Text
-		if err := rows.Scan(&chat.ID, &chat.Name, &picture, &chat.UpdatedAt); err != nil {
+		if err := rows.Scan(&chat.ID, &chat.Name, &picture, &chat.UpdatedAt, &chat.MemberUserIDs); err != nil {
 			return nil, fmt.Errorf("scan group chat: %w", err)
 		}
 		if picture.Valid {

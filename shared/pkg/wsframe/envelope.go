@@ -61,14 +61,17 @@ type MessageRecvPayload struct {
 }
 
 type DeliveryReceiptPayload struct {
-	OutboxType OutboxType `json:"outboxType"`
-	OutboxID   int64      `json:"outboxId"`
+	ChatID          string     `json:"chatId"`
+	MessageSenderID string     `json:"messageSenderId"`
+	ClientMsgID     string     `json:"clientMsgId"`
+	OutboxType      OutboxType `json:"outboxType"`
+	OutboxID        int64      `json:"outboxId"`
 }
 
 type ReadReceiptPayload struct {
-	OutboxType OutboxType `json:"outboxType"`
-	OutboxID   int64      `json:"outboxId"`
-	ReadAt     int64      `json:"readAt"`
+	ChatID          string `json:"chatId"`
+	MessageSenderID string `json:"messageSenderId"`
+	ClientMsgID     string `json:"clientMsgId"`
 }
 
 type PresenceTargetPayload struct {
@@ -84,12 +87,12 @@ type PresencePayload struct {
 // ReceiptStatusPayload is a server-to-client receipt event. Outbox identity
 // refers to this receipt event so the recipient device can acknowledge it.
 type ReceiptStatusPayload struct {
-	OutboxType   OutboxType `json:"outboxType"`
-	OutboxID     int64      `json:"outboxId"`
-	ReceiptType  string     `json:"receiptType"`
-	SenderID     string     `json:"senderId"`
-	ClientMsgID  string     `json:"clientMsgId"`
-	ReaderUserID string     `json:"readerUserId"`
-	DeliveredAt  int64      `json:"deliveredAt,omitempty"`
-	ReadAt       int64      `json:"readAt,omitempty"`
+	OutboxType      OutboxType `json:"outboxType"`
+	OutboxID        int64      `json:"outboxId"`
+	ReceiptType     string     `json:"receiptType"`
+	ChatID          string     `json:"chatId"`
+	MessageSenderID string     `json:"messageSenderId"`
+	ClientMsgID     string     `json:"clientMsgId"`
+	ReceiptSenderID string     `json:"receiptSenderId"`
+	Timestamp       string     `json:"timestamp"`
 }

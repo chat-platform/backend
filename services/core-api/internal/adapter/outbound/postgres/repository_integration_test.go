@@ -232,7 +232,7 @@ func TestCreateAndManageGroupMembershipTransactionally(t *testing.T) {
 		t.Fatalf("last admin self-leave error=%v, want conflict", err)
 	}
 	chats, err := repo.ListGroupChats(ctx, member)
-	if err != nil || len(chats) != 1 || chats[0].ID != groupID || chats[0].Name != name || chats[0].ProfilePic == nil || *chats[0].ProfilePic != picture {
+	if err != nil || len(chats) != 1 || chats[0].ID != groupID || chats[0].Name != name || chats[0].ProfilePic == nil || *chats[0].ProfilePic != picture || len(chats[0].MemberUserIDs) != 1 || chats[0].MemberUserIDs[0] != member {
 		t.Fatalf("listed groups=%+v error=%v", chats, err)
 	}
 }
@@ -275,7 +275,7 @@ func TestListGroupChatsExcludesDirectDeletedAndOtherUsersChats(t *testing.T) {
 		t.Fatal(err)
 	}
 	chats, err := repo.ListGroupChats(ctx, user)
-	if err != nil || len(chats) != 1 || chats[0].ID != visible || chats[0].Name != "visible" {
+	if err != nil || len(chats) != 1 || chats[0].ID != visible || chats[0].Name != "visible" || len(chats[0].MemberUserIDs) != 2 {
 		t.Fatalf("groups=%+v error=%v", chats, err)
 	}
 	otherChats, err := repo.ListGroupChats(ctx, uuid.NewString())

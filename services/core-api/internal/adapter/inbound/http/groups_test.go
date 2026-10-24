@@ -82,7 +82,7 @@ func callGroupAPI(server *Server, token, method, path, body string) *httptest.Re
 func TestListGroupChatsReturnsAuthenticatedUsersGroups(t *testing.T) {
 	updated := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	name, picture := "study group", "media-1"
-	repo := &groupHTTPRepo{sessionRepoStub: &sessionRepoStub{}, chats: []app.GroupChat{{ID: groupTestID, Name: name, ProfilePic: &picture, UpdatedAt: updated}}}
+	repo := &groupHTTPRepo{sessionRepoStub: &sessionRepoStub{}, chats: []app.GroupChat{{ID: groupTestID, Name: name, ProfilePic: &picture, UpdatedAt: updated, MemberUserIDs: []string{groupTestID, groupOtherID}}}}
 	server, token := groupTestServer(repo)
 	recorder := callGroupAPI(server, token, http.MethodGet, "/v1/chats/groups", "")
 	if recorder.Code != http.StatusOK {
@@ -92,7 +92,7 @@ func TestListGroupChatsReturnsAuthenticatedUsersGroups(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &chats); err != nil {
 		t.Fatal(err)
 	}
-	if len(chats) != 1 || chats[0].ID != groupTestID || chats[0].Name != name || *chats[0].ProfilePic != picture || !chats[0].UpdatedAt.Equal(updated) {
+	if len(chats) != 1 || chats[0].ID != groupTestID || chats[0].Name != name || *chats[0].ProfilePic != picture || !chats[0].UpdatedAt.Equal(updated) || len(chats[0].MemberUserIDs) != 2 || chats[0].MemberUserIDs[1] != groupOtherID {
 		t.Fatalf("group chats=%+v", chats)
 	}
 	if got := callGroupAPI(server, "", http.MethodGet, "/v1/chats/groups", "").Code; got != http.StatusUnauthorized {

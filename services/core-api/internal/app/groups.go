@@ -9,10 +9,11 @@ import (
 )
 
 type GroupChat struct {
-	ID         string    `json:"chatId"`
-	Name       string    `json:"name"`
-	ProfilePic *string   `json:"profilePic"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID            string    `json:"chatId"`
+	Name          string    `json:"name"`
+	ProfilePic    *string   `json:"profilePic"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+	MemberUserIDs []string  `json:"memberUserIds"`
 }
 
 func (s *Service) GroupChats(ctx context.Context, userID string) ([]GroupChat, error) {

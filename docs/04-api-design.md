@@ -158,9 +158,10 @@ its active sockets.
 | `message.send` | C → S | `{ chatId, clientMsgId, content }` | Idempotent via `clientMsgId`. Attempt only; no durability yet. |
 | `message.ack` | S → C | `{ clientMsgId, messageId, ts }` | Server has durably accepted the message. Correlates to `message.send` via `clientMsgId`. |
 | `message.recv` | S → C | `{ outboxType, outboxId, chatId, senderId, clientMsgId, content, ts }` | `outboxType` identifies the outbox table; `outboxId` is its cursor and dedup key. |
-| `receipt.delivered` | C → S | `{ outboxType, outboxId }` | Client confirms it durably applied the event and persisted its cursor. |
+| `receipt.delivered` | C → S | `{ chatId, messageSenderId, clientMsgId, outboxType, outboxId }` | Client confirms it durably applied the event. The outbox row is marked delivered when present; receipt forwarding does not depend on row retention. |
 | `sync.ready` | C → S | `{}` | Sent after HTTP sync completes; Gateway flushes buffered events and resumes live delivery. |
-| `receipt.read` | C → S | `{ outboxType, outboxId, readAt }` | Recipient has read one message; the server resolves the exact delivered event and forwards a RECEIPT event to its sender's devices. |
+| `receipt.read` | C → S | `{ chatId, messageSenderId, clientMsgId }` | Recipient has read one message. The server forwards a RECEIPT event without looking up the original message. |
+| `receipt.status` | S → C | `{ outboxType, outboxId, receiptType, chatId, messageSenderId, clientMsgId, receiptSenderId, timestamp }` | Forwarded to the message sender's devices. `timestamp` is server-generated UTC RFC3339; `receiptSenderId` is derived from the authenticated device. |
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |
 | `presence.subscribe` | C → S | `{ targetUserId }` | Authenticated; subscribes idempotently and returns a fresh `presence.snapshot`. Subscription is registered before the snapshot read. |
 | `presence.unsubscribe` | C → S | `{ targetUserId }` | Removes this connection's subscription. |
@@ -174,6 +175,12 @@ The client opens and authenticates its WebSocket, pages `/v1/sync` from its
 persisted `cursor`s (group and direct), applies and persists each event before sending
 `receipt.delivered`, then sends `sync.ready` after all pages are exhausted.
 The Gateway buffers live frames until `sync.ready`.
+
+Receipt clients validate `chatId`, message identity, and participant membership
+against local chat/message state. The backend checks identifier existence through
+foreign keys but does not validate `clientMsgId`, membership, or message-to-chat
+association. Receipt status events returned by `/v1/sync` use the same payload
+and client validation as live `receipt.status` frames.
 
 Reliability:
 

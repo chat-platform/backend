@@ -27,16 +27,16 @@ func (s *messageServiceClient) SendMessage(ctx context.Context, command domain.S
 	return domain.MessageAck{ClientMsgID: response.GetClientMsgId(), TimestampMS: response.GetTsUnixMilli()}, nil
 }
 
-func (s *messageServiceClient) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {
-	_, err := s.client.MarkDelivered(ctx, &messagev1.MarkDeliveredRequest{DeviceId: deviceID, OutboxType: outboxType, OutboxId: outboxID})
+func (s *messageServiceClient) MarkDelivered(ctx context.Context, deviceID, receiptSenderID, chatID, messageSenderID, clientMsgID, outboxType string, outboxID int64) error {
+	_, err := s.client.MarkDelivered(ctx, &messagev1.MarkDeliveredRequest{DeviceId: deviceID, ReceiptSenderId: receiptSenderID, ChatId: chatID, MessageSenderId: messageSenderID, ClientMsgId: clientMsgID, OutboxType: outboxType, OutboxId: outboxID})
 	if err != nil {
 		return fmt.Errorf("message service MarkDelivered RPC: %w", err)
 	}
 	return nil
 }
 
-func (s *messageServiceClient) MarkRead(ctx context.Context, deviceID, outboxType string, outboxID, readAt int64) error {
-	_, err := s.client.MarkRead(ctx, &messagev1.MarkReadRequest{DeviceId: deviceID, OutboxType: outboxType, OutboxId: outboxID, ReadAt: readAt})
+func (s *messageServiceClient) MarkRead(ctx context.Context, deviceID, receiptSenderID, chatID, messageSenderID, clientMsgID string) error {
+	_, err := s.client.MarkRead(ctx, &messagev1.MarkReadRequest{DeviceId: deviceID, ReceiptSenderId: receiptSenderID, ChatId: chatID, MessageSenderId: messageSenderID, ClientMsgId: clientMsgID})
 	if err != nil {
 		return fmt.Errorf("message service MarkRead RPC: %w", err)
 	}

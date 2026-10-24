@@ -32,8 +32,8 @@ type Operations interface {
 	Refresh(context.Context, string, string, domain.Connection) (bool, error)
 	Unregister(context.Context, string, string, domain.Connection) error
 	Send(context.Context, domain.Identity, domain.SendMessage) (domain.MessageAck, error)
-	MarkDelivered(context.Context, domain.Identity, string, int64) error
-	MarkRead(context.Context, domain.Identity, string, int64, int64) error
+	MarkDelivered(context.Context, domain.Identity, wsframe.DeliveryReceiptPayload) error
+	MarkRead(context.Context, domain.Identity, wsframe.ReadReceiptPayload) error
 	SubscribePresence(context.Context, string, string) error
 	UnsubscribePresence(context.Context, string, string) error
 	GetPresence(context.Context, string, string) (domain.Presence, error)
@@ -196,14 +196,14 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		}
 		if envelope.Type == wsframe.TypeReceiptDelivered {
 			var receipt wsframe.DeliveryReceiptPayload
-			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &receipt) != nil || receipt.OutboxID <= 0 ||
+			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &receipt) != nil || receipt.OutboxID <= 0 || strings.TrimSpace(receipt.ChatID) == "" || strings.TrimSpace(receipt.MessageSenderID) == "" || strings.TrimSpace(receipt.ClientMsgID) == "" ||
 				(receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) {
 				s.logger.Warn(ctx, "websocket client sent an invalid delivered receipt",
 					"request_id", envelope.ID, "device_id", identity.DeviceID)
-				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.delivered requires a valid outboxType and positive outboxId")
+				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.delivered requires chatId, messageSenderId, clientMsgId, a valid outboxType, and positive outboxId")
 				continue
 			}
-			if err := s.operations.MarkDelivered(ctx, identity, string(receipt.OutboxType), receipt.OutboxID); err != nil {
+			if err := s.operations.MarkDelivered(ctx, identity, receipt); err != nil {
 				s.logOperationFailure(ctx, "record delivered receipt", err,
 					"request_id", envelope.ID, "user_id", identity.UserID,
 					"device_id", identity.DeviceID, "outbox_type", receipt.OutboxType,
@@ -216,19 +216,17 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if envelope.Type == wsframe.TypeReceiptRead {
 			var receipt wsframe.ReadReceiptPayload
 			decodeErr := json.Unmarshal(envelope.Payload, &receipt)
-			if len(envelope.Payload) == 0 || decodeErr != nil ||
-				(receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) ||
-				receipt.OutboxID <= 0 || receipt.ReadAt <= 0 {
+			if len(envelope.Payload) == 0 || decodeErr != nil || strings.TrimSpace(receipt.ChatID) == "" || strings.TrimSpace(receipt.MessageSenderID) == "" || strings.TrimSpace(receipt.ClientMsgID) == "" {
 				s.logger.Warn(ctx, "websocket client sent an invalid read receipt",
 					"request_id", envelope.ID, "device_id", identity.DeviceID)
-				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.read requires a valid outboxType, positive outboxId, and positive readAt")
+				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.read requires chatId, messageSenderId, and clientMsgId")
 				continue
 			}
-			if err := s.operations.MarkRead(ctx, identity, string(receipt.OutboxType), receipt.OutboxID, receipt.ReadAt); err != nil {
+			if err := s.operations.MarkRead(ctx, identity, receipt); err != nil {
 				s.logOperationFailure(ctx, "record read receipt", err,
 					"request_id", envelope.ID, "user_id", identity.UserID,
-					"device_id", identity.DeviceID, "outbox_type", receipt.OutboxType,
-					"outbox_id", receipt.OutboxID)
+					"device_id", identity.DeviceID, "chat_id", receipt.ChatID,
+					"message_sender_id", receipt.MessageSenderID, "client_msg_id", receipt.ClientMsgID)
 				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "read receipt could not be recorded")
 			}
 			continue
