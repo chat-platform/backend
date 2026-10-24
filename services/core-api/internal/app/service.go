@@ -5,6 +5,8 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"mime"
 	"strings"
 	"time"
 
@@ -78,15 +80,44 @@ type SessionCache interface {
 }
 
 type Config struct {
-	OTPCode    string
-	Secret     []byte
-	SessionTTL time.Duration
-	Now        func() time.Time
+	OTPCode     string
+	Secret      []byte
+	SessionTTL  time.Duration
+	MediaURLTTL time.Duration
+	Now         func() time.Time
+}
+
+type MediaCategory string
+
+const (
+	MediaImage    MediaCategory = "image"
+	MediaAudio    MediaCategory = "audio"
+	MediaVideo    MediaCategory = "video"
+	MediaDocument MediaCategory = "document"
+)
+
+type MediaUpload struct {
+	MediaID   string            `json:"mediaId"`
+	UploadURL string            `json:"uploadUrl"`
+	Method    string            `json:"method"`
+	Headers   map[string]string `json:"headers"`
+	ExpiresAt int64             `json:"expiresAt"`
+}
+
+type MediaDownload struct {
+	DownloadURL string `json:"downloadUrl"`
+	ExpiresAt   int64  `json:"expiresAt"`
+}
+
+type MediaSigner interface {
+	SignUpload(context.Context, string, string, int64, time.Duration) (string, map[string]string, error)
+	SignDownload(context.Context, string, time.Duration) (string, error)
 }
 
 type Service struct {
 	repo     Repository
 	sessions SessionCache
+	media    MediaSigner
 	cfg      Config
 }
 
@@ -95,6 +126,58 @@ func New(repo Repository, sessions SessionCache, cfg Config) *Service {
 		cfg.Now = time.Now
 	}
 	return &Service{repo: repo, sessions: sessions, cfg: cfg}
+}
+
+// NewWithMedia adds object-storage URL signing to the Core API without adding
+// media metadata to the relational database.
+func NewWithMedia(repo Repository, sessions SessionCache, media MediaSigner, cfg Config) *Service {
+	service := New(repo, sessions, cfg)
+	service.media = media
+	if service.cfg.MediaURLTTL <= 0 {
+		service.cfg.MediaURLTTL = 5 * time.Minute
+	}
+	return service
+}
+
+func (s *Service) CreateMediaUpload(ctx context.Context, category MediaCategory, size int64, contentType string) (MediaUpload, error) {
+	if s.media == nil {
+		return MediaUpload{}, ErrUnavailable
+	}
+	limits := map[MediaCategory]int64{
+		MediaImage: 5 << 20, MediaAudio: 5 << 20,
+		MediaVideo: 10 << 20, MediaDocument: 15 << 20,
+	}
+	limit, ok := limits[category]
+	if !ok || size <= 0 || size > limit {
+		return MediaUpload{}, ErrInvalidRequest
+	}
+	contentType = strings.TrimSpace(contentType)
+	parsedType, _, err := mime.ParseMediaType(contentType)
+	if err != nil || parsedType == "" {
+		return MediaUpload{}, ErrInvalidRequest
+	}
+	mediaID := uuid.NewString()
+	objectKey := "media/" + mediaID
+	uploadURL, headers, err := s.media.SignUpload(ctx, objectKey, contentType, size, s.cfg.MediaURLTTL)
+	if err != nil {
+		return MediaUpload{}, fmt.Errorf("sign media upload: %v: %w", err, ErrUnavailable)
+	}
+	return MediaUpload{MediaID: mediaID, UploadURL: uploadURL, Method: "PUT", Headers: headers, ExpiresAt: s.cfg.Now().Add(s.cfg.MediaURLTTL).Unix()}, nil
+}
+
+func (s *Service) CreateMediaDownload(ctx context.Context, mediaID string) (MediaDownload, error) {
+	if s.media == nil {
+		return MediaDownload{}, ErrUnavailable
+	}
+	parsedID, err := uuid.Parse(mediaID)
+	if err != nil || parsedID.String() != strings.ToLower(mediaID) {
+		return MediaDownload{}, ErrInvalidRequest
+	}
+	downloadURL, err := s.media.SignDownload(ctx, "media/"+parsedID.String(), s.cfg.MediaURLTTL)
+	if err != nil {
+		return MediaDownload{}, fmt.Errorf("sign media download: %v: %w", err, ErrUnavailable)
+	}
+	return MediaDownload{DownloadURL: downloadURL, ExpiresAt: s.cfg.Now().Add(s.cfg.MediaURLTTL).Unix()}, nil
 }
 
 func (s *Service) RequestOTP(_ context.Context, phone string) error {

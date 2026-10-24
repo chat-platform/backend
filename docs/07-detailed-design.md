@@ -593,14 +593,19 @@ Pub/Sub subscriptions, or Stream consumers. Track that as separate work.
 
 ## 6. Media Flow
 
-TODO. Sketch:
-
-- Upload: Core signs URL → client uploads direct → client calls back
-  with media_id → Core writes `media` row.
-- Download: Core signs URL → client fetches from object storage.
-- Thumbnails: generated client-side (E2EE constraint).
-- Association: - Association: media IDs are carried in the message payload (E2EE).
-  The server does not store message-media associations.
+- Upload: the authenticated client requests a signed PUT URL from Core API,
+  supplying category, byte size, and content type. Core generates a random
+  media UUID and signs the object key, exact content length, and content type.
+  The client uploads directly to object storage; no callback or database row
+  is created.
+- Download: the authenticated client presents the media UUID to Core API,
+  which signs a short-lived GET URL for that object key. Possession of the
+  opaque UUID is the sharing mechanism; media IDs and metadata travel inside
+  the encrypted message payload.
+- Upload limits: 5 MiB for images/audio, 10 MiB for video, and 15 MiB for
+  documents. Thumbnails are generated client-side. The backend does not
+  proxy, inspect, or scan media bytes.
+- Profile-picture media is outside this phase.
 
 ---
 

@@ -73,7 +73,7 @@ func writeServiceError(c echo.Context, err error) error {
 	case errors.Is(err, app.ErrNotFound):
 		return writeError(c, http.StatusNotFound, "not_found", "resource was not found")
 	case errors.Is(err, app.ErrUnavailable):
-		return writeError(c, http.StatusServiceUnavailable, "unavailable", "authentication state is unavailable")
+		return writeError(c, http.StatusServiceUnavailable, "unavailable", "a required service is unavailable")
 	default:
 		return writeError(c, http.StatusInternalServerError, "internal_error", "request could not be completed")
 	}

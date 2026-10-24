@@ -81,6 +81,7 @@ TBD: Rate-limits
 - Phone numbers: lookup is rate-limited and privacy-sensitive.
 TODO: Decide ratelimit for the above
 - Media: time-limited signed URLs; revoked for blocked pairs (future signed URLs).
+ Already issued URLs remain valid until expiry.
 TODO: Decide timelimit for the above
 - Outbox: carries the transport payload (message content included), and
   is transient. Aged out after delivery (direct/group); the retention

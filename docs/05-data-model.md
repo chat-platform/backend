@@ -41,19 +41,6 @@ size
 created_at
 deleted_at
 
-media
------
-media_id
-file_name
-caption //text along with the media
-thumbnail_storage_key
-full_storage_key
-mime_type
-size
-created_at
-deleted_at
-...
-
 phone_history (or as event log?)
 -------------
 user_id → user.user_id
