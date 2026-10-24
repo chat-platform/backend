@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -14,7 +15,9 @@ import (
 
 func (r *Repository) ListGroupChats(ctx context.Context, userID string) ([]app.GroupChat, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.chat_id::text, c.name, c.profile_pic, c.updated_at
+		SELECT c.chat_id::text, c.name, c.profile_pic, c.updated_at,
+			COALESCE((SELECT json_agg(json_build_object('userId', cm.user_id::text, 'phoneNumber', u.phone) ORDER BY cm.user_id)
+				FROM chat_membership cm JOIN users u ON u.user_id = cm.user_id WHERE cm.chat_id=c.chat_id), '[]'::json)::text
 		FROM chat c
 		JOIN chat_membership m ON m.chat_id = c.chat_id
 		WHERE m.user_id = $1 AND c.type = 'GROUP' AND c.deleted_at IS NULL
@@ -27,8 +30,12 @@ func (r *Repository) ListGroupChats(ctx context.Context, userID string) ([]app.G
 	for rows.Next() {
 		var chat app.GroupChat
 		var picture pgtype.Text
-		if err := rows.Scan(&chat.ID, &chat.Name, &picture, &chat.UpdatedAt); err != nil {
+		var membersJSON string
+		if err := rows.Scan(&chat.ID, &chat.Name, &picture, &chat.UpdatedAt, &membersJSON); err != nil {
 			return nil, fmt.Errorf("scan group chat: %w", err)
+		}
+		if err := json.Unmarshal([]byte(membersJSON), &chat.Members); err != nil {
+			return nil, fmt.Errorf("decode group members: %w", err)
 		}
 		if picture.Valid {
 			chat.ProfilePic = &picture.String

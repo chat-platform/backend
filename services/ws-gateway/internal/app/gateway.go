@@ -10,6 +10,7 @@ import (
 	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/port"
+	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/google/uuid"
 )
 
@@ -222,22 +223,32 @@ func (g *Gateway) Send(ctx context.Context, identity domain.Identity, command do
 	return ack, nil
 }
 
-func (g *Gateway) MarkDelivered(ctx context.Context, identity domain.Identity, outboxType string, outboxID int64) error {
-	if outboxID <= 0 {
+func (g *Gateway) MarkDelivered(ctx context.Context, identity domain.Identity, receipt wsframe.DeliveryReceiptPayload) error {
+	if receipt.OutboxID <= 0 || (receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) || receipt.ChatID == "" || receipt.MessageSenderID == "" || receipt.ClientMsgID == "" {
 		return domain.ErrInvalidMessage
 	}
-	if err := g.messages.MarkDelivered(ctx, identity.DeviceID, outboxType, outboxID); err != nil {
+	if err := g.messages.MarkDelivered(ctx, identity.DeviceID, identity.UserID, receipt.ChatID, receipt.MessageSenderID, receipt.ClientMsgID, string(receipt.OutboxType), receipt.OutboxID); err != nil {
 		return fmt.Errorf("record delivered receipt: %w", err)
 	}
 	return nil
 }
 
-func (g *Gateway) MarkRead(ctx context.Context, identity domain.Identity, outboxType string, outboxID int64, readAt int64) error {
-	if (outboxType != "direct" && outboxType != "group") || outboxID <= 0 || readAt <= 0 {
+func (g *Gateway) MarkRead(ctx context.Context, identity domain.Identity, receipt wsframe.ReadReceiptPayload) error {
+	if receipt.ChatID == "" || receipt.MessageSenderID == "" || receipt.ClientMsgID == "" {
 		return domain.ErrInvalidMessage
 	}
-	if err := g.messages.MarkRead(ctx, identity.DeviceID, outboxType, outboxID, readAt); err != nil {
+	if err := g.messages.MarkRead(ctx, identity.DeviceID, identity.UserID, receipt.ChatID, receipt.MessageSenderID, receipt.ClientMsgID); err != nil {
 		return fmt.Errorf("record read receipt: %w", err)
+	}
+	return nil
+}
+
+func (g *Gateway) MarkPlayed(ctx context.Context, identity domain.Identity, receipt wsframe.PlayedReceiptPayload) error {
+	if receipt.ChatID == "" || receipt.MessageSenderID == "" || receipt.ClientMsgID == "" {
+		return domain.ErrInvalidMessage
+	}
+	if err := g.messages.MarkPlayed(ctx, identity.DeviceID, identity.UserID, receipt.ChatID, receipt.MessageSenderID, receipt.ClientMsgID); err != nil {
+		return fmt.Errorf("record played receipt: %w", err)
 	}
 	return nil
 }

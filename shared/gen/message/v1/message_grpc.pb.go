@@ -22,6 +22,7 @@ const (
 	MessageService_SendMessage_FullMethodName   = "/message.v1.MessageService/SendMessage"
 	MessageService_MarkDelivered_FullMethodName = "/message.v1.MessageService/MarkDelivered"
 	MessageService_MarkRead_FullMethodName      = "/message.v1.MessageService/MarkRead"
+	MessageService_MarkPlayed_FullMethodName    = "/message.v1.MessageService/MarkPlayed"
 )
 
 // MessageServiceClient is the client API for MessageService service.
@@ -34,6 +35,7 @@ type MessageServiceClient interface {
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageAck, error)
 	MarkDelivered(ctx context.Context, in *MarkDeliveredRequest, opts ...grpc.CallOption) (*MarkDeliveredResponse, error)
 	MarkRead(ctx context.Context, in *MarkReadRequest, opts ...grpc.CallOption) (*MarkReadResponse, error)
+	MarkPlayed(ctx context.Context, in *MarkPlayedRequest, opts ...grpc.CallOption) (*MarkPlayedResponse, error)
 }
 
 type messageServiceClient struct {
@@ -74,6 +76,16 @@ func (c *messageServiceClient) MarkRead(ctx context.Context, in *MarkReadRequest
 	return out, nil
 }
 
+func (c *messageServiceClient) MarkPlayed(ctx context.Context, in *MarkPlayedRequest, opts ...grpc.CallOption) (*MarkPlayedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MarkPlayedResponse)
+	err := c.cc.Invoke(ctx, MessageService_MarkPlayed_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MessageServiceServer is the server API for MessageService service.
 // All implementations must embed UnimplementedMessageServiceServer
 // for forward compatibility.
@@ -84,6 +96,7 @@ type MessageServiceServer interface {
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageAck, error)
 	MarkDelivered(context.Context, *MarkDeliveredRequest) (*MarkDeliveredResponse, error)
 	MarkRead(context.Context, *MarkReadRequest) (*MarkReadResponse, error)
+	MarkPlayed(context.Context, *MarkPlayedRequest) (*MarkPlayedResponse, error)
 	mustEmbedUnimplementedMessageServiceServer()
 }
 
@@ -102,6 +115,9 @@ func (UnimplementedMessageServiceServer) MarkDelivered(context.Context, *MarkDel
 }
 func (UnimplementedMessageServiceServer) MarkRead(context.Context, *MarkReadRequest) (*MarkReadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MarkRead not implemented")
+}
+func (UnimplementedMessageServiceServer) MarkPlayed(context.Context, *MarkPlayedRequest) (*MarkPlayedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MarkPlayed not implemented")
 }
 func (UnimplementedMessageServiceServer) mustEmbedUnimplementedMessageServiceServer() {}
 func (UnimplementedMessageServiceServer) testEmbeddedByValue()                        {}
@@ -178,6 +194,24 @@ func _MessageService_MarkRead_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessageService_MarkPlayed_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkPlayedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessageServiceServer).MarkPlayed(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessageService_MarkPlayed_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessageServiceServer).MarkPlayed(ctx, req.(*MarkPlayedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MessageService_ServiceDesc is the grpc.ServiceDesc for MessageService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -196,6 +230,10 @@ var MessageService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MarkRead",
 			Handler:    _MessageService_MarkRead_Handler,
+		},
+		{
+			MethodName: "MarkPlayed",
+			Handler:    _MessageService_MarkPlayed_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

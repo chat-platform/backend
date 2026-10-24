@@ -12,18 +12,31 @@ service MessageService {
   rpc SendMessage(SendMessageRequest) returns (SendMessageAck);
   rpc MarkDelivered(MarkDeliveredRequest) returns (MarkDeliveredResponse);
   rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+  rpc MarkPlayed(MarkPlayedRequest) returns (MarkPlayedResponse);
 }
 
 message SendMessageRequest {
-  string sender_id = 1 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
-  string device_id = 2 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
-  string chat_id = 3 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
+  string sender_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string device_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string chat_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
   // Client-generated UUIDv7 used as the sender-scoped idempotency key.
   string client_msg_id = 4 [(buf.validate.field).string = {
-    uuid: true,
+    uuid: true
     pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
   }];
-  string content = 5 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
+  string content = 5 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
 }
 
 message SendMessageAck {
@@ -32,19 +45,80 @@ message SendMessageAck {
 }
 
 message MarkDeliveredRequest {
-  string device_id = 1 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
-  int64 outbox_id = 2 [(buf.validate.field).int64.gt = 0];
-  string outbox_type = 3 [(buf.validate.field).string = {pattern: "^(direct|group)$"}];
+  string device_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  reserved 2, 3;
+  string chat_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string message_sender_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string client_msg_id = 6 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  int64 outbox_id = 7 [(buf.validate.field).int64.gt = 0];
+  string outbox_type = 8 [(buf.validate.field).string = {pattern: "^(direct|group)$"}];
+  string receipt_sender_id = 9 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
 }
 
 message MarkDeliveredResponse {}
 
 message MarkReadRequest {
-  string device_id = 1 [(buf.validate.field).string = {min_len: 1, pattern: ".*\\S.*"}];
-  reserved 2, 3, 4;
-  int64 read_at = 5 [(buf.validate.field).int64.gt = 0];
-  int64 outbox_id = 6 [(buf.validate.field).int64.gt = 0];
-  string outbox_type = 7 [(buf.validate.field).string = {pattern: "^(direct|group)$"}];
+  string device_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string chat_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string message_sender_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string client_msg_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  reserved 5, 6, 7;
+  string receipt_sender_id = 8 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
 }
 
 message MarkReadResponse {}
+
+message MarkPlayedRequest {
+  string device_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string chat_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string message_sender_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string client_msg_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string receipt_sender_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+}
+
+message MarkPlayedResponse {}

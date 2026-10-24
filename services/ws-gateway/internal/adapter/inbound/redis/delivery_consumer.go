@@ -160,20 +160,17 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 			return decodedDelivery{}, err
 		}
-		if payload.ClientMsgID == "" || payload.SenderID == "" || payload.ReaderUserID == "" {
+		if payload.ChatID == "" || payload.ClientMsgID == "" || payload.MessageSenderID == "" || payload.ReceiptSenderID == "" {
 			return decodedDelivery{}, fmt.Errorf("receipt payload is missing message or user identity")
 		}
 		switch payload.ReceiptType {
-		case "delivered":
-			if payload.DeliveredAt <= 0 {
-				return decodedDelivery{}, fmt.Errorf("delivery receipt is missing deliveredAt")
-			}
-		case "read":
-			if payload.ReadAt <= 0 {
-				return decodedDelivery{}, fmt.Errorf("read receipt is missing readAt")
-			}
+		case "delivered", "read", "played":
 		default:
 			return decodedDelivery{}, fmt.Errorf("unsupported receipt type %q", payload.ReceiptType)
+		}
+		ts, err := time.Parse(time.RFC3339Nano, payload.Timestamp)
+		if err != nil || payload.Timestamp == "" {
+			return decodedDelivery{}, fmt.Errorf("receipt payload has an invalid timestamp")
 		}
 		payload.OutboxID = outboxID
 		payload.OutboxType = wsframe.OutboxType(typ)
@@ -181,11 +178,7 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 		if err != nil {
 			return decodedDelivery{}, err
 		}
-		ts := payload.DeliveredAt
-		if payload.ReadAt > 0 {
-			ts = payload.ReadAt
-		}
-		envelope = wsframe.Envelope{Type: wsframe.TypeReceiptStatus, TS: ts, Payload: body}
+		envelope = wsframe.Envelope{Type: wsframe.TypeReceiptStatus, TS: ts.UnixMilli(), Payload: body}
 	default:
 		return decodedDelivery{}, fmt.Errorf("unsupported outbox event type %q", eventType)
 	}

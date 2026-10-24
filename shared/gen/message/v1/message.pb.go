@@ -152,12 +152,16 @@ func (x *SendMessageAck) GetTsUnixMilli() int64 {
 }
 
 type MarkDeliveredRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	OutboxId      int64                  `protobuf:"varint,2,opt,name=outbox_id,json=outboxId,proto3" json:"outbox_id,omitempty"`
-	OutboxType    string                 `protobuf:"bytes,3,opt,name=outbox_type,json=outboxType,proto3" json:"outbox_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId        string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	ChatId          string                 `protobuf:"bytes,4,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	MessageSenderId string                 `protobuf:"bytes,5,opt,name=message_sender_id,json=messageSenderId,proto3" json:"message_sender_id,omitempty"`
+	ClientMsgId     string                 `protobuf:"bytes,6,opt,name=client_msg_id,json=clientMsgId,proto3" json:"client_msg_id,omitempty"`
+	OutboxId        int64                  `protobuf:"varint,7,opt,name=outbox_id,json=outboxId,proto3" json:"outbox_id,omitempty"`
+	OutboxType      string                 `protobuf:"bytes,8,opt,name=outbox_type,json=outboxType,proto3" json:"outbox_type,omitempty"`
+	ReceiptSenderId string                 `protobuf:"bytes,9,opt,name=receipt_sender_id,json=receiptSenderId,proto3" json:"receipt_sender_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *MarkDeliveredRequest) Reset() {
@@ -197,6 +201,27 @@ func (x *MarkDeliveredRequest) GetDeviceId() string {
 	return ""
 }
 
+func (x *MarkDeliveredRequest) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *MarkDeliveredRequest) GetMessageSenderId() string {
+	if x != nil {
+		return x.MessageSenderId
+	}
+	return ""
+}
+
+func (x *MarkDeliveredRequest) GetClientMsgId() string {
+	if x != nil {
+		return x.ClientMsgId
+	}
+	return ""
+}
+
 func (x *MarkDeliveredRequest) GetOutboxId() int64 {
 	if x != nil {
 		return x.OutboxId
@@ -207,6 +232,13 @@ func (x *MarkDeliveredRequest) GetOutboxId() int64 {
 func (x *MarkDeliveredRequest) GetOutboxType() string {
 	if x != nil {
 		return x.OutboxType
+	}
+	return ""
+}
+
+func (x *MarkDeliveredRequest) GetReceiptSenderId() string {
+	if x != nil {
+		return x.ReceiptSenderId
 	}
 	return ""
 }
@@ -248,13 +280,14 @@ func (*MarkDeliveredResponse) Descriptor() ([]byte, []int) {
 }
 
 type MarkReadRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	ReadAt        int64                  `protobuf:"varint,5,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
-	OutboxId      int64                  `protobuf:"varint,6,opt,name=outbox_id,json=outboxId,proto3" json:"outbox_id,omitempty"`
-	OutboxType    string                 `protobuf:"bytes,7,opt,name=outbox_type,json=outboxType,proto3" json:"outbox_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId        string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	ChatId          string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	MessageSenderId string                 `protobuf:"bytes,3,opt,name=message_sender_id,json=messageSenderId,proto3" json:"message_sender_id,omitempty"`
+	ClientMsgId     string                 `protobuf:"bytes,4,opt,name=client_msg_id,json=clientMsgId,proto3" json:"client_msg_id,omitempty"`
+	ReceiptSenderId string                 `protobuf:"bytes,8,opt,name=receipt_sender_id,json=receiptSenderId,proto3" json:"receipt_sender_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *MarkReadRequest) Reset() {
@@ -294,23 +327,30 @@ func (x *MarkReadRequest) GetDeviceId() string {
 	return ""
 }
 
-func (x *MarkReadRequest) GetReadAt() int64 {
+func (x *MarkReadRequest) GetChatId() string {
 	if x != nil {
-		return x.ReadAt
+		return x.ChatId
 	}
-	return 0
+	return ""
 }
 
-func (x *MarkReadRequest) GetOutboxId() int64 {
+func (x *MarkReadRequest) GetMessageSenderId() string {
 	if x != nil {
-		return x.OutboxId
+		return x.MessageSenderId
 	}
-	return 0
+	return ""
 }
 
-func (x *MarkReadRequest) GetOutboxType() string {
+func (x *MarkReadRequest) GetClientMsgId() string {
 	if x != nil {
-		return x.OutboxType
+		return x.ClientMsgId
+	}
+	return ""
+}
+
+func (x *MarkReadRequest) GetReceiptSenderId() string {
+	if x != nil {
+		return x.ReceiptSenderId
 	}
 	return ""
 }
@@ -351,6 +391,118 @@ func (*MarkReadResponse) Descriptor() ([]byte, []int) {
 	return file_message_v1_message_proto_rawDescGZIP(), []int{5}
 }
 
+type MarkPlayedRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId        string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	ChatId          string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	MessageSenderId string                 `protobuf:"bytes,3,opt,name=message_sender_id,json=messageSenderId,proto3" json:"message_sender_id,omitempty"`
+	ClientMsgId     string                 `protobuf:"bytes,4,opt,name=client_msg_id,json=clientMsgId,proto3" json:"client_msg_id,omitempty"`
+	ReceiptSenderId string                 `protobuf:"bytes,5,opt,name=receipt_sender_id,json=receiptSenderId,proto3" json:"receipt_sender_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *MarkPlayedRequest) Reset() {
+	*x = MarkPlayedRequest{}
+	mi := &file_message_v1_message_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkPlayedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkPlayedRequest) ProtoMessage() {}
+
+func (x *MarkPlayedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_message_v1_message_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkPlayedRequest.ProtoReflect.Descriptor instead.
+func (*MarkPlayedRequest) Descriptor() ([]byte, []int) {
+	return file_message_v1_message_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *MarkPlayedRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *MarkPlayedRequest) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *MarkPlayedRequest) GetMessageSenderId() string {
+	if x != nil {
+		return x.MessageSenderId
+	}
+	return ""
+}
+
+func (x *MarkPlayedRequest) GetClientMsgId() string {
+	if x != nil {
+		return x.ClientMsgId
+	}
+	return ""
+}
+
+func (x *MarkPlayedRequest) GetReceiptSenderId() string {
+	if x != nil {
+		return x.ReceiptSenderId
+	}
+	return ""
+}
+
+type MarkPlayedResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkPlayedResponse) Reset() {
+	*x = MarkPlayedResponse{}
+	mi := &file_message_v1_message_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkPlayedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkPlayedResponse) ProtoMessage() {}
+
+func (x *MarkPlayedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_message_v1_message_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkPlayedResponse.ProtoReflect.Descriptor instead.
+func (*MarkPlayedResponse) Descriptor() ([]byte, []int) {
+	return file_message_v1_message_proto_rawDescGZIP(), []int{7}
+}
+
 var File_message_v1_message_proto protoreflect.FileDescriptor
 
 const file_message_v1_message_proto_rawDesc = "" +
@@ -369,26 +521,52 @@ const file_message_v1_message_proto_rawDesc = "" +
 	"\x10\x012\x06.*\\S.*R\acontent\"X\n" +
 	"\x0eSendMessageAck\x12\"\n" +
 	"\rclient_msg_id\x18\x01 \x01(\tR\vclientMsgId\x12\"\n" +
-	"\rts_unix_milli\x18\x02 \x01(\x03R\vtsUnixMilli\"\xa4\x01\n" +
+	"\rts_unix_milli\x18\x02 \x01(\x03R\vtsUnixMilli\"\x89\x03\n" +
 	"\x14MarkDeliveredRequest\x12,\n" +
 	"\tdevice_id\x18\x01 \x01(\tB\x0f\xbaH\fr\n" +
-	"\x10\x012\x06.*\\S.*R\bdeviceId\x12$\n" +
-	"\toutbox_id\x18\x02 \x01(\x03B\a\xbaH\x04\"\x02 \x00R\boutboxId\x128\n" +
-	"\voutbox_type\x18\x03 \x01(\tB\x17\xbaH\x14r\x122\x10^(direct|group)$R\n" +
-	"outboxType\"\x17\n" +
-	"\x15MarkDeliveredResponse\"\xd3\x01\n" +
+	"\x10\x012\x06.*\\S.*R\bdeviceId\x12(\n" +
+	"\achat_id\x18\x04 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x06chatId\x12;\n" +
+	"\x11message_sender_id\x18\x05 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x0fmessageSenderId\x123\n" +
+	"\rclient_msg_id\x18\x06 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\vclientMsgId\x12$\n" +
+	"\toutbox_id\x18\a \x01(\x03B\a\xbaH\x04\"\x02 \x00R\boutboxId\x128\n" +
+	"\voutbox_type\x18\b \x01(\tB\x17\xbaH\x14r\x122\x10^(direct|group)$R\n" +
+	"outboxType\x12;\n" +
+	"\x11receipt_sender_id\x18\t \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x0freceiptSenderIdJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"\x17\n" +
+	"\x15MarkDeliveredResponse\"\xaa\x02\n" +
 	"\x0fMarkReadRequest\x12,\n" +
 	"\tdevice_id\x18\x01 \x01(\tB\x0f\xbaH\fr\n" +
-	"\x10\x012\x06.*\\S.*R\bdeviceId\x12 \n" +
-	"\aread_at\x18\x05 \x01(\x03B\a\xbaH\x04\"\x02 \x00R\x06readAt\x12$\n" +
-	"\toutbox_id\x18\x06 \x01(\x03B\a\xbaH\x04\"\x02 \x00R\boutboxId\x128\n" +
-	"\voutbox_type\x18\a \x01(\tB\x17\xbaH\x14r\x122\x10^(direct|group)$R\n" +
-	"outboxTypeJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05\"\x12\n" +
-	"\x10MarkReadResponse2\xf8\x01\n" +
+	"\x10\x012\x06.*\\S.*R\bdeviceId\x12(\n" +
+	"\achat_id\x18\x02 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x06chatId\x12;\n" +
+	"\x11message_sender_id\x18\x03 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x0fmessageSenderId\x123\n" +
+	"\rclient_msg_id\x18\x04 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\vclientMsgId\x12;\n" +
+	"\x11receipt_sender_id\x18\b \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x0freceiptSenderIdJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\b\"\x12\n" +
+	"\x10MarkReadResponse\"\x9a\x02\n" +
+	"\x11MarkPlayedRequest\x12,\n" +
+	"\tdevice_id\x18\x01 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\bdeviceId\x12(\n" +
+	"\achat_id\x18\x02 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x06chatId\x12;\n" +
+	"\x11message_sender_id\x18\x03 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x0fmessageSenderId\x123\n" +
+	"\rclient_msg_id\x18\x04 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\vclientMsgId\x12;\n" +
+	"\x11receipt_sender_id\x18\x05 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x0freceiptSenderId\"\x14\n" +
+	"\x12MarkPlayedResponse2\xc5\x02\n" +
 	"\x0eMessageService\x12I\n" +
 	"\vSendMessage\x12\x1e.message.v1.SendMessageRequest\x1a\x1a.message.v1.SendMessageAck\x12T\n" +
 	"\rMarkDelivered\x12 .message.v1.MarkDeliveredRequest\x1a!.message.v1.MarkDeliveredResponse\x12E\n" +
-	"\bMarkRead\x12\x1b.message.v1.MarkReadRequest\x1a\x1c.message.v1.MarkReadResponseBBZ@github.com/chat-platform/backend/shared/gen/message/v1;messagev1b\x06proto3"
+	"\bMarkRead\x12\x1b.message.v1.MarkReadRequest\x1a\x1c.message.v1.MarkReadResponse\x12K\n" +
+	"\n" +
+	"MarkPlayed\x12\x1d.message.v1.MarkPlayedRequest\x1a\x1e.message.v1.MarkPlayedResponseBBZ@github.com/chat-platform/backend/shared/gen/message/v1;messagev1b\x06proto3"
 
 var (
 	file_message_v1_message_proto_rawDescOnce sync.Once
@@ -402,7 +580,7 @@ func file_message_v1_message_proto_rawDescGZIP() []byte {
 	return file_message_v1_message_proto_rawDescData
 }
 
-var file_message_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_message_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_message_v1_message_proto_goTypes = []any{
 	(*SendMessageRequest)(nil),    // 0: message.v1.SendMessageRequest
 	(*SendMessageAck)(nil),        // 1: message.v1.SendMessageAck
@@ -410,16 +588,20 @@ var file_message_v1_message_proto_goTypes = []any{
 	(*MarkDeliveredResponse)(nil), // 3: message.v1.MarkDeliveredResponse
 	(*MarkReadRequest)(nil),       // 4: message.v1.MarkReadRequest
 	(*MarkReadResponse)(nil),      // 5: message.v1.MarkReadResponse
+	(*MarkPlayedRequest)(nil),     // 6: message.v1.MarkPlayedRequest
+	(*MarkPlayedResponse)(nil),    // 7: message.v1.MarkPlayedResponse
 }
 var file_message_v1_message_proto_depIdxs = []int32{
 	0, // 0: message.v1.MessageService.SendMessage:input_type -> message.v1.SendMessageRequest
 	2, // 1: message.v1.MessageService.MarkDelivered:input_type -> message.v1.MarkDeliveredRequest
 	4, // 2: message.v1.MessageService.MarkRead:input_type -> message.v1.MarkReadRequest
-	1, // 3: message.v1.MessageService.SendMessage:output_type -> message.v1.SendMessageAck
-	3, // 4: message.v1.MessageService.MarkDelivered:output_type -> message.v1.MarkDeliveredResponse
-	5, // 5: message.v1.MessageService.MarkRead:output_type -> message.v1.MarkReadResponse
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
+	6, // 3: message.v1.MessageService.MarkPlayed:input_type -> message.v1.MarkPlayedRequest
+	1, // 4: message.v1.MessageService.SendMessage:output_type -> message.v1.SendMessageAck
+	3, // 5: message.v1.MessageService.MarkDelivered:output_type -> message.v1.MarkDeliveredResponse
+	5, // 6: message.v1.MessageService.MarkRead:output_type -> message.v1.MarkReadResponse
+	7, // 7: message.v1.MessageService.MarkPlayed:output_type -> message.v1.MarkPlayedResponse
+	4, // [4:8] is the sub-list for method output_type
+	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -436,7 +618,7 @@ func file_message_v1_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_message_v1_message_proto_rawDesc), len(file_message_v1_message_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

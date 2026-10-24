@@ -197,20 +197,23 @@ func (f *fakeOperations) Send(_ context.Context, identity domain.Identity, comma
 	}
 	return domain.MessageAck{ClientMsgID: command.ClientMsgID, TimestampMS: 1770000000123}, nil
 }
-func (f *fakeOperations) MarkDelivered(_ context.Context, identity domain.Identity, outboxType string, outboxID int64) error {
-	f.delivered = append(f.delivered, outboxID)
+func (f *fakeOperations) MarkDelivered(_ context.Context, identity domain.Identity, receipt wsframe.DeliveryReceiptPayload) error {
+	f.delivered = append(f.delivered, receipt.OutboxID)
 	f.deliveredDevice = identity.DeviceID
 	if f.deliveredCh != nil {
 		close(f.deliveredCh)
 	}
 	return f.deliveredErr
 }
-func (f *fakeOperations) MarkRead(_ context.Context, _ domain.Identity, outboxType string, outboxID, readAt int64) error {
-	f.readReceipt = wsframe.ReadReceiptPayload{OutboxType: wsframe.OutboxType(outboxType), OutboxID: outboxID, ReadAt: readAt}
+func (f *fakeOperations) MarkRead(_ context.Context, _ domain.Identity, receipt wsframe.ReadReceiptPayload) error {
+	f.readReceipt = receipt
 	if f.readCh != nil {
 		close(f.readCh)
 	}
 	return f.readErr
+}
+func (f *fakeOperations) MarkPlayed(context.Context, domain.Identity, wsframe.PlayedReceiptPayload) error {
+	return nil
 }
 
 func TestConnectionAuthSendAndAck(t *testing.T) {
@@ -372,14 +375,14 @@ func TestReceiptFailuresAreLoggedAtWebSocketBoundary(t *testing.T) {
 			name:      "delivered",
 			frameType: wsframe.TypeReceiptDelivered,
 			operation: "record delivered receipt",
-			payload:   wsframe.DeliveryReceiptPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 42},
+			payload:   wsframe.DeliveryReceiptPayload{ChatID: "chat", MessageSenderID: "sender", ClientMsgID: "client", OutboxType: wsframe.OutboxTypeDirect, OutboxID: 42},
 			configure: func(ops *fakeOperations) { ops.deliveredErr = status.Error(codes.Internal, "write failed") },
 		},
 		{
 			name:      "read",
 			frameType: wsframe.TypeReceiptRead,
 			operation: "record read receipt",
-			payload:   wsframe.ReadReceiptPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 42, ReadAt: 1770000000123},
+			payload:   wsframe.ReadReceiptPayload{ChatID: "chat", MessageSenderID: "sender", ClientMsgID: "client"},
 			configure: func(ops *fakeOperations) { ops.readErr = status.Error(codes.Internal, "write failed") },
 		},
 	} {
@@ -472,7 +475,7 @@ func TestDeliveryReceiptIsForwardedToMessageService(t *testing.T) {
 	if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
 		t.Fatalf("auth ack=(%+v,%v)", authAck, err)
 	}
-	receipt, _ := json.Marshal(wsframe.DeliveryReceiptPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 42})
+	receipt, _ := json.Marshal(wsframe.DeliveryReceiptPayload{ChatID: "chat", MessageSenderID: "sender", ClientMsgID: "client", OutboxType: wsframe.OutboxTypeDirect, OutboxID: 42})
 	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeReceiptDelivered, Payload: receipt}); err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +509,7 @@ func TestReadReceiptIsForwardedWithAuthenticatedIdentity(t *testing.T) {
 	if err := conn.ReadJSON(&authAck); err != nil || authAck.Type != wsframe.TypeAuthOK {
 		t.Fatalf("auth ack=(%+v,%v)", authAck, err)
 	}
-	payload := wsframe.ReadReceiptPayload{OutboxType: wsframe.OutboxTypeGroup, OutboxID: 42, ReadAt: 1770000000123}
+	payload := wsframe.ReadReceiptPayload{ChatID: "chat", MessageSenderID: "sender", ClientMsgID: "client"}
 	if err := conn.WriteJSON(wsframe.Envelope{Type: wsframe.TypeReceiptRead, Payload: mustJSON(t, payload)}); err != nil {
 		t.Fatal(err)
 	}

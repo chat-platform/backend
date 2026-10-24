@@ -108,12 +108,16 @@ func (r *CachedChatRepository) EnqueueGroupMessageEvent(ctx context.Context, mes
 	return r.store.EnqueueGroupMessageEvent(ctx, message)
 }
 
-func (r *CachedChatRepository) MarkDelivered(ctx context.Context, deviceID string, outboxType string, outboxID int64) error {
-	return r.store.MarkDelivered(ctx, deviceID, outboxType, outboxID)
+func (r *CachedChatRepository) MarkDelivered(ctx context.Context, receipt domain.Receipt) error {
+	return r.store.MarkDelivered(ctx, receipt)
 }
 
-func (r *CachedChatRepository) MarkRead(ctx context.Context, receipt domain.ReadReceipt) error {
+func (r *CachedChatRepository) MarkRead(ctx context.Context, receipt domain.Receipt) error {
 	return r.store.MarkRead(ctx, receipt)
+}
+
+func (r *CachedChatRepository) MarkPlayed(ctx context.Context, receipt domain.Receipt) error {
+	return r.store.MarkPlayed(ctx, receipt)
 }
 
 // InvalidateChatAuthorization removes the cached authorization decision for a user in a chat.

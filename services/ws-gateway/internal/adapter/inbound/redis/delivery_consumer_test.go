@@ -65,20 +65,20 @@ func TestDecodeGroupDeliveryCarriesIndependentOutboxIdentity(t *testing.T) {
 func TestDecodeReceiptDeliveryPreservesReceiptStatus(t *testing.T) {
 	message := redis.XMessage{ID: "2-0", Values: map[string]any{
 		"outbox_id": "84", "outbox_type": "direct", "event_type": "RECEIPT", "device_id": "sender-device", "conn_id": "sender-conn",
-		"payload": `{"receiptType":"read","senderId":"sender","clientMsgId":"client-id","readAt":456,"readerUserId":"reader"}`,
+		"payload": `{"receiptType":"read","chatId":"chat","messageSenderId":"sender","clientMsgId":"client-id","receiptSenderId":"reader","timestamp":"2026-10-24T12:00:00Z"}`,
 	}}
 	delivery, err := decodeDelivery(message)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if delivery.envelope.Type != wsframe.TypeReceiptStatus || delivery.envelope.TS != 456 {
+	if delivery.envelope.Type != wsframe.TypeReceiptStatus || delivery.envelope.TS <= 0 {
 		t.Fatalf("envelope=%+v", delivery.envelope)
 	}
 	var payload wsframe.ReceiptStatusPayload
 	if err := json.Unmarshal(delivery.envelope.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.OutboxID != 84 || payload.OutboxType != wsframe.OutboxTypeDirect || payload.ReceiptType != "read" || payload.ClientMsgID != "client-id" || payload.ReadAt != 456 || payload.SenderID != "sender" || payload.ReaderUserID != "reader" {
+	if payload.OutboxID != 84 || payload.OutboxType != wsframe.OutboxTypeDirect || payload.ReceiptType != "read" || payload.ClientMsgID != "client-id" || payload.ChatID != "chat" || payload.MessageSenderID != "sender" || payload.ReceiptSenderID != "reader" || payload.Timestamp != "2026-10-24T12:00:00Z" {
 		t.Fatalf("receipt payload=%+v", payload)
 	}
 }
