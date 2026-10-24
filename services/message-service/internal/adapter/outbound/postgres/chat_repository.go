@@ -283,21 +283,14 @@ func (r *ChatRepository) MarkDelivered(ctx context.Context, receipt domain.Recei
 }
 
 func (r *ChatRepository) MarkRead(ctx context.Context, receipt domain.Receipt) error {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin read receipt transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if err := enqueueReceipt(ctx, tx, receipt, "read"); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit read receipt transaction: %w", err)
-	}
-	return nil
+	return enqueueReceipt(ctx, r.pool, receipt, "read")
 }
 
-func enqueueReceipt(ctx context.Context, tx pgx.Tx, receipt domain.Receipt, receiptType string) error {
+type receiptExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func enqueueReceipt(ctx context.Context, exec receiptExecutor, receipt domain.Receipt, receiptType string) error {
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
 	payload, err := json.Marshal(map[string]any{
 		"receiptType": receiptType, "chatId": receipt.ChatID,
@@ -307,7 +300,7 @@ func enqueueReceipt(ctx context.Context, tx pgx.Tx, receipt domain.Receipt, rece
 	if err != nil {
 		return fmt.Errorf("encode %s receipt: %w", receiptType, err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO direct_outbox
+	_, err = exec.Exec(ctx, `INSERT INTO direct_outbox
 		(chat_id, sender_id, client_msg_id, recipient_id, device_id, event_type, payload)
 		SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, d.device_id, 'RECEIPT', $5::text
 		FROM device d WHERE d.user_id=$4::uuid AND d.revoked_at IS NULL`, receipt.ChatID, receipt.ReceiptSenderID, uuid.NewString(), receipt.MessageSenderID, string(payload))
