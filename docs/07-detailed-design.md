@@ -335,7 +335,7 @@ and writes RECEIPT rows to `direct_outbox` for the message sender's active
 devices. The receipt rows carry `chat_id` with a foreign key to `chat`. The
 server does not look up or mutate the original message.
 
-Both receipt types are relayed as
+All receipt types are relayed as
 `{ receiptType, chatId, messageSenderId, clientMsgId, receiptSenderId,
 timestamp }`; relay preserves the stored timestamp. Clients match the local
 message and validate the receipt sender against the direct peer or group
@@ -349,9 +349,22 @@ relationship checks are performed by clients.
 
 Read state is per-user, aggregated client-side (see `06` §6).
 
-The sender's devices receive the RECEIPT event, apply the first one for
-a given message (ignoring duplicates from other devices of the same
-reader), and render the read tick.
+### 3.2.1 Played receipt
+
+When a recipient first plays an audio or video message, the client sends
+`receipt.played { chatId, messageSenderId, clientMsgId }`. The backend does
+not inspect message content or receive a client playback timestamp. It writes
+a `RECEIPT` event with a server-generated timestamp and uses a unique partial
+index on the existing `direct_outbox` to ensure concurrent reports and later
+plays from any recipient device enqueue at most one played receipt per
+recipient and message. The timestamp is carried in the receipt payload, not
+stored as played state in an outbox column. The client sends once and retries
+only when it has not received the gateway's write acknowledgment. If an
+acknowledgment is lost after the write, a retry can produce another receipt;
+the sender's client deduplicates these events.
+
+The sender's devices receive the RECEIPT event and apply it idempotently,
+showing played status for the message.
 
 Read state is per-user, aggregated client-side (see `06` §6).
 

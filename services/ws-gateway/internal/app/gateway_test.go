@@ -18,6 +18,9 @@ func (messageSenderFunc) MarkDelivered(context.Context, string, string, string, 
 func (messageSenderFunc) MarkRead(context.Context, string, string, string, string, string) error {
 	return nil
 }
+func (messageSenderFunc) MarkPlayed(context.Context, string, string, string, string, string) error {
+	return nil
+}
 
 type registryStub struct{}
 

@@ -34,6 +34,7 @@ type Operations interface {
 	Send(context.Context, domain.Identity, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, domain.Identity, wsframe.DeliveryReceiptPayload) error
 	MarkRead(context.Context, domain.Identity, wsframe.ReadReceiptPayload) error
+	MarkPlayed(context.Context, domain.Identity, wsframe.PlayedReceiptPayload) error
 	SubscribePresence(context.Context, string, string) error
 	UnsubscribePresence(context.Context, string, string) error
 	GetPresence(context.Context, string, string) (domain.Presence, error)
@@ -216,7 +217,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if envelope.Type == wsframe.TypeReceiptRead {
 			var receipt wsframe.ReadReceiptPayload
 			decodeErr := json.Unmarshal(envelope.Payload, &receipt)
-			if len(envelope.Payload) == 0 || decodeErr != nil || strings.TrimSpace(receipt.ChatID) == "" || strings.TrimSpace(receipt.MessageSenderID) == "" || strings.TrimSpace(receipt.ClientMsgID) == "" {
+			if strings.TrimSpace(envelope.ID) == "" || len(envelope.Payload) == 0 || decodeErr != nil || strings.TrimSpace(receipt.ChatID) == "" || strings.TrimSpace(receipt.MessageSenderID) == "" || strings.TrimSpace(receipt.ClientMsgID) == "" {
 				s.logger.Warn(ctx, "websocket client sent an invalid read receipt",
 					"request_id", envelope.ID, "device_id", identity.DeviceID)
 				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.read requires chatId, messageSenderId, and clientMsgId")
@@ -228,6 +229,29 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 					"device_id", identity.DeviceID, "chat_id", receipt.ChatID,
 					"message_sender_id", receipt.MessageSenderID, "client_msg_id", receipt.ClientMsgID)
 				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "read receipt could not be recorded")
+			}
+			continue
+		}
+		if envelope.Type == wsframe.TypeReceiptPlayed {
+			var receipt wsframe.PlayedReceiptPayload
+			decodeErr := json.Unmarshal(envelope.Payload, &receipt)
+			if len(envelope.Payload) == 0 || decodeErr != nil || strings.TrimSpace(receipt.ChatID) == "" || strings.TrimSpace(receipt.MessageSenderID) == "" || strings.TrimSpace(receipt.ClientMsgID) == "" {
+				s.logger.Warn(ctx, "websocket client sent an invalid played receipt", "request_id", envelope.ID, "device_id", identity.DeviceID)
+				s.writeError(ctx, socket, envelope.ID, "invalid_receipt", "receipt.played requires an id, chatId, messageSenderId, and clientMsgId")
+				continue
+			}
+			if err := s.operations.MarkPlayed(ctx, identity, receipt); err != nil {
+				s.logOperationFailure(ctx, "record played receipt", err,
+					"request_id", envelope.ID, "user_id", identity.UserID,
+					"device_id", identity.DeviceID, "chat_id", receipt.ChatID,
+					"message_sender_id", receipt.MessageSenderID, "client_msg_id", receipt.ClientMsgID)
+				s.writeError(ctx, socket, envelope.ID, "receipt_failed", "played receipt could not be recorded")
+				continue
+			}
+			if err := socket.WriteJSON(wsframe.Envelope{Type: wsframe.TypeReceiptPlayedAck, ID: envelope.ID, TS: time.Now().UnixMilli(), Payload: json.RawMessage(`{}`)}); err != nil {
+				s.logOperationFailure(ctx, "write played receipt acknowledgement", err,
+					"request_id", envelope.ID, "user_id", identity.UserID, "device_id", identity.DeviceID)
+				return
 			}
 			continue
 		}

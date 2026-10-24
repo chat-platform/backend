@@ -212,6 +212,9 @@ func (f *fakeOperations) MarkRead(_ context.Context, _ domain.Identity, receipt 
 	}
 	return f.readErr
 }
+func (f *fakeOperations) MarkPlayed(context.Context, domain.Identity, wsframe.PlayedReceiptPayload) error {
+	return nil
+}
 
 func TestConnectionAuthSendAndAck(t *testing.T) {
 	logger, err := logging.New(io.Discard, logging.Config{})

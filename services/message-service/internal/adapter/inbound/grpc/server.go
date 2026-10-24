@@ -18,6 +18,7 @@ type ChatOperations interface {
 	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, domain.Receipt) error
 	MarkRead(context.Context, domain.Receipt) error
+	MarkPlayed(context.Context, domain.Receipt) error
 }
 
 type Server struct {
@@ -117,4 +118,22 @@ func (s *Server) MarkRead(ctx context.Context, request *messagev1.MarkReadReques
 		return nil, status.Error(codes.Internal, "could not record read receipt")
 	}
 	return &messagev1.MarkReadResponse{}, nil
+}
+
+func (s *Server) MarkPlayed(ctx context.Context, request *messagev1.MarkPlayedRequest) (*messagev1.MarkPlayedResponse, error) {
+	if request == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	if err := s.validator.Validate(request); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	err := s.operations.MarkPlayed(ctx, domain.Receipt{DeviceID: request.GetDeviceId(), ReceiptSenderID: request.GetReceiptSenderId(), ChatID: request.GetChatId(), MessageSenderID: request.GetMessageSenderId(), ClientMsgID: request.GetClientMsgId()})
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidMessage) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		s.logger.Error(ctx, "could not record played receipt", "error", err, "device_id", request.GetDeviceId(), "chat_id", request.GetChatId())
+		return nil, status.Error(codes.Internal, "could not record played receipt")
+	}
+	return &messagev1.MarkPlayedResponse{}, nil
 }

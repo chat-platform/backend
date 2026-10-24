@@ -222,6 +222,10 @@ Recipient device receives message
   and ignores duplicates from other devices — the user is considered
   to have read the message once, regardless of which device they read
   it on.
+- **Played receipts use at-least-once delivery.** The gateway acknowledges
+  a playback report only after it is written to the outbox. If that
+  acknowledgment is lost, the client retries and the sender deduplicates
+  using the message and receipt sender identity.
 
 There is no `msg_seen_status` table. The aggregation happens on the
 client, from the stream of RECEIPT events.

@@ -164,7 +164,7 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 			return decodedDelivery{}, fmt.Errorf("receipt payload is missing message or user identity")
 		}
 		switch payload.ReceiptType {
-		case "delivered", "read":
+		case "delivered", "read", "played":
 		default:
 			return decodedDelivery{}, fmt.Errorf("unsupported receipt type %q", payload.ReceiptType)
 		}

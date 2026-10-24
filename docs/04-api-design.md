@@ -161,6 +161,8 @@ its active sockets.
 | `receipt.delivered` | C → S | `{ chatId, messageSenderId, clientMsgId, outboxType, outboxId }` | Client confirms it durably applied the event. The outbox row is marked delivered when present; receipt forwarding does not depend on row retention. |
 | `sync.ready` | C → S | `{}` | Sent after HTTP sync completes; Gateway flushes buffered events and resumes live delivery. |
 | `receipt.read` | C → S | `{ chatId, messageSenderId, clientMsgId }` | Recipient has read one message. The server forwards a RECEIPT event without looking up the original message. |
+| `receipt.played` | C → S | `{ chatId, messageSenderId, clientMsgId }` | Requires an envelope `id`. Sent when the recipient first plays audio or video. The client retries until it receives `receipt.played.ack`; duplicate statuses are deduplicated by the sender's client. |
+| `receipt.played.ack` | S → C | `{}` | Uses the request `id`; sent only after the receipt has been written to the outbox. The client may retry if it does not receive this acknowledgment. |
 | `receipt.status` | S → C | `{ outboxType, outboxId, receiptType, chatId, messageSenderId, clientMsgId, receiptSenderId, timestamp }` | Forwarded to the message sender's devices. `timestamp` is server-generated UTC RFC3339; `receiptSenderId` is derived from the authenticated device. |
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |
 | `presence.subscribe` | C → S | `{ targetUserId }` | Authenticated; subscribes idempotently and returns a fresh `presence.snapshot`. Subscription is registered before the snapshot read. |
@@ -237,7 +239,7 @@ WS: message.ack → sender
   ↓
 WS: message.recv → recipient's device(s)
   ↓
-WS: receipt.delivered / receipt.read
+WS: receipt.delivered / receipt.read / receipt.played
 ```
 
 ### 5.3 Reconnect / Sync

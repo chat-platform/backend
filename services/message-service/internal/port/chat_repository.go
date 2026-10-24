@@ -13,4 +13,5 @@ type ChatRepository interface {
 	EnqueueGroupMessageEvent(context.Context, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, domain.Receipt) error
 	MarkRead(context.Context, domain.Receipt) error
+	MarkPlayed(context.Context, domain.Receipt) error
 }

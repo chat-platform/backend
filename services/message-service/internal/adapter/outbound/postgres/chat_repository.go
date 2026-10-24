@@ -286,6 +286,10 @@ func (r *ChatRepository) MarkRead(ctx context.Context, receipt domain.Receipt) e
 	return enqueueReceipt(ctx, r.pool, receipt, "read")
 }
 
+func (r *ChatRepository) MarkPlayed(ctx context.Context, receipt domain.Receipt) error {
+	return enqueueReceipt(ctx, r.pool, receipt, "played")
+}
+
 type receiptExecutor interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
@@ -300,12 +304,15 @@ func enqueueReceipt(ctx context.Context, exec receiptExecutor, receipt domain.Re
 	if err != nil {
 		return fmt.Errorf("encode %s receipt: %w", receiptType, err)
 	}
-	_, err = exec.Exec(ctx, `INSERT INTO direct_outbox
+	result, err := exec.Exec(ctx, `INSERT INTO direct_outbox
 		(chat_id, sender_id, client_msg_id, recipient_id, device_id, event_type, payload)
 		SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, d.device_id, 'RECEIPT', $5::text
 		FROM device d WHERE d.user_id=$4::uuid AND d.revoked_at IS NULL`, receipt.ChatID, receipt.ReceiptSenderID, uuid.NewString(), receipt.MessageSenderID, string(payload))
 	if err != nil {
 		return fmt.Errorf("enqueue %s receipt for message sender devices: %w", receiptType, err)
+	}
+	if receiptType == "played" && result.RowsAffected() == 0 {
+		return fmt.Errorf("enqueue played receipt: message sender has no active devices")
 	}
 	return nil
 }

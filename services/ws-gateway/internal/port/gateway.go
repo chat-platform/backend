@@ -11,6 +11,7 @@ type MessageService interface {
 	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, string, string, string, string, string, string, int64) error
 	MarkRead(context.Context, string, string, string, string, string) error
+	MarkPlayed(context.Context, string, string, string, string, string) error
 }
 
 type ConnectionRegistry interface {

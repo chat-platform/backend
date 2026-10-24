@@ -116,6 +116,10 @@ func (r *CachedChatRepository) MarkRead(ctx context.Context, receipt domain.Rece
 	return r.store.MarkRead(ctx, receipt)
 }
 
+func (r *CachedChatRepository) MarkPlayed(ctx context.Context, receipt domain.Receipt) error {
+	return r.store.MarkPlayed(ctx, receipt)
+}
+
 // InvalidateChatAuthorization removes the cached authorization decision for a user in a chat.
 func (r *CachedChatRepository) InvalidateChatAuthorization(ctx context.Context, chatID, userID string) error {
 	return r.cache.InvalidateChatAuthorization(ctx, chatID, userID)

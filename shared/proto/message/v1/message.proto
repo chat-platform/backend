@@ -12,6 +12,7 @@ service MessageService {
   rpc SendMessage(SendMessageRequest) returns (SendMessageAck);
   rpc MarkDelivered(MarkDeliveredRequest) returns (MarkDeliveredResponse);
   rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+  rpc MarkPlayed(MarkPlayedRequest) returns (MarkPlayedResponse);
 }
 
 message SendMessageRequest {
@@ -96,3 +97,28 @@ message MarkReadRequest {
 }
 
 message MarkReadResponse {}
+
+message MarkPlayedRequest {
+  string device_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string chat_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string message_sender_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string client_msg_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+  string receipt_sender_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    pattern: ".*\\S.*"
+  }];
+}
+
+message MarkPlayedResponse {}

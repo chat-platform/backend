@@ -20,6 +20,8 @@ const (
 	TypeSyncReady           = "sync.ready"
 	TypeReceiptDelivered    = "receipt.delivered"
 	TypeReceiptRead         = "receipt.read"
+	TypeReceiptPlayed       = "receipt.played"
+	TypeReceiptPlayedAck    = "receipt.played.ack"
 	TypePresenceSubscribe   = "presence.subscribe"
 	TypePresenceUnsubscribe = "presence.unsubscribe"
 	TypePresenceGet         = "presence.get"
@@ -69,6 +71,12 @@ type DeliveryReceiptPayload struct {
 }
 
 type ReadReceiptPayload struct {
+	ChatID          string `json:"chatId"`
+	MessageSenderID string `json:"messageSenderId"`
+	ClientMsgID     string `json:"clientMsgId"`
+}
+
+type PlayedReceiptPayload struct {
 	ChatID          string `json:"chatId"`
 	MessageSenderID string `json:"messageSenderId"`
 	ClientMsgID     string `json:"clientMsgId"`

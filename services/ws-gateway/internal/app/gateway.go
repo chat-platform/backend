@@ -242,3 +242,13 @@ func (g *Gateway) MarkRead(ctx context.Context, identity domain.Identity, receip
 	}
 	return nil
 }
+
+func (g *Gateway) MarkPlayed(ctx context.Context, identity domain.Identity, receipt wsframe.PlayedReceiptPayload) error {
+	if receipt.ChatID == "" || receipt.MessageSenderID == "" || receipt.ClientMsgID == "" {
+		return domain.ErrInvalidMessage
+	}
+	if err := g.messages.MarkPlayed(ctx, identity.DeviceID, identity.UserID, receipt.ChatID, receipt.MessageSenderID, receipt.ClientMsgID); err != nil {
+		return fmt.Errorf("record played receipt: %w", err)
+	}
+	return nil
+}
