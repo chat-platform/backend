@@ -21,6 +21,7 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 		t.Setenv("RELAY_CLAIM_LEASE", "")
 		t.Setenv("RELAY_RETRY_INTERVAL", "")
 		t.Setenv("RELAY_RETRY_BATCH_SIZE", "")
+		t.Setenv("METRICS_ADDR", "")
 		cfg, err := FromEnv(logger)
 		if err != nil {
 			t.Fatal(err)
@@ -39,6 +40,9 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 		}
 		if cfg.Retry.Interval != 10*time.Second || cfg.Retry.BatchSize != 100 {
 			t.Fatalf("Retry=%+v, want 10s and 100", cfg.Retry)
+		}
+		if cfg.MetricsAddr != "127.0.0.1:9093" {
+			t.Fatalf("MetricsAddr=%q, want 127.0.0.1:9093", cfg.MetricsAddr)
 		}
 	})
 
@@ -77,6 +81,17 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 		}
 		if cfg.Retry.Interval != 15*time.Second || cfg.Retry.BatchSize != 35 {
 			t.Fatalf("Retry=%+v, want 15s and 35", cfg.Retry)
+		}
+	})
+
+	t.Run("accepts metrics address override", func(t *testing.T) {
+		t.Setenv("METRICS_ADDR", "127.0.0.1:19093")
+		cfg, err := FromEnv(logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MetricsAddr != "127.0.0.1:19093" {
+			t.Fatalf("MetricsAddr=%q, want 127.0.0.1:19093", cfg.MetricsAddr)
 		}
 	})
 }

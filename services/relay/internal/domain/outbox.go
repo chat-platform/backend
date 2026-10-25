@@ -11,6 +11,17 @@ type OutboxEvent struct {
 	ClaimExpiry time.Time
 }
 
+type OutboxSnapshot struct {
+	OutboxType              string
+	PendingRows             int64
+	OldestPendingAgeSeconds float64
+	RetryPendingRows        int64
+	RetryOldestAgeSeconds   float64
+	RetryExhaustedRows      int64
+	Overdue500msRows        int64
+	Overdue1sRows           int64
+}
+
 type Connection struct {
 	NodeID string
 	ConnID string

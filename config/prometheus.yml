@@ -8,3 +8,9 @@ scrape_configs:
       - targets: ["message-service:9092"]
         labels:
           service: message-service
+
+  - job_name: relay
+    static_configs:
+      - targets: ["relay:9093"]
+        labels:
+          service: relay

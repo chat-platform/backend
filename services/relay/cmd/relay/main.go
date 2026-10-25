@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,7 +14,9 @@ import (
 	redisadapter "github.com/chat-platform/backend/services/relay/internal/adapter/outbound/redis"
 	"github.com/chat-platform/backend/services/relay/internal/app"
 	"github.com/chat-platform/backend/services/relay/internal/config"
+	relaymetrics "github.com/chat-platform/backend/services/relay/internal/metrics"
 	"github.com/chat-platform/backend/shared/pkg/logging"
+	sharedmetrics "github.com/chat-platform/backend/shared/pkg/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -45,12 +48,34 @@ func main() {
 		fatal(ctx, logger, "ping redis", err)
 	}
 	outboxRepository := postgresadapter.NewOutboxRepository(pool)
+	registry, err := sharedmetrics.NewRegistry()
+	if err != nil {
+		fatal(ctx, logger, "create metrics registry", err)
+	}
+	outboxMetrics, err := relaymetrics.NewOutboxMetrics(registry)
+	if err != nil {
+		fatal(ctx, logger, "register outbox metrics", err)
+	}
+	metricsServer, err := sharedmetrics.Start(cfg.MetricsAddr, registry)
+	if err != nil {
+		logger.Error(ctx, "metrics listener failed to start", "address", cfg.MetricsAddr, "error", err)
+		os.Exit(1)
+	}
+	go func() {
+		if err := <-metricsServer.Done(); ctx.Err() == nil {
+			if err == nil {
+				err = errors.New("metrics listener stopped unexpectedly")
+			}
+			logger.Error(context.Background(), "metrics server failed", "address", cfg.MetricsAddr, "error", err)
+			stop()
+		}
+	}()
 	dispatcher := app.New(outboxRepository, redisadapter.NewRegistry(rc), redisadapter.NewPublisher(rc), app.OutboxOptions{
 		BatchSize: cfg.Outbox.BatchSize, RetryBatchSize: cfg.Retry.BatchSize, ClaimLease: cfg.Outbox.ClaimLease,
 	}, logger.With("component", "dispatcher"))
-	logger.Info(ctx, "relay started", "workers", cfg.Workers.Count, "batch_size", cfg.Outbox.BatchSize, "poll_interval", cfg.Workers.PollInterval.String(), "claim_lease", cfg.Outbox.ClaimLease.String())
+	logger.Info(ctx, "relay started", "workers", cfg.Workers.Count, "batch_size", cfg.Outbox.BatchSize, "poll_interval", cfg.Workers.PollInterval.String(), "claim_lease", cfg.Outbox.ClaimLease.String(), "metrics_address", cfg.MetricsAddr)
 	var workers sync.WaitGroup
-	workers.Add(cfg.Workers.Count + 2)
+	workers.Add(cfg.Workers.Count + 3)
 	go func() {
 		defer workers.Done()
 		runCleanupWorker(ctx, outboxRepository, logger.With("component", "outbox_cleanup"))
@@ -59,6 +84,10 @@ func main() {
 		defer workers.Done()
 		runRetryWorker(ctx, cfg.Retry.Interval, dispatcher, logger.With("component", "retry"))
 	}()
+	go func() {
+		defer workers.Done()
+		relaymetrics.RunOutboxSampler(ctx, relaymetrics.DefaultSnapshotInterval, relaymetrics.DefaultSnapshotTimeout, outboxRepository, outboxMetrics, logger.With("component", "outbox_metrics"))
+	}()
 	for workerID := 1; workerID <= cfg.Workers.Count; workerID++ {
 		go func(id int) {
 			defer workers.Done()
@@ -66,8 +95,13 @@ func main() {
 		}(workerID)
 	}
 	<-ctx.Done()
-	logger.Info(context.Background(), "relay stopping", "workers", cfg.Workers.Count)
+	logger.Info(context.Background(), "relay stopping", "workers", cfg.Workers.Count, "metrics_address", cfg.MetricsAddr)
 	workers.Wait()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error(context.Background(), "metrics server shutdown failed", "address", cfg.MetricsAddr, "error", err)
+	}
+	cancel()
 	logger.Info(context.Background(), "relay stopped")
 }
 
