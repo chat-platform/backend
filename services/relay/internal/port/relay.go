@@ -13,6 +13,11 @@ type OutboxRepository interface {
 	MarkRetryAttempt(context.Context, string, int64, time.Time) error
 	ReleaseRetryClaim(context.Context, string, int64, time.Time, time.Duration) error
 }
+
+type OutboxSnapshotter interface {
+	Snapshot(context.Context) ([]domain.OutboxSnapshot, error)
+}
+
 type ConnectionRegistry interface {
 	Lookup(context.Context, string) (domain.Connection, bool, error)
 }

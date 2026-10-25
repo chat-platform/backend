@@ -3,18 +3,55 @@ package main
 import (
 	"context"
 	"io"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	relaymetrics "github.com/chat-platform/backend/services/relay/internal/metrics"
 	"github.com/chat-platform/backend/shared/pkg/logging"
+	sharedmetrics "github.com/chat-platform/backend/shared/pkg/metrics"
 )
 
 type blockingDispatcher struct {
 	active  atomic.Int32
 	max     atomic.Int32
 	started chan struct{}
+}
+
+func TestRelayMetricsListenerBindsAndShutsDown(t *testing.T) {
+	registry, err := sharedmetrics.NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := relaymetrics.NewOutboxMetrics(registry); err != nil {
+		t.Fatal(err)
+	}
+	server, err := sharedmetrics.Start("127.0.0.1:0", registry)
+	if err != nil {
+		t.Fatalf("start Relay metrics listener: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown Relay metrics listener: %v", err)
+	}
+}
+
+func TestRelayMetricsListenerReturnsBindFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	registry, err := sharedmetrics.NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sharedmetrics.Start(listener.Addr().String(), registry); err == nil {
+		t.Fatal("metrics listener started on an occupied address")
+	}
 }
 
 func (d *blockingDispatcher) RunOnce(ctx context.Context) (int, error) {

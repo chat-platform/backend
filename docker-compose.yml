@@ -86,6 +86,8 @@ services:
     depends_on:
       message-service:
         condition: service_started
+      relay:
+        condition: service_started
 
   core-api:
     build:
@@ -150,6 +152,7 @@ services:
       POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
       REDIS_ADDR: redis:6379
       RELAY_POLL_INTERVAL: 250ms
+      METRICS_ADDR: :9093
       RELAY_BATCH_SIZE: 100
       RELAY_WORKERS: 2
       RELAY_CLAIM_LEASE: 30s

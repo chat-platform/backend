@@ -13,6 +13,80 @@ import (
 type OutboxRepository struct{ pool *pgxpool.Pool }
 
 func NewOutboxRepository(pool *pgxpool.Pool) *OutboxRepository { return &OutboxRepository{pool: pool} }
+
+func (r *OutboxRepository) Snapshot(ctx context.Context) ([]domain.OutboxSnapshot, error) {
+	const query = `
+WITH sample_time AS (
+	SELECT statement_timestamp() AS at
+), direct AS (
+	SELECT
+		count(*) FILTER (WHERE outbox.dispatched_at IS NULL) AS pending_rows,
+		COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (sample_time.at - (
+			SELECT pending.created_at FROM direct_outbox AS pending
+			WHERE pending.dispatched_at IS NULL ORDER BY pending.id LIMIT 1
+		)))), 0)::double precision AS oldest_pending_age_seconds,
+		count(*) FILTER (WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count < 10) AS retry_pending_rows,
+		COALESCE(MAX(GREATEST(0, EXTRACT(EPOCH FROM (sample_time.at - outbox.dispatched_at)))) FILTER (
+			WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count < 10
+		), 0)::double precision AS retry_oldest_age_seconds,
+		count(*) FILTER (WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count >= 10) AS retry_exhausted_rows,
+		count(*) FILTER (WHERE outbox.event_type = 'NEW_MESSAGE' AND outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.created_at <= sample_time.at - interval '500 milliseconds') AS overdue_500ms_rows,
+		count(*) FILTER (WHERE outbox.event_type = 'NEW_MESSAGE' AND outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.created_at <= sample_time.at - interval '1 second') AS overdue_1s_rows
+	FROM direct_outbox AS outbox CROSS JOIN sample_time
+), grouped AS (
+	SELECT
+		count(*) FILTER (WHERE outbox.dispatched_at IS NULL) AS pending_rows,
+		COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (sample_time.at - (
+			SELECT pending.created_at FROM group_outbox AS pending
+			WHERE pending.dispatched_at IS NULL ORDER BY pending.id LIMIT 1
+		)))), 0)::double precision AS oldest_pending_age_seconds,
+		count(*) FILTER (WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count < 10) AS retry_pending_rows,
+		COALESCE(MAX(GREATEST(0, EXTRACT(EPOCH FROM (sample_time.at - outbox.dispatched_at)))) FILTER (
+			WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count < 10
+		), 0)::double precision AS retry_oldest_age_seconds,
+		count(*) FILTER (WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count >= 10) AS retry_exhausted_rows,
+		count(*) FILTER (WHERE event.event_type = 'NEW_MESSAGE' AND outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.created_at <= sample_time.at - interval '500 milliseconds') AS overdue_500ms_rows,
+		count(*) FILTER (WHERE event.event_type = 'NEW_MESSAGE' AND outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.created_at <= sample_time.at - interval '1 second') AS overdue_1s_rows
+	FROM group_outbox AS outbox
+	JOIN group_event AS event ON event.event_id = outbox.event_id
+	CROSS JOIN sample_time
+)
+SELECT 'direct', pending_rows, oldest_pending_age_seconds, retry_pending_rows, retry_oldest_age_seconds, retry_exhausted_rows, overdue_500ms_rows, overdue_1s_rows FROM direct
+UNION ALL
+SELECT 'group', pending_rows, oldest_pending_age_seconds, retry_pending_rows, retry_oldest_age_seconds, retry_exhausted_rows, overdue_500ms_rows, overdue_1s_rows FROM grouped`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query outbox metrics snapshot: %w", err)
+	}
+	defer rows.Close()
+
+	snapshots := make([]domain.OutboxSnapshot, 0, 2)
+	for rows.Next() {
+		var snapshot domain.OutboxSnapshot
+		if err := rows.Scan(
+			&snapshot.OutboxType,
+			&snapshot.PendingRows,
+			&snapshot.OldestPendingAgeSeconds,
+			&snapshot.RetryPendingRows,
+			&snapshot.RetryOldestAgeSeconds,
+			&snapshot.RetryExhaustedRows,
+			&snapshot.Overdue500msRows,
+			&snapshot.Overdue1sRows,
+		); err != nil {
+			return nil, fmt.Errorf("scan outbox metrics snapshot: %w", err)
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read outbox metrics snapshot: %w", err)
+	}
+	if len(snapshots) != 2 {
+		return nil, fmt.Errorf("outbox metrics snapshot returned %d rows, want 2", len(snapshots))
+	}
+	return snapshots, nil
+}
+
 func (r *OutboxRepository) ClaimBatch(ctx context.Context, outboxType string, batchSize int, lease time.Duration) ([]domain.OutboxEvent, error) {
 	if batchSize <= 0 {
 		return nil, nil

@@ -13,6 +13,7 @@ import (
 type Config struct {
 	PostgresDSN string
 	RedisAddr   string
+	MetricsAddr string
 	Workers     WorkerSettings
 	Outbox      OutboxSettings
 	Retry       RetrySettings
@@ -85,6 +86,7 @@ func FromEnv(logger logging.Logger) (Config, error) {
 	return Config{
 		PostgresDSN: getenv(logger, "POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"),
 		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"),
+		MetricsAddr: getenv(logger, "METRICS_ADDR", "127.0.0.1:9093"),
 		Workers:     WorkerSettings{Count: workers, PollInterval: poll},
 		Outbox:      OutboxSettings{BatchSize: batch, ClaimLease: lease},
 		Retry:       RetrySettings{Interval: retryInterval, BatchSize: retryBatch},

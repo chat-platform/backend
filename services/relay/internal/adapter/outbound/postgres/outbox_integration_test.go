@@ -118,6 +118,95 @@ func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
 	}
 }
 
+func TestSnapshotReportsEmptyAndPopulatedDirectAndGroupOutboxes(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+
+	snapshots, err := repo.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byType := snapshotsByType(t, snapshots)
+	for _, outboxType := range []string{"direct", "group"} {
+		if snapshot := byType[outboxType]; snapshot.PendingRows != 0 || snapshot.RetryPendingRows != 0 || snapshot.RetryExhaustedRows != 0 || snapshot.Overdue500msRows != 0 || snapshot.Overdue1sRows != 0 || snapshot.OldestPendingAgeSeconds != 0 || snapshot.RetryOldestAgeSeconds != 0 {
+			t.Fatalf("empty %s snapshot=%+v", outboxType, snapshot)
+		}
+	}
+
+	firstPending := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "lowest id")
+	secondPending := insertEvent(t, pool, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "older timestamp")
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET created_at=now()-interval '5 seconds' WHERE id=$1;
+		UPDATE direct_outbox SET created_at=now()-interval '50 seconds' WHERE id=$2`, firstPending, secondPending); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(device_id,event_type,payload,created_at,routed_to,dispatched_at,attempt_count) VALUES
+		('cccccccc-cccc-4ccc-8ccc-cccccccccccc','NEW_MESSAGE','eligible',now()-interval '2 seconds','WS',now()-interval '4 seconds',1),
+		('dddddddd-dddd-4ddd-8ddd-dddddddddddd','NEW_MESSAGE','recent',now()-interval '800 milliseconds','WS',now()-interval '1 second',1),
+		('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee','NEW_MESSAGE','exhausted',now()-interval '3 seconds','WS',now()-interval '3 seconds',10),
+		('ffffffff-ffff-4fff-8fff-ffffffffffff','DELIVERY_RECEIPT','receipt',now()-interval '10 seconds','WS',now()-interval '1 second',1)`); err != nil {
+		t.Fatal(err)
+	}
+	var newEventID, receiptEventID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO group_event(event_type,payload) VALUES ('NEW_MESSAGE','group message') RETURNING event_id`).Scan(&newEventID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO group_event(event_type,payload) VALUES ('DELIVERY_RECEIPT','group receipt') RETURNING event_id`).Scan(&receiptEventID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(event_id,device_id,created_at,routed_to,dispatched_at,attempt_count) VALUES
+		($1,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',now()-interval '2 seconds','WS',now()-interval '3 seconds',1),
+		($2,'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',now()-interval '10 seconds','WS',now()-interval '10 seconds',1)`, newEventID, receiptEventID); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshots, err = repo.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byType = snapshotsByType(t, snapshots)
+	direct := byType["direct"]
+	if direct.PendingRows != 2 {
+		t.Fatalf("direct pending rows=%d, want 2", direct.PendingRows)
+	}
+	if direct.OldestPendingAgeSeconds < 3 || direct.OldestPendingAgeSeconds > 10 {
+		t.Fatalf("direct lowest-ID pending age=%v, want approximately 5s rather than the later row's 50s", direct.OldestPendingAgeSeconds)
+	}
+	if direct.RetryPendingRows != 3 || direct.RetryExhaustedRows != 1 {
+		t.Fatalf("direct retry counts=(pending %d, exhausted %d), want (3,1)", direct.RetryPendingRows, direct.RetryExhaustedRows)
+	}
+	if direct.RetryOldestAgeSeconds < 3 || direct.RetryOldestAgeSeconds > 6 {
+		t.Fatalf("direct oldest retry age=%v, want approximately 4s", direct.RetryOldestAgeSeconds)
+	}
+	if direct.Overdue500msRows != 3 || direct.Overdue1sRows != 2 {
+		t.Fatalf("direct overdue counts=(500ms %d, 1s %d), want (3,2); receipt rows must be excluded", direct.Overdue500msRows, direct.Overdue1sRows)
+	}
+	group := byType["group"]
+	if group.PendingRows != 0 || group.RetryPendingRows != 2 || group.Overdue500msRows != 1 || group.Overdue1sRows != 1 {
+		t.Fatalf("group snapshot=%+v, want no undispatched rows, two retry rows, and only the message overdue", group)
+	}
+}
+
+func snapshotsByType(t *testing.T, snapshots []domain.OutboxSnapshot) map[string]domain.OutboxSnapshot {
+	t.Helper()
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshot count=%d, want 2", len(snapshots))
+	}
+	result := make(map[string]domain.OutboxSnapshot, len(snapshots))
+	for _, snapshot := range snapshots {
+		if _, exists := result[snapshot.OutboxType]; exists {
+			t.Fatalf("duplicate snapshot for %s", snapshot.OutboxType)
+		}
+		result[snapshot.OutboxType] = snapshot
+	}
+	if _, ok := result["direct"]; !ok {
+		t.Fatal("missing direct snapshot")
+	}
+	if _, ok := result["group"]; !ok {
+		t.Fatal("missing group snapshot")
+	}
+	return result
+}
+
 func TestRetryClaimsDirectAndGroupExclusively(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
