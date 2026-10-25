@@ -1,6 +1,7 @@
 package httpadapter
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -11,11 +12,11 @@ func (s *Server) authMiddleware() echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			token, ok := bearerToken(c.Request())
 			if !ok {
-				return writeError(c, http.StatusUnauthorized, "unauthorized", "valid bearer token required")
+				return s.writeExpectedError(c, "request authentication rejected", errors.New("missing or malformed bearer authorization"), http.StatusUnauthorized, "unauthorized", "valid bearer token required")
 			}
 			claims, err := s.service.Authenticate(c.Request().Context(), token)
 			if err != nil {
-				return writeServiceError(c, err)
+				return s.writeServiceError(c, err)
 			}
 			c.SetRequest(c.Request().WithContext(contextWithClaims(c.Request(), claims)))
 			return next(c)
@@ -28,11 +29,11 @@ func (s *Server) logoutAuth() echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			token, ok := bearerToken(c.Request())
 			if !ok {
-				return writeError(c, http.StatusUnauthorized, "unauthorized", "valid bearer token required")
+				return s.writeExpectedError(c, "request authentication rejected", errors.New("missing or malformed bearer authorization"), http.StatusUnauthorized, "unauthorized", "valid bearer token required")
 			}
 			claims, err := s.service.VerifyToken(token)
 			if err != nil {
-				return writeServiceError(c, err)
+				return s.writeServiceError(c, err)
 			}
 			c.SetRequest(c.Request().WithContext(contextWithClaims(c.Request(), claims)))
 			return next(c)

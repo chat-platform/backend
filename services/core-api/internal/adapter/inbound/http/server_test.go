@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chat-platform/backend/services/core-api/internal/app"
+	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/chat-platform/backend/shared/pkg/sessiontoken"
 )
 
@@ -31,6 +33,14 @@ type sessionRepoStub struct {
 	clearedDevice    string
 	peerLookupUser   string
 	peerLookupChat   string
+}
+
+func testLogger() logging.Logger {
+	logger, err := logging.New(io.Discard, logging.Config{Level: "debug", Format: "json"})
+	if err != nil {
+		panic(err)
+	}
+	return logger
 }
 
 func (r *sessionRepoStub) CompleteOTP(context.Context, string, string, string, string, string, time.Time) (app.User, app.Device, app.Session, error) {
@@ -147,7 +157,7 @@ func TestValidateSessionChecksPostgresOnCacheMissAndReturnsClaims(t *testing.T) 
 	request := httptest.NewRequest(http.MethodPost, "/internal/v1/session/validate", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
-	New(service).ServeHTTP(recorder, request)
+	New(service, testLogger()).ServeHTTP(recorder, request)
 	response := recorder.Result()
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -176,7 +186,7 @@ func TestLogoutDoesNotRequireRedisAuthentication(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", strings.NewReader(""))
 	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
-	New(service).ServeHTTP(recorder, request)
+	New(service, testLogger()).ServeHTTP(recorder, request)
 	response := recorder.Result()
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNoContent || !repo.revoked || cache.statusCalls != 0 || !cache.revokeCalled {
@@ -194,7 +204,7 @@ func TestSyncRequiresBearerAndUsesAuthenticatedDevice(t *testing.T) {
 	}
 	repo := &sessionRepoStub{active: true, events: []app.SyncEvent{{OutboxID: 12, EventType: "NEW_MESSAGE", Payload: json.RawMessage(`{"chatId":"chat"}`)}}}
 	service := app.New(repo, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }})
-	server := New(service)
+	server := New(service, testLogger())
 	unauthorized := httptest.NewRecorder()
 	server.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/v1/sync", nil))
 	if unauthorized.Code != http.StatusUnauthorized {
@@ -229,7 +239,7 @@ func TestDirectChatPeerRequiresAuthenticationAndReturnsPeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := &sessionRepoStub{active: true}
-	server := New(app.New(repo, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }}))
+	server := New(app.New(repo, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }}), testLogger())
 	unauthorized := httptest.NewRecorder()
 	server.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/v1/chats/direct/123e4567-e89b-12d3-a456-426614174000/peer", nil))
 	if unauthorized.Code != http.StatusUnauthorized {
@@ -253,7 +263,7 @@ func TestSyncRejectsInvalidQuery(t *testing.T) {
 	secret := []byte("a sufficiently long test signing secret 123456")
 	claims := sessiontoken.Claims{SessionID: "sid", UserID: "user", DeviceID: "device-a", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
 	token, _ := sessiontoken.Sign(claims, secret)
-	server := New(app.New(&sessionRepoStub{active: true}, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }}))
+	server := New(app.New(&sessionRepoStub{active: true}, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }}), testLogger())
 	for _, path := range []string{"/v1/sync?since_direct=-1", "/v1/sync?since_direct=nope", "/v1/sync?since_group=-1", "/v1/sync?limit=0"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer "+token)
@@ -274,7 +284,7 @@ func TestPushTokenLifecycleUsesAuthenticatedDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := &sessionRepoStub{active: true}
-	server := New(app.New(repo, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }}))
+	server := New(app.New(repo, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: secret, Now: func() time.Time { return now }}), testLogger())
 	for _, value := range []string{"token-old", "token-new"} {
 		request := httptest.NewRequest(http.MethodPut, "/v1/devices/push-token", strings.NewReader(`{"token":"`+value+`"}`))
 		request.Header.Set("Authorization", "Bearer "+token)

@@ -55,26 +55,43 @@ func decode(c echo.Context, target any) error {
 	return nil
 }
 
-func writeInvalidRequest(c echo.Context, err error) error {
-	c.Logger().Errorf("invalid request body: %v", err)
-	return writeError(c, http.StatusBadRequest, "invalid_request", "request body is invalid")
+func (s *Server) writeInvalidRequest(c echo.Context, err error) error {
+	return s.writeExpectedError(c, "invalid request", err, http.StatusBadRequest, "invalid_request", "request body is invalid")
 }
 
-func writeServiceError(c echo.Context, err error) error {
+func (s *Server) writeExpectedError(c echo.Context, message string, cause error, status int, code, response string) error {
+	s.logRequestError(c, message, cause, status, true)
+	return writeError(c, status, code, response)
+}
+
+func (s *Server) writeServiceError(c echo.Context, err error) error {
+	statusCode, code, message, debug := http.StatusInternalServerError, "internal_error", "request could not be completed", false
 	switch {
 	case errors.Is(err, app.ErrInvalidRequest):
-		return writeError(c, http.StatusBadRequest, "invalid_request", "request is invalid")
+		statusCode, code, message, debug = http.StatusBadRequest, "invalid_request", "request is invalid", true
 	case errors.Is(err, app.ErrUnauthorized):
-		return writeError(c, http.StatusUnauthorized, "unauthorized", "authentication failed")
+		statusCode, code, message, debug = http.StatusUnauthorized, "unauthorized", "authentication failed", true
 	case errors.Is(err, app.ErrForbidden):
-		return writeError(c, http.StatusForbidden, "forbidden", "operation is not allowed")
+		statusCode, code, message, debug = http.StatusForbidden, "forbidden", "operation is not allowed", true
 	case errors.Is(err, app.ErrConflict):
-		return writeError(c, http.StatusConflict, "conflict", "operation conflicts with current group state")
+		statusCode, code, message, debug = http.StatusConflict, "conflict", "operation conflicts with current group state", true
 	case errors.Is(err, app.ErrNotFound):
-		return writeError(c, http.StatusNotFound, "not_found", "resource was not found")
+		statusCode, code, message, debug = http.StatusNotFound, "not_found", "resource was not found", true
 	case errors.Is(err, app.ErrUnavailable):
-		return writeError(c, http.StatusServiceUnavailable, "unavailable", "a required service is unavailable")
-	default:
-		return writeError(c, http.StatusInternalServerError, "internal_error", "request could not be completed")
+		statusCode, code, message = http.StatusServiceUnavailable, "unavailable", "a required service is unavailable"
+	}
+	s.logRequestError(c, "request failed", err, statusCode, debug)
+	return writeError(c, statusCode, code, message)
+}
+
+func (s *Server) logRequestError(c echo.Context, message string, err error, status int, debug bool) {
+	if s.logger == nil {
+		return
+	}
+	attrs := []any{"operation", c.Path(), "method", c.Request().Method, "status", status, "error", err}
+	if debug {
+		s.logger.Debug(c.Request().Context(), message, attrs...)
+	} else {
+		s.logger.Error(c.Request().Context(), message, attrs...)
 	}
 }

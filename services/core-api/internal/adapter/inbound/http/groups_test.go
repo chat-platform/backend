@@ -66,7 +66,7 @@ func groupTestServer(repo *groupHTTPRepo) (*Server, string) {
 	claims := sessiontoken.Claims{SessionID: "sid", UserID: groupTestUser, DeviceID: "device", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
 	token, _ := sessiontoken.Sign(claims, []byte(groupTestSecret))
 	service := app.New(repo, &sessionCacheStub{status: sessiontoken.StatusActive}, app.Config{Secret: []byte(groupTestSecret), Now: func() time.Time { return now }})
-	return New(service), token
+	return New(service, testLogger()), token
 }
 
 func callGroupAPI(server *Server, token, method, path, body string) *httptest.ResponseRecorder {

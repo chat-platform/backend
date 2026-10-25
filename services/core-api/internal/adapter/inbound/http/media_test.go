@@ -47,7 +47,7 @@ func mediaTestServer(t *testing.T, media app.MediaSigner) (*Server, string) {
 	service := app.NewWithMedia(repo, &sessionCacheStub{status: sessiontoken.StatusActive}, media, app.Config{
 		Secret: secret, MediaURLTTL: 5 * time.Minute, Now: func() time.Time { return now },
 	})
-	server := New(service)
+	server := New(service, testLogger())
 	claims := sessiontoken.Claims{SessionID: "sid", UserID: "user", DeviceID: "device", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
 	token, err := sessiontoken.Sign(claims, secret)
 	if err != nil {

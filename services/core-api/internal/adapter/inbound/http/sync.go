@@ -22,17 +22,20 @@ func (s *Server) syncEvents(c echo.Context) error {
 	}
 	directCursor, err := parseCursor("since_direct")
 	if err != nil {
-		return writeError(c, http.StatusBadRequest, "invalid_request", "since_direct must be a non-negative integer")
+		return s.writeExpectedError(c, "invalid sync cursor", err, http.StatusBadRequest, "invalid_request", "since_direct must be a non-negative integer")
 	}
 	groupCursor, err := parseCursor("since_group")
 	if err != nil {
-		return writeError(c, http.StatusBadRequest, "invalid_request", "since_group must be a non-negative integer")
+		return s.writeExpectedError(c, "invalid sync cursor", err, http.StatusBadRequest, "invalid_request", "since_group must be a non-negative integer")
 	}
 	limit := 100
 	if raw := query.Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 {
-			return writeError(c, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
+			if err == nil {
+				err = strconv.ErrSyntax
+			}
+			return s.writeExpectedError(c, "invalid sync limit", err, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
 		}
 		limit = parsed
 		if limit > 500 {
@@ -41,7 +44,7 @@ func (s *Server) syncEvents(c echo.Context) error {
 	}
 	page, err := s.service.Sync(c.Request().Context(), claimsFrom(c.Request()), directCursor, groupCursor, limit)
 	if err != nil {
-		return writeServiceError(c, err)
+		return s.writeServiceError(c, err)
 	}
 	return writeJSON(c, http.StatusOK, page)
 }
