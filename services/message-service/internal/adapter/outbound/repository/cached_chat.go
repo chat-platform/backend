@@ -108,7 +108,7 @@ func (r *CachedChatRepository) EnqueueGroupMessageEvent(ctx context.Context, mes
 	return r.store.EnqueueGroupMessageEvent(ctx, message)
 }
 
-func (r *CachedChatRepository) MarkDelivered(ctx context.Context, receipt domain.Receipt) error {
+func (r *CachedChatRepository) MarkDelivered(ctx context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {
 	return r.store.MarkDelivered(ctx, receipt)
 }
 

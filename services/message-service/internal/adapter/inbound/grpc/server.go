@@ -3,9 +3,11 @@ package grpcserver
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/bufbuild/protovalidate-go"
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
+	servicemetrics "github.com/chat-platform/backend/services/message-service/internal/metrics"
 	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/google/uuid"
@@ -16,7 +18,7 @@ import (
 
 type ChatOperations interface {
 	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
-	MarkDelivered(context.Context, domain.Receipt) error
+	MarkDelivered(context.Context, domain.Receipt) (domain.DeliveryAck, error)
 	MarkRead(context.Context, domain.Receipt) error
 	MarkPlayed(context.Context, domain.Receipt) error
 }
@@ -26,18 +28,24 @@ type Server struct {
 	operations ChatOperations
 	validator  protovalidate.Validator
 	logger     logging.Logger
+	metrics    *servicemetrics.Metrics
 }
 
-func Register(server *grpc.Server, operations ChatOperations, validator protovalidate.Validator, logger logging.Logger) {
-	messagev1.RegisterMessageServiceServer(server, &Server{operations: operations, validator: validator, logger: logger})
+func Register(server *grpc.Server, operations ChatOperations, validator protovalidate.Validator, logger logging.Logger, metrics *servicemetrics.Metrics) {
+	messagev1.RegisterMessageServiceServer(server, &Server{operations: operations, validator: validator, logger: logger, metrics: metrics})
 }
 
 func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessageRequest) (*messagev1.SendMessageAck, error) {
+	started := time.Now()
+	result := servicemetrics.SendError
+	defer func() { s.metrics.ObserveSend(result, time.Since(started)) }()
 	if request == nil {
+		result = servicemetrics.SendRejected
 		s.logger.Warn(ctx, "message send request is missing")
 		return nil, status.Error(codes.InvalidArgument, "request is required")
 	}
 	if err := s.validator.Validate(request); err != nil {
+		result = servicemetrics.SendRejected
 		s.logger.Warn(ctx, "message send request failed validation", "error", err,
 			"sender_id", request.GetSenderId(), "chat_id", request.GetChatId(),
 			"client_msg_id", request.GetClientMsgId())
@@ -45,6 +53,7 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 	}
 	clientMsgID, err := uuid.Parse(request.GetClientMsgId()) // validated as UUIDv7 above
 	if err != nil {
+		result = servicemetrics.SendRejected
 		s.logger.Warn(ctx, "validated client message ID could not be parsed", "error", err,
 			"client_msg_id", request.GetClientMsgId(), "chat_id", request.GetChatId(),
 			"sender_id", request.GetSenderId())
@@ -56,16 +65,19 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidMessage) {
+			result = servicemetrics.SendRejected
 			s.logger.Warn(ctx, "message send rejected as invalid", "chat_id", request.GetChatId(),
 				"sender_id", request.GetSenderId(), "client_msg_id", request.GetClientMsgId())
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 		if errors.Is(err, domain.ErrChatAccessDenied) {
+			result = servicemetrics.SendRejected
 			s.logger.Warn(ctx, "message send rejected because sender lacks chat access",
 				"chat_id", request.GetChatId(), "sender_id", request.GetSenderId())
 			return nil, status.Error(codes.PermissionDenied, err.Error())
 		}
 		if errors.Is(err, domain.ErrNoRecipients) {
+			result = servicemetrics.SendRejected
 			s.logger.Warn(ctx, "message send rejected because chat has no recipient devices",
 				"chat_id", request.GetChatId(), "sender_id", request.GetSenderId())
 			return nil, status.Error(codes.FailedPrecondition, err.Error())
@@ -78,6 +90,7 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 		)
 		return nil, status.Error(codes.Internal, "could not persist message")
 	}
+	result = servicemetrics.SendAccepted
 	s.logger.Info(ctx, "message durably accepted",
 		"chat_id", request.GetChatId(), "sender_id", request.GetSenderId(),
 		"device_id", request.GetDeviceId(), "client_msg_id", ack.ClientMsgID,
@@ -92,12 +105,16 @@ func (s *Server) MarkDelivered(ctx context.Context, request *messagev1.MarkDeliv
 	if err := s.validator.Validate(request); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	if err := s.operations.MarkDelivered(ctx, domain.Receipt{DeviceID: request.GetDeviceId(), ReceiptSenderID: request.GetReceiptSenderId(), ChatID: request.GetChatId(), MessageSenderID: request.GetMessageSenderId(), ClientMsgID: request.GetClientMsgId(), OutboxType: request.GetOutboxType(), OutboxID: request.GetOutboxId()}); err != nil {
+	ack, err := s.operations.MarkDelivered(ctx, domain.Receipt{DeviceID: request.GetDeviceId(), ReceiptSenderID: request.GetReceiptSenderId(), ChatID: request.GetChatId(), MessageSenderID: request.GetMessageSenderId(), ClientMsgID: request.GetClientMsgId(), OutboxType: request.GetOutboxType(), OutboxID: request.GetOutboxId()})
+	if err != nil {
 		if errors.Is(err, domain.ErrInvalidMessage) {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 		s.logger.Error(ctx, "could not mark outbox event delivered", "device_id", request.GetDeviceId(), "outbox_id", request.GetOutboxId(), "error", err)
 		return nil, status.Error(codes.Internal, "could not mark event delivered")
+	}
+	if ack.FirstTransition && ack.EventType == "NEW_MESSAGE" && ack.RoutedTo == "WS" {
+		s.metrics.ObserveDeliveryAck(ack.OutboxType, ack.Latency)
 	}
 	return &messagev1.MarkDeliveredResponse{}, nil
 }

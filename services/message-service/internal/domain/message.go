@@ -1,6 +1,9 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 var (
 	ErrInvalidMessage   = errors.New("invalid message")
@@ -29,6 +32,16 @@ type Receipt struct {
 	ClientMsgID     string
 	OutboxType      string
 	OutboxID        int64
+}
+
+// DeliveryAck describes the first successful delivered_at transition for an
+// outbox row. It is internal metadata and does not alter the gRPC response.
+type DeliveryAck struct {
+	FirstTransition bool
+	EventType       string
+	OutboxType      string
+	RoutedTo        string
+	Latency         time.Duration
 }
 
 type RecipientDevice struct {

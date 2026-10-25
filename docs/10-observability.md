@@ -1,70 +1,49 @@
 # 10 — Observability
 
-How we know the system is healthy, and how we detect when it isn't.
+Observability provides aggregate signals for system health and operational diagnosis. Service responsibilities and metric boundaries follow the architecture in [Detailed Design](07-detailed-design.md) and [Reliability](08-reliability.md).
 
-## 1. Signals
+## Signals and responsibilities
 
-- **Metrics** — counters, gauges, histograms. For dashboards and alerts.
-- **Logs** — structured, per-service. For debugging.
-- **Traces** — not instrumented. At message-send volume, the cost (span
-  collection, storage, per-service overhead) isn't justified. Rely on
-  metrics + logs; enable tracing temporarily when investigating an
-  incident.
+- **Metrics** describe rates, latency distributions, active work, and failures across service boundaries. They support capacity and reliability analysis, but do not replace durable application state.
+- **Structured logs** explain individual operations and failures. They carry safe correlation identifiers so an event can be followed across services.
+- **Tracing** is not a default signal. Metrics and logs are the primary diagnostic tools; tracing may be enabled when cross-service timing is needed.
 
-## 2. Core Metrics
+Each service owns metrics for work it performs. A central Prometheus-compatible collector scrapes service metrics endpoints. Metrics endpoints are internal observability interfaces, separate from user-facing APIs. Collection of database- or queue-derived gauges is periodic so scrapes remain independent of dependency latency. A sample reports its success and last-success time; on collection failure, cached values remain available but are visibly stale rather than appearing as fresh zeroes.
 
-| Metric | Source | Why | Interpretation |
-|---|---|---|---|
-| Message send rate | Message Service | Load baseline | Drops signal outage; spikes signal surge |
-| Delivery latency (p50/p95/p99) | Outbox dispatch time | User-visible performance | Wide p50–p99 gap signals a slow subset (device, region) |
-| Relay lag (oldest undispatched) | Relay | Is dispatch keeping up? | Rising = Relay can't keep up; flat = healthy |
-| Retry lag (oldest dispatched-but-undelivered WS row) | Retry scan | Are lost messages being redelivered? | Rising = messages stuck; correctness signal |
-| WS connections (per node, total) | WS Gateway | Capacity and churn | Per-node for capacity; total for churn |
-| Sync rate and latency | Core API | Reconnect load | Spike after an incident = mass reconnect |
-| Redis op latency | All Redis clients | Registry/stream health | Rising = Redis under pressure |
-| Postgres write latency | Message Service | Durable store health | Rising = write path degradation |
+## Metrics and interpretation
 
-## 3. SLOs
+Counters distinguish request attempts from successful state transitions and provider calls. Histograms record a single well-defined latency boundary. Gauges describe current state or sampled backlog; they do not imply that work completed successfully.
 
-From `03-scale-estimation.md`:
+| Service | Signals | Purpose and interpretation |
+|---|---|---|
+| Core API | HTTP request count and duration by bounded operation, method, and status class | Measures API load and response latency, including sync activity. Route templates, not concrete URLs, define operations. |
+| Message Service | Send attempts and durable send latency; first delivery acknowledgement latency | Send latency runs from the send RPC boundary to durable acknowledgement readiness. Replayed idempotent sends are additional attempts. Acknowledgement latency measures event-created-to-first-device-ack for eligible WS-routed message rows. |
+| Relay | Outbox pending rows and age; dispatch wait; WS retry backlog, retry age and exhaustion; dispatch and retry outcomes and processing latency | Separates queued work from Relay processing. Pending age follows Relay's lowest-ID processing order and may differ from the row with the earliest creation timestamp. Retry age starts at dispatch and measures time awaiting retry, not end-to-end delivery latency. |
+| WS Gateway | Active connections, delivery handling outcomes, and socket write outcomes | Separates Redis-entry handling and Hub acceptance from actual socket writes. Hub acceptance may represent buffering; neither acceptance nor a successful write is a client acknowledgement. |
+| Notification Service | Stream unread lag, pending entries, oldest unresolved age, snapshot health, and push-provider attempts and outcomes | Describes queue pressure and provider behavior. Provider attempts count actual calls; coalescing multiple hints into one call remains one attempt. |
 
-- Message delivery latency: <500 ms normal, <1 s peak.
-- API response latency: <200 ms.
+### Latency boundaries
 
-## 4. Alerts
+Three message timings answer different questions:
 
-Symptom-based, not cause-based:
+1. **Durable send latency** measures how long Message Service takes to make a send durably accepted.
+2. **Outbox dispatch wait** measures event creation to first successful dispatch. Pending age describes the oldest row in Relay's processing order.
+3. **Acknowledged delivery latency** measures event creation to the first client acknowledgement for a recipient-device row initially routed to a live WS path. It includes queue wait, retries, and client receipt delay.
 
-- **Relay lag** (oldest undispatched row) > threshold for X min — dispatch is falling behind.
-- **Retry lag** (oldest dispatched-but-undelivered WS row) > threshold for Y min — lost messages aren't being redelivered. Correctness signal, not just latency.
-- **Delivery latency p99** > SLO for 5 min.
-- **WS connection count** drops > X% in 5 min.
-- **Postgres/Redis error rate** > threshold.
+The acknowledgement cohort excludes offline and notification routes, whose acknowledgements may arrive much later through synchronization. Duplicate acknowledgements do not add observations. The timestamp origin is event creation before transaction commit, so this is not an exact commit-to-ack measurement and may include pre-commit time or clock skew.
 
-TBD: Thresholds — tune after load testing.
+There is a route-classification race: Relay can publish before the route is durably recorded. A very fast acknowledgement may arrive before the row is classified as WS-routed and therefore be omitted. This is an accepted limitation of the approximate acknowledged-latency distribution.
 
-## 5. Correlation
+## Delivery SLO limitations
 
-Every log line and metric carries identifiers that tie it to the
-client's action:
+The acknowledged-latency histogram contains acknowledged rows only. Messages that remain unacknowledged are absent, so the histogram has survivorship bias. A sampled overdue-unacknowledged count provides useful backlog context, but is only a point-in-time gauge. Neither signal alone, nor their combination, provides a delivery SLO compliance percentage.
 
-- `clientMsgId` — at message send.
-- **Outbox row id** — for any outbox event (dispatch, delivery, retry).
-  Qualify with the table: `direct_outbox.id` or `group_outbox.id`.
-- `device_id` — the target device.
-- `chat_id` — the chat, when relevant.
+Accurate compliance requires an eligible-message denominator and explicit outcome accounting over the same measurement window, including messages that never receive acknowledgements and a defined treatment for messages still within the deadline. Until those semantics are defined, the <500 ms normal / <1 s peak targets for the online-at-first-WS-route cohort are latency goals, not a measurable compliance percentage. Offline synchronization remains outside this latency cohort.
 
-This lets one client action (send) be tied to its server-side events
-(dispatch, delivery, retry) by searching for the same id. Without a
-shared key, correlating across services is guesswork.
+## Sampling and cardinality
 
-Note: `device_id` and `chat_id` are useful for logs, but as metric
-labels they're high-cardinality — avoid them there. Metrics should use
-coarse labels (`service`, `operation`, `region`), not per-entity ones.
+Outbox and notification queue sizes and ages are sampled because computing them on every scrape would couple metrics collection to database or Redis work. Samples are bounded and non-overlapping. A failed or unknown sample is distinct from an empty queue: preserve the last known values, mark collection unhealthy, and expose sample freshness. This makes stale observations diagnosable without putting dependency queries on request paths.
 
-## Open:
+Metric labels are limited to service, bounded operation templates, outbox type, and small outcome or result enums. Do not label by user, device, chat, message, connection, outbox ID, token, raw URL, payload, or error text. Such values create unbounded cardinality and belong, when safe, in structured logs.
 
-- Distributed tracing: not enabled (cost/scale). Revisit if debugging requires it.
-- Log aggregation: provider-managed; service logs are structured.
-- Retry scan is a correctness mechanism, not just a latency optimization. 
-  Its lag metric (§2, §4) needs alerting, not just dashboarding.
+Logs should avoid duplicate reports of the same failure across layers. The layer with operation and protocol context records the failure once; lower layers return contextual errors. Safe correlation fields such as client message ID, outbox table and row ID, device ID, or chat ID can connect an operation across services without becoming metric labels. Never log request bodies, OTPs, credentials, push tokens, or signed URLs.

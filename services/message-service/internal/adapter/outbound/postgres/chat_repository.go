@@ -241,45 +241,55 @@ func (r *ChatRepository) findExistingMessageAck(
 	}, nil
 }
 
-func (r *ChatRepository) MarkDelivered(ctx context.Context, receipt domain.Receipt) error {
+func (r *ChatRepository) MarkDelivered(ctx context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {
 	table, eventJoin, err := receiptOutboxQueryParts(receipt.OutboxType)
 	if err != nil {
-		return domain.ErrInvalidMessage
+		return domain.DeliveryAck{}, domain.ErrInvalidMessage
 	}
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf("begin delivery receipt transaction: %w", err)
+		return domain.DeliveryAck{}, fmt.Errorf("begin delivery receipt transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 	var eventType string
 	var alreadyDelivered bool
-	query := fmt.Sprintf(`SELECT %s, outbox.delivered_at IS NOT NULL
+	var routedTo string
+	query := fmt.Sprintf(`SELECT %s, outbox.delivered_at IS NOT NULL, COALESCE(outbox.routed_to, '')
 		FROM %s AS outbox %s WHERE outbox.id=$1 AND outbox.device_id=$2
 		FOR UPDATE OF outbox`, receiptTypeExpr(receipt.OutboxType), table, eventJoin)
-	err = tx.QueryRow(ctx, query, receipt.OutboxID, receipt.DeviceID).Scan(&eventType, &alreadyDelivered)
+	err = tx.QueryRow(ctx, query, receipt.OutboxID, receipt.DeviceID).Scan(&eventType, &alreadyDelivered, &routedTo)
 	missingSource := errors.Is(err, pgx.ErrNoRows)
 	if err != nil && !missingSource {
-		return fmt.Errorf("load delivered event: %w", err)
+		return domain.DeliveryAck{}, fmt.Errorf("load delivered event: %w", err)
 	}
 	if !missingSource && alreadyDelivered {
-		return nil
+		return domain.DeliveryAck{EventType: eventType, OutboxType: receipt.OutboxType, RoutedTo: routedTo}, nil
 	}
+	var latencySeconds float64
 	if !missingSource {
-		if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s SET delivered_at=now() WHERE id=$1 AND device_id=$2`, table), receipt.OutboxID, receipt.DeviceID); err != nil {
-			return fmt.Errorf("mark %s outbox event delivered: %w", receipt.OutboxType, err)
+		update := fmt.Sprintf(`UPDATE %s SET delivered_at=now() WHERE id=$1 AND device_id=$2
+			RETURNING GREATEST(0, EXTRACT(EPOCH FROM (delivered_at - created_at)))`, table)
+		if err := tx.QueryRow(ctx, update, receipt.OutboxID, receipt.DeviceID).Scan(&latencySeconds); err != nil {
+			return domain.DeliveryAck{}, fmt.Errorf("mark %s outbox event delivered: %w", receipt.OutboxType, err)
 		}
 	}
 	// Receipt status events are acknowledged through this same operation. Do
 	// not turn those acknowledgements into a nested delivered receipt.
 	if missingSource || eventType == "NEW_MESSAGE" {
 		if err := enqueueReceipt(ctx, tx, receipt, "delivered"); err != nil {
-			return err
+			return domain.DeliveryAck{}, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit delivery receipt transaction: %w", err)
+		return domain.DeliveryAck{}, fmt.Errorf("commit delivery receipt transaction: %w", err)
 	}
-	return nil
+	if missingSource {
+		return domain.DeliveryAck{}, nil
+	}
+	return domain.DeliveryAck{
+		FirstTransition: true, EventType: eventType, OutboxType: receipt.OutboxType,
+		RoutedTo: routedTo, Latency: time.Duration(latencySeconds * float64(time.Second)),
+	}, nil
 }
 
 func (r *ChatRepository) MarkRead(ctx context.Context, receipt domain.Receipt) error {

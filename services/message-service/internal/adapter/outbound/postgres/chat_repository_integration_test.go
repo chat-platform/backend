@@ -48,9 +48,9 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 	if _, err := pool.Exec(ctx, `CREATE TABLE users (user_id UUID PRIMARY KEY);
 	CREATE TABLE chat (chat_id UUID PRIMARY KEY, type TEXT NOT NULL, deleted_at TIMESTAMPTZ);
 	CREATE TABLE device (device_id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(user_id), revoked_at TIMESTAMPTZ);
-	CREATE TABLE direct_outbox (id BIGINT PRIMARY KEY, chat_id UUID REFERENCES chat(chat_id), sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL, recipient_id UUID NOT NULL REFERENCES users(user_id), device_id UUID NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL, delivered_at TIMESTAMPTZ);
+	CREATE TABLE direct_outbox (id BIGINT PRIMARY KEY, chat_id UUID REFERENCES chat(chat_id), sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL, recipient_id UUID NOT NULL REFERENCES users(user_id), device_id UUID NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), routed_to TEXT, delivered_at TIMESTAMPTZ);
 	CREATE TABLE group_event (event_id BIGINT PRIMARY KEY, chat_id UUID NOT NULL REFERENCES chat(chat_id), sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL);
-	CREATE TABLE group_outbox (id BIGINT PRIMARY KEY, event_id BIGINT NOT NULL, recipient_id UUID NOT NULL, device_id UUID NOT NULL, delivered_at TIMESTAMPTZ);
+	CREATE TABLE group_outbox (id BIGINT PRIMARY KEY, event_id BIGINT NOT NULL, recipient_id UUID NOT NULL, device_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), routed_to TEXT, delivered_at TIMESTAMPTZ);
 	CREATE TABLE chat_membership (chat_id UUID NOT NULL, user_id UUID NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
@@ -62,9 +62,9 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 	INSERT INTO device(device_id,user_id) VALUES ($1,$4),('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',$2),('cccccccc-cccc-4ccc-8ccc-cccccccccccc',$2);
 	INSERT INTO chat(chat_id,type) VALUES ('33333333-3333-4333-8333-333333333333','DIRECT'),('44444444-4444-4444-8444-444444444444','GROUP');
 	INSERT INTO chat_membership(chat_id,user_id) VALUES ('33333333-3333-4333-8333-333333333333',$2),('33333333-3333-4333-8333-333333333333',$4),('44444444-4444-4444-8444-444444444444',$2),('44444444-4444-4444-8444-444444444444',$4);
-	INSERT INTO direct_outbox(id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload) VALUES (7,$2,$3,$4,$1,'NEW_MESSAGE','{"chatId":"33333333-3333-4333-8333-333333333333","senderId":"11111111-1111-4111-8111-111111111111","clientMsgId":"0199d628-39d0-7000-8000-000000000001","content":"hi","ts":1}');
+	INSERT INTO direct_outbox(id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload,created_at,routed_to) VALUES (7,$2,$3,$4,$1,'NEW_MESSAGE','{"chatId":"33333333-3333-4333-8333-333333333333","senderId":"11111111-1111-4111-8111-111111111111","clientMsgId":"0199d628-39d0-7000-8000-000000000001","content":"hi","ts":1}',now()-interval '250 milliseconds','WS');
 	INSERT INTO group_event VALUES (8,'44444444-4444-4444-8444-444444444444',$2,$3,'NEW_MESSAGE','{"chatId":"44444444-4444-4444-8444-444444444444","senderId":"11111111-1111-4111-8111-111111111111","clientMsgId":"0199d628-39d0-7000-8000-000000000001","content":"hi","ts":1}');
-	INSERT INTO group_outbox(id,event_id,recipient_id,device_id) VALUES (7,8,$4,$1)`, device, sender, clientMsg, reader); err != nil {
+	INSERT INTO group_outbox(id,event_id,recipient_id,device_id,created_at,routed_to) VALUES (7,8,$4,$1,now()-interval '250 milliseconds','WS')`, device, sender, clientMsg, reader); err != nil {
 		t.Fatal(err)
 	}
 	logger, err := logging.New(io.Discard, logging.Config{})
@@ -72,33 +72,49 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := NewChatRepository(pool, logger)
-	if err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ReceiptSenderID: reader, ChatID: "33333333-3333-4333-8333-333333333333", MessageSenderID: sender, ClientMsgID: "delivery-client-forwarded", OutboxType: "direct", OutboxID: 7}); err != nil {
+	if _, err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ReceiptSenderID: reader, ChatID: "33333333-3333-4333-8333-333333333333", MessageSenderID: sender, ClientMsgID: "delivery-client-forwarded", OutboxType: "direct", OutboxID: 7}); err != nil {
 		t.Fatalf("missing device-scoped source should still forward: %v", err)
 	}
 	var delivered bool
 	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM direct_outbox WHERE id=7`).Scan(&delivered); err != nil || delivered {
 		t.Fatalf("wrong-device receipt changed row: delivered=(%v,%v)", delivered, err)
 	}
-	if err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: device, ReceiptSenderID: reader, ChatID: "44444444-4444-4444-8444-444444444444", MessageSenderID: sender, ClientMsgID: "delivery-client-forwarded", OutboxType: "direct", OutboxID: 7}); err != nil {
+	directAck, err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: device, ReceiptSenderID: reader, ChatID: "44444444-4444-4444-8444-444444444444", MessageSenderID: sender, ClientMsgID: "delivery-client-forwarded", OutboxType: "direct", OutboxID: 7})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: device, ReceiptSenderID: reader, ChatID: "33333333-3333-4333-8333-333333333333", MessageSenderID: sender, ClientMsgID: clientMsg, OutboxType: "direct", OutboxID: 7}); err != nil {
+	if !directAck.FirstTransition || directAck.EventType != "NEW_MESSAGE" || directAck.OutboxType != "direct" || directAck.RoutedTo != "WS" || directAck.Latency <= 0 {
+		t.Fatalf("direct first-transition metadata=%+v", directAck)
+	}
+	duplicateDirect, err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: device, ReceiptSenderID: reader, ChatID: "33333333-3333-4333-8333-333333333333", MessageSenderID: sender, ClientMsgID: clientMsg, OutboxType: "direct", OutboxID: 7})
+	if err != nil {
 		t.Fatalf("duplicate receipt should be idempotent: %v", err)
+	}
+	if duplicateDirect.FirstTransition {
+		t.Fatalf("duplicate direct receipt reported first transition: %+v", duplicateDirect)
 	}
 	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM direct_outbox WHERE id=7`).Scan(&delivered); err != nil || !delivered {
 		t.Fatalf("delivered=(%v,%v), want true", delivered, err)
 	}
-	if err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ReceiptSenderID: reader, ChatID: "44444444-4444-4444-8444-444444444444", MessageSenderID: sender, ClientMsgID: clientMsg, OutboxType: "group", OutboxID: 7}); err != nil {
+	if _, err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ReceiptSenderID: reader, ChatID: "44444444-4444-4444-8444-444444444444", MessageSenderID: sender, ClientMsgID: clientMsg, OutboxType: "group", OutboxID: 7}); err != nil {
 		t.Fatalf("missing device-scoped group source should still forward: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM group_outbox WHERE id=7`).Scan(&delivered); err != nil || delivered {
 		t.Fatalf("wrong-device group receipt changed row: delivered=(%v,%v)", delivered, err)
 	}
-	if err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: device, ReceiptSenderID: reader, ChatID: "44444444-4444-4444-8444-444444444444", MessageSenderID: sender, ClientMsgID: clientMsg, OutboxType: "group", OutboxID: 7}); err != nil {
+	groupAck, err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: device, ReceiptSenderID: reader, ChatID: "44444444-4444-4444-8444-444444444444", MessageSenderID: sender, ClientMsgID: clientMsg, OutboxType: "group", OutboxID: 7})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: device, ReceiptSenderID: reader, ChatID: "44444444-4444-4444-8444-444444444444", MessageSenderID: sender, ClientMsgID: clientMsg, OutboxType: "group", OutboxID: 7}); err != nil {
+	if !groupAck.FirstTransition || groupAck.EventType != "NEW_MESSAGE" || groupAck.OutboxType != "group" || groupAck.RoutedTo != "WS" || groupAck.Latency <= 0 {
+		t.Fatalf("group first-transition metadata=%+v", groupAck)
+	}
+	duplicateGroup, err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: device, ReceiptSenderID: reader, ChatID: "44444444-4444-4444-8444-444444444444", MessageSenderID: sender, ClientMsgID: clientMsg, OutboxType: "group", OutboxID: 7})
+	if err != nil {
 		t.Fatalf("duplicate group receipt should be idempotent: %v", err)
+	}
+	if duplicateGroup.FirstTransition {
+		t.Fatalf("duplicate group receipt reported first transition: %+v", duplicateGroup)
 	}
 	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM group_outbox WHERE id=7`).Scan(&delivered); err != nil || !delivered {
 		t.Fatalf("group delivered=(%v,%v), want true", delivered, err)
@@ -126,7 +142,7 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT id,device_id::text FROM direct_outbox WHERE event_type='RECEIPT' AND payload::jsonb->>'receiptType'='delivered' LIMIT 1`).Scan(&receiptOutboxID, &receiptDeviceID); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: receiptDeviceID, ReceiptSenderID: sender, ChatID: deliveredStatus["chatId"], MessageSenderID: sender, ClientMsgID: deliveredStatus["clientMsgId"], OutboxType: "direct", OutboxID: receiptOutboxID}); err != nil {
+	if _, err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: receiptDeviceID, ReceiptSenderID: sender, ChatID: deliveredStatus["chatId"], MessageSenderID: sender, ClientMsgID: deliveredStatus["clientMsgId"], OutboxType: "direct", OutboxID: receiptOutboxID}); err != nil {
 		t.Fatalf("ack receipt status event: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE event_type='RECEIPT'`).Scan(&receipts); err != nil || receipts != 8 {

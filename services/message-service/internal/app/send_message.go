@@ -53,9 +53,9 @@ func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMes
 	}
 }
 
-func (s *ChatOperations) MarkDelivered(ctx context.Context, receipt domain.Receipt) error {
+func (s *ChatOperations) MarkDelivered(ctx context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {
 	if receipt.DeviceID == "" || receipt.ReceiptSenderID == "" || (receipt.OutboxType != "direct" && receipt.OutboxType != "group") || receipt.OutboxID <= 0 || receipt.ChatID == "" || receipt.MessageSenderID == "" || receipt.ClientMsgID == "" {
-		return domain.ErrInvalidMessage
+		return domain.DeliveryAck{}, domain.ErrInvalidMessage
 	}
 	return s.chatRepository.MarkDelivered(ctx, receipt)
 }
