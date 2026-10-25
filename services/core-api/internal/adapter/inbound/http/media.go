@@ -14,11 +14,11 @@ func (s *Server) createMediaUpload(c echo.Context) error {
 		ContentType string            `json:"contentType" validate:"required,max=255"`
 	}
 	if err := decode(c, &body); err != nil {
-		return writeInvalidRequest(c, err)
+		return s.writeInvalidRequest(c, err)
 	}
 	result, err := s.service.CreateMediaUpload(c.Request().Context(), body.Category, body.Size, body.ContentType)
 	if err != nil {
-		return writeServiceError(c, err)
+		return s.writeServiceError(c, err)
 	}
 	return writeJSON(c, http.StatusOK, result)
 }
@@ -26,7 +26,7 @@ func (s *Server) createMediaUpload(c echo.Context) error {
 func (s *Server) createMediaDownload(c echo.Context) error {
 	result, err := s.service.CreateMediaDownload(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return writeServiceError(c, err)
+		return s.writeServiceError(c, err)
 	}
 	return writeJSON(c, http.StatusOK, result)
 }

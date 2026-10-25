@@ -4,15 +4,17 @@ import (
 	"net/http"
 
 	"github.com/chat-platform/backend/services/core-api/internal/app"
+	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/labstack/echo/v4"
 )
 
 type Server struct {
 	service *app.Service
 	echo    *echo.Echo
+	logger  logging.Logger
 }
 
-func New(service *app.Service) *Server {
+func New(service *app.Service, logger logging.Logger) *Server {
 	const (
 		GET    = http.MethodGet
 		HEAD   = http.MethodHead
@@ -29,6 +31,7 @@ func New(service *app.Service) *Server {
 	s := &Server{
 		service: service,
 		echo:    e,
+		logger:  logger,
 	}
 
 	e.Add(POST, "/v1/auth/otp/request", s.requestOTP)

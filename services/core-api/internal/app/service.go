@@ -160,7 +160,7 @@ func (s *Service) CreateMediaUpload(ctx context.Context, category MediaCategory,
 	objectKey := "media/" + mediaID
 	uploadURL, headers, err := s.media.SignUpload(ctx, objectKey, contentType, size, s.cfg.MediaURLTTL)
 	if err != nil {
-		return MediaUpload{}, fmt.Errorf("sign media upload: %v: %w", err, ErrUnavailable)
+		return MediaUpload{}, fmt.Errorf("sign media upload: %w: %w", err, ErrUnavailable)
 	}
 	return MediaUpload{MediaID: mediaID, UploadURL: uploadURL, Method: "PUT", Headers: headers, ExpiresAt: s.cfg.Now().Add(s.cfg.MediaURLTTL).Unix()}, nil
 }
@@ -175,7 +175,7 @@ func (s *Service) CreateMediaDownload(ctx context.Context, mediaID string) (Medi
 	}
 	downloadURL, err := s.media.SignDownload(ctx, "media/"+parsedID.String(), s.cfg.MediaURLTTL)
 	if err != nil {
-		return MediaDownload{}, fmt.Errorf("sign media download: %v: %w", err, ErrUnavailable)
+		return MediaDownload{}, fmt.Errorf("sign media download: %w: %w", err, ErrUnavailable)
 	}
 	return MediaDownload{DownloadURL: downloadURL, ExpiresAt: s.cfg.Now().Add(s.cfg.MediaURLTTL).Unix()}, nil
 }
