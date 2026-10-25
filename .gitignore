@@ -33,6 +33,7 @@ profile.cov
 # Temporary
 temp/
 .local/
+/data/
 
 # log files
 *.log
