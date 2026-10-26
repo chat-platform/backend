@@ -253,6 +253,30 @@ func TestCreateAndManageGroupMembershipTransactionally(t *testing.T) {
 	}
 }
 
+func TestListGroupChatsIncludesMemberDisplayNames(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	creator, member := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone,display_name) VALUES($1,'+15552220001','Rae'),($2,'+15552220002','Abdu')`, creator, member); err != nil {
+		t.Fatal(err)
+	}
+	groupID, err := repo.CreateGroup(ctx, creator, "friends", []string{member})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chats, err := repo.ListGroupChats(ctx, member)
+	if err != nil || len(chats) != 1 || chats[0].ID != groupID || len(chats[0].Members) != 2 {
+		t.Fatalf("groups=%+v error=%v", chats, err)
+	}
+	names := map[string]string{}
+	for _, groupMember := range chats[0].Members {
+		names[groupMember.UserID] = groupMember.DisplayName
+	}
+	if names[creator] != "Rae" || names[member] != "Abdu" {
+		t.Fatalf("member display names=%v", names)
+	}
+}
+
 func TestGroupCreationRejectsMissingUserWithoutPartialRows(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
