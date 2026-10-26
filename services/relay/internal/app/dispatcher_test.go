@@ -23,6 +23,7 @@ type testOutbox struct {
 	markErr      error
 	retryMarkErr error
 	releaseErr   error
+	exhausted    map[string]bool
 }
 
 func (o *testOutbox) ClaimBatch(_ context.Context, outboxType string, _ int, _ time.Duration) ([]domain.OutboxEvent, error) {
@@ -57,12 +58,12 @@ func (o *testOutbox) MarkDispatched(_ context.Context, outboxType string, id int
 	o.marked[fmt.Sprintf("%s:%d", outboxType, id)] = route
 	return 100 * time.Millisecond, nil
 }
-func (o *testOutbox) MarkRetryAttempt(_ context.Context, outboxType string, id int64, _ time.Time) error {
+func (o *testOutbox) MarkRetryAttempt(_ context.Context, outboxType string, id int64, _ time.Time) (bool, error) {
 	if o.retryMarkErr != nil {
-		return o.retryMarkErr
+		return false, o.retryMarkErr
 	}
 	o.retried = append(o.retried, fmt.Sprintf("%s:%d", outboxType, id))
-	return nil
+	return o.exhausted[fmt.Sprintf("%s:%d", outboxType, id)], nil
 }
 func (o *testOutbox) ReleaseRetryClaim(context.Context, string, int64, time.Time, time.Duration) error {
 	return o.releaseErr
@@ -218,6 +219,29 @@ func TestRetryOncePublishesDirectAndGroupAndMarksAttempts(t *testing.T) {
 	}
 }
 
+func TestRetryExhaustionMetricCountsOnlyNewTransitions(t *testing.T) {
+	registry := newMetricsRegistry(t)
+	metrics, err := relaymetrics.NewDispatchMetrics(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := time.Now().Add(time.Minute)
+	outbox := &testOutbox{
+		retryEvents: []domain.OutboxEvent{
+			{ID: 41, OutboxType: "direct", DeviceID: "online", ClaimExpiry: lease},
+			{ID: 42, OutboxType: "group", DeviceID: "online", ClaimExpiry: lease},
+			{ID: 43, OutboxType: "direct", DeviceID: "online", ClaimExpiry: lease},
+		},
+		exhausted: map[string]bool{"direct:41": true, "group:42": true},
+	}
+	d := New(outbox, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}, &testPublisher{}, OutboxOptions{RetryBatchSize: 10}, quietLogger(t), metrics)
+	if count, err := d.RetryOnce(context.Background()); err != nil || count != 3 {
+		t.Fatalf("RetryOnce()=(%d,%v), want (3,nil)", count, err)
+	}
+	assertCounterByOutboxType(t, registry, "relay_retry_exhaustions_total", "direct", 1)
+	assertCounterByOutboxType(t, registry, "relay_retry_exhaustions_total", "group", 1)
+}
+
 func TestDispatchMetricsRecordEachRouteAndFailureOnce(t *testing.T) {
 	registry := newMetricsRegistry(t)
 	metrics, err := relaymetrics.NewDispatchMetrics(registry)
@@ -332,6 +356,7 @@ func TestRetryMetricsRecordPublishedDeferredAndErrorsOnce(t *testing.T) {
 			}
 			assertCounter(t, r, "relay_retry_events_total", "direct", tc.outcome, 1)
 			assertHistogram(t, r, "relay_retry_event_duration_seconds", map[string]string{"outbox_type": "direct", "outcome": tc.outcome}, 1)
+			assertCounterByOutboxType(t, r, "relay_retry_exhaustions_total", "direct", 0)
 		})
 	}
 }
@@ -369,6 +394,33 @@ func assertCounter(t *testing.T, registry *prometheus.Registry, name, outboxType
 		}
 	}
 	t.Fatalf("counter %s{%s,%s} not found", name, outboxType, outcome)
+}
+
+func assertCounterByOutboxType(t *testing.T, registry *prometheus.Registry, name, outboxType string, want float64) {
+	t.Helper()
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, pair := range metric.GetLabel() {
+				if pair.GetName() == "outbox_type" && pair.GetValue() == outboxType {
+					if got := metric.GetCounter().GetValue(); got != want {
+						t.Fatalf("%s{outbox_type=%q}=%v, want %v", name, outboxType, got, want)
+					}
+					return
+				}
+			}
+		}
+	}
+	if want == 0 {
+		return
+	}
+	t.Fatalf("counter %s{outbox_type=%q} not found", name, outboxType)
 }
 
 func assertHistogram(t *testing.T, registry *prometheus.Registry, name string, labels map[string]string, want uint64) {

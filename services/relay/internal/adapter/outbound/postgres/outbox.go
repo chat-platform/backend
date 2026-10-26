@@ -258,19 +258,20 @@ func (r *OutboxRepository) ClaimRetryBatch(ctx context.Context, outboxType strin
 	return events, nil
 }
 
-func (r *OutboxRepository) MarkRetryAttempt(ctx context.Context, outboxType string, id int64, claimExpiry time.Time) error {
+func (r *OutboxRepository) MarkRetryAttempt(ctx context.Context, outboxType string, id int64, claimExpiry time.Time) (bool, error) {
 	table, err := outboxTable(outboxType)
 	if err != nil {
-		return err
+		return false, err
 	}
-	result, err := r.pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET attempt_count=attempt_count+1, dispatched_at=now(), claim_expiry=NULL WHERE id=$1 AND claim_expiry=$2 AND delivered_at IS NULL AND attempt_count < 10`, table), id, claimExpiry)
+	var exhausted bool
+	err = r.pool.QueryRow(ctx, fmt.Sprintf(`UPDATE %s SET attempt_count=attempt_count+1, dispatched_at=now(), claim_expiry=NULL WHERE id=$1 AND claim_expiry=$2 AND delivered_at IS NULL AND attempt_count < 10 RETURNING attempt_count = 10`, table), id, claimExpiry).Scan(&exhausted)
 	if err != nil {
-		return fmt.Errorf("mark %s retry attempt: %w", outboxType, err)
+		if err == pgx.ErrNoRows {
+			return false, fmt.Errorf("%s retry row %d lost its claim or reached attempt limit", outboxType, id)
+		}
+		return false, fmt.Errorf("mark %s retry attempt: %w", outboxType, err)
 	}
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("%s retry row %d lost its claim or reached attempt limit", outboxType, id)
-	}
-	return nil
+	return exhausted, nil
 }
 
 func (r *OutboxRepository) ReleaseRetryClaim(ctx context.Context, outboxType string, id int64, claimExpiry time.Time, delay time.Duration) error {

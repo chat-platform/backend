@@ -151,8 +151,12 @@ func (d *Dispatcher) retryEvent(ctx context.Context, outboxType string, event do
 		}
 		return relaymetrics.RetryOfflineDeferred, false, nil
 	}
-	if err := d.outbox.MarkRetryAttempt(ctx, outboxType, event.ID, event.ClaimExpiry); err != nil {
+	exhausted, err := d.outbox.MarkRetryAttempt(ctx, outboxType, event.ID, event.ClaimExpiry)
+	if err != nil {
 		return relaymetrics.RetryMarkAttemptError, false, err
+	}
+	if exhausted {
+		d.metrics.RecordRetryExhaustion(outboxType)
 	}
 	if err := d.publisher.Publish(ctx, connection, event); err != nil {
 		return relaymetrics.RetryPublishError, false, fmt.Errorf("publish retry outbox %d: %w", event.ID, err)

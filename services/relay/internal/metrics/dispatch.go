@@ -29,6 +29,7 @@ type DispatchMetrics struct {
 	dispatchEvents   *prometheus.CounterVec
 	dispatchDuration *prometheus.HistogramVec
 	retryEvents      *prometheus.CounterVec
+	retryExhaustions *prometheus.CounterVec
 	retryDuration    *prometheus.HistogramVec
 	dispatchWait     *prometheus.HistogramVec
 }
@@ -44,6 +45,9 @@ func NewDispatchMetrics(registry prometheus.Registerer) (*DispatchMetrics, error
 		retryEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "relay_retry_events_total", Help: "Outbox retry candidate processing attempts by outcome.",
 		}, []string{"outbox_type", "outcome"}),
+		retryExhaustions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "relay_retry_exhaustions_total", Help: "Outbox retry rows that newly transitioned into the exhausted state.",
+		}, []string{"outbox_type"}),
 		retryDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "relay_retry_event_duration_seconds", Help: "Relay processing time per retry candidate.", Buckets: sharedmetrics.DefaultBuckets(),
 		}, []string{"outbox_type", "outcome"}),
@@ -51,7 +55,7 @@ func NewDispatchMetrics(registry prometheus.Registerer) (*DispatchMetrics, error
 			Name: "outbox_dispatch_wait_seconds", Help: "Event-created-to-first-successful-dispatch wait.", Buckets: sharedmetrics.DefaultBuckets(),
 		}, []string{"outbox_type", "outcome"}),
 	}
-	for _, collector := range []prometheus.Collector{m.dispatchEvents, m.dispatchDuration, m.retryEvents, m.retryDuration, m.dispatchWait} {
+	for _, collector := range []prometheus.Collector{m.dispatchEvents, m.dispatchDuration, m.retryEvents, m.retryExhaustions, m.retryDuration, m.dispatchWait} {
 		if err := registry.Register(collector); err != nil {
 			return nil, fmt.Errorf("register Relay dispatch metrics: %w", err)
 		}
@@ -79,4 +83,10 @@ func (m *DispatchMetrics) RecordRetry(outboxType, outcome string, duration time.
 	}
 	m.retryEvents.WithLabelValues(outboxType, outcome).Inc()
 	m.retryDuration.WithLabelValues(outboxType, outcome).Observe(duration.Seconds())
+}
+
+func (m *DispatchMetrics) RecordRetryExhaustion(outboxType string) {
+	if m != nil {
+		m.retryExhaustions.WithLabelValues(outboxType).Inc()
+	}
 }

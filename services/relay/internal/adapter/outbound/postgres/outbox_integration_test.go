@@ -100,8 +100,10 @@ func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].ID != id {
 		t.Fatalf("first retry claim=(%+v,%v)", events, err)
 	}
-	if err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
+	if exhausted, err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
 		t.Fatal(err)
+	} else if exhausted {
+		t.Fatal("ordinary retry attempt reported exhaustion")
 	}
 	var attempts int
 	var dispatched time.Time
@@ -118,8 +120,10 @@ func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
 	if err != nil || len(events) != 1 {
 		t.Fatalf("second retry should be eligible after maximum jittered delay: events=%+v err=%v", events, err)
 	}
-	if err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
+	if exhausted, err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
 		t.Fatal(err)
+	} else if exhausted {
+		t.Fatal("ordinary retry attempt reported exhaustion")
 	}
 	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET attempt_count=10, dispatched_at=now()-interval '1 day', claim_expiry=NULL WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
@@ -127,6 +131,54 @@ func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
 	events, err = repo.ClaimRetryBatch(ctx, "direct", 10, time.Minute)
 	if err != nil || len(events) != 0 {
 		t.Fatalf("exhausted retry claim=(%+v,%v), want none", events, err)
+	}
+}
+
+func TestMarkRetryAttemptReportsExhaustionExactlyOnce(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	device := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	lease := time.Now().UTC().Truncate(time.Microsecond)
+	directID := insertEvent(t, pool, device, "direct transition")
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS',dispatched_at=now()-interval '1 day',attempt_count=9,claim_expiry=$2 WHERE id=$1`, directID, lease); err != nil {
+		t.Fatal(err)
+	}
+	var eventID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO group_event(payload) VALUES ('group transition') RETURNING event_id`).Scan(&eventID); err != nil {
+		t.Fatal(err)
+	}
+	var groupID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO group_outbox(event_id,device_id,routed_to,dispatched_at,attempt_count,claim_expiry)
+		VALUES ($1,$2,'WS',now()-interval '1 day',9,$3) RETURNING id`, eventID, device, lease).Scan(&groupID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, row := range []struct {
+		outboxType string
+		id         int64
+	}{
+		{outboxType: "direct", id: directID},
+		{outboxType: "group", id: groupID},
+	} {
+		exhausted, err := repo.MarkRetryAttempt(ctx, row.outboxType, row.id, lease)
+		if err != nil || !exhausted {
+			t.Fatalf("MarkRetryAttempt(%s)=(%v,%v), want transition", row.outboxType, exhausted, err)
+		}
+		exhausted, err = repo.MarkRetryAttempt(ctx, row.outboxType, row.id, lease)
+		if err == nil || exhausted {
+			t.Fatalf("repeated MarkRetryAttempt(%s)=(%v,%v), want stale-claim error without transition", row.outboxType, exhausted, err)
+		}
+	}
+
+	var directAttempts, groupAttempts int
+	if err := pool.QueryRow(ctx, `SELECT attempt_count FROM direct_outbox WHERE id=$1`, directID).Scan(&directAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT attempt_count FROM group_outbox WHERE id=$1`, groupID).Scan(&groupAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if directAttempts != 10 || groupAttempts != 10 {
+		t.Fatalf("attempt counts=(direct %d, group %d), want 10 for both", directAttempts, groupAttempts)
 	}
 }
 
