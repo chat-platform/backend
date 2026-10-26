@@ -49,6 +49,9 @@ func (r *sessionRepoStub) CompleteOTP(context.Context, string, string, string, s
 func (r *sessionRepoStub) GetProfile(context.Context, string) (app.User, error) {
 	return app.User{}, nil
 }
+func (r *sessionRepoStub) LookupUserByPhone(_ context.Context, phone string) (app.User, error) {
+	return app.User{ID: "lookup-user", Phone: phone}, nil
+}
 func (r *sessionRepoStub) SetDisplayName(context.Context, string, string) error { return nil }
 func (r *sessionRepoStub) SetPushToken(_ context.Context, device, token string) error {
 	r.pushDevice, r.pushToken = device, token
@@ -106,13 +109,14 @@ func (r *sessionRepoStub) ListGroupEvents(_ context.Context, _ string, cursor in
 }
 
 type sessionCacheStub struct {
-	status          string
-	statusErr       error
-	statusCalls     int
-	active, revoked bool
-	setRevokedErr   error
-	revokeErr       error
-	revokeCalled    bool
+	status           string
+	statusErr        error
+	statusCalls      int
+	active, revoked  bool
+	setRevokedErr    error
+	revokeErr        error
+	revokeCalled     bool
+	phoneLookupCount int
 }
 
 func (c *sessionCacheStub) SetActive(context.Context, string, time.Duration) error {
@@ -141,6 +145,10 @@ func (c *sessionCacheStub) Status(context.Context, string) (string, error) {
 func (c *sessionCacheStub) RevokeConnection(context.Context, string, string) error {
 	c.revokeCalled = true
 	return c.revokeErr
+}
+func (c *sessionCacheStub) AllowPhoneLookup(context.Context, string) (bool, error) {
+	c.phoneLookupCount++
+	return c.phoneLookupCount <= 10, nil
 }
 
 func TestValidateSessionChecksPostgresOnCacheMissAndReturnsClaims(t *testing.T) {

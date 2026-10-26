@@ -50,6 +50,7 @@ func NewWithMetrics(service *app.Service, logger logging.Logger, metrics *coreme
 	v1.Add(HEAD, "/sync", s.syncEvents)
 	v1.Add(GET, "/profile/me", s.profile)
 	v1.Add(HEAD, "/profile/me", s.profile)
+	v1.Add(GET, "/users/lookup", s.lookupUser)
 	v1.Add(PUT, "/profile/name", s.setName)
 	v1.Add(PUT, "/devices/push-token", s.setPushToken)
 	v1.Add(DELETE, "/devices/push-token", s.clearPushToken)

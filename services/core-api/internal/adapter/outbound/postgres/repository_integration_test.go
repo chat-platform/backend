@@ -180,6 +180,22 @@ func TestGetDirectChatPeerRequiresActiveDirectChatMembership(t *testing.T) {
 	}
 }
 
+func TestLookupUserByPhone(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id, phone) VALUES($1, '+15550000444')`, userID); err != nil {
+		t.Fatal(err)
+	}
+	user, err := repo.LookupUserByPhone(ctx, "+15550000444")
+	if err != nil || user.ID != userID || user.Phone != "+15550000444" {
+		t.Fatalf("lookup=(%+v,%v)", user, err)
+	}
+	if _, err := repo.LookupUserByPhone(ctx, "+15550000445"); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("missing lookup error=%v, want not found", err)
+	}
+}
+
 func TestCreateAndManageGroupMembershipTransactionally(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()

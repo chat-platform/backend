@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/chat-platform/backend/services/core-api/internal/app"
 	"github.com/labstack/echo/v4"
 )
 
@@ -28,6 +29,27 @@ func (s *Server) groupChats(c echo.Context) error {
 		return s.writeServiceError(c, err)
 	}
 	return writeJSON(c, http.StatusOK, chats)
+}
+
+func (s *Server) lookupUser(c echo.Context) error {
+	phone := strings.TrimSpace(c.QueryParam("phone"))
+	if len(phone) < 6 || len(phone) > 32 {
+		return s.writeInvalidRequest(c, errors.New("phone must be between 6 and 32 characters"))
+	}
+	userID := claimsFrom(c.Request()).UserID
+	allowed, err := s.service.AllowPhoneLookup(c.Request().Context(), userID)
+	if err != nil {
+		return s.writeServiceError(c, app.ErrUnavailable)
+	}
+	if !allowed {
+		c.Response().Header().Set("Retry-After", "60")
+		return s.writeExpectedError(c, "phone lookup rate limit exceeded", errors.New("too many phone lookups"), http.StatusTooManyRequests, "rate_limited", "try again later")
+	}
+	user, err := s.service.LookupUserByPhone(c.Request().Context(), phone)
+	if err != nil {
+		return s.writeServiceError(c, err)
+	}
+	return writeJSON(c, http.StatusOK, map[string]string{"userId": user.ID, "phoneNumber": user.Phone})
 }
 
 func (s *Server) createGroup(c echo.Context) error {

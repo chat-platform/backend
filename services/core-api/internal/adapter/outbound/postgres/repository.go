@@ -74,6 +74,17 @@ func (r *Repository) GetProfile(ctx context.Context, userID string) (app.User, e
 	}
 	return user, nil
 }
+func (r *Repository) LookupUserByPhone(ctx context.Context, phone string) (app.User, error) {
+	var user app.User
+	err := r.pool.QueryRow(ctx, `SELECT user_id::text, phone, COALESCE(display_name, '') FROM users WHERE phone = $1`, phone).Scan(&user.ID, &user.Phone, &user.DisplayName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return app.User{}, app.ErrNotFound
+	}
+	if err != nil {
+		return app.User{}, fmt.Errorf("lookup user by phone: %w", err)
+	}
+	return user, nil
+}
 func (r *Repository) SetDisplayName(ctx context.Context, userID, name string) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE users SET display_name = $2, updated_at = now() WHERE user_id = $1`, userID, name)
 	if err != nil {
