@@ -21,6 +21,22 @@ func TestParseGroupKnownLagAndPending(t *testing.T) {
 	}
 }
 
+func TestParseGroupMapInterfaceReply(t *testing.T) {
+	entry := map[any]any{
+		"name":              []byte(NotificationGroup),
+		"pending":           int64(2),
+		"last-delivered-id": []byte("1700000000000-1"),
+		"lag":               int64(3),
+	}
+	got, err := parseGroup([]any{entry}, NotificationGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.lag != 3 || got.pending != 2 || got.lastDeliveredID != "1700000000000-1" {
+		t.Fatalf("metadata=%+v", got)
+	}
+}
+
 func TestParseGroupDistinguishesUnknownLagFromZero(t *testing.T) {
 	knownZero := []any{[]any{"name", NotificationGroup, "pending", int64(0), "last-delivered-id", "0-0", "lag", int64(0)}}
 	if got, err := parseGroup(knownZero, NotificationGroup); err != nil || got.lag != 0 {

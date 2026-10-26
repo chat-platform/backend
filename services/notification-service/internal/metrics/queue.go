@@ -146,26 +146,39 @@ func parseGroup(reply any, groupName string) (groupMetadata, error) {
 }
 
 func keyValues(value any) (map[string]any, bool) {
-	if values, ok := value.(map[string]any); ok {
+	switch values := value.(type) {
+	case map[string]any:
 		out := make(map[string]any, len(values))
 		for key, val := range values {
-			out[fmt.Sprint(key)] = val
+			out[key] = val
 		}
 		return out, true
-	}
-	values, ok := value.([]any)
-	if !ok || len(values)%2 != 0 {
-		return nil, false
-	}
-	out := make(map[string]any, len(values)/2)
-	for i := 0; i < len(values); i += 2 {
-		key, ok := redisString(values[i])
-		if !ok {
+	case map[any]any:
+		out := make(map[string]any, len(values))
+		for rawKey, val := range values {
+			key, ok := redisString(rawKey)
+			if !ok {
+				return nil, false
+			}
+			out[key] = val
+		}
+		return out, true
+	case []any:
+		if len(values)%2 != 0 {
 			return nil, false
 		}
-		out[key] = values[i+1]
+		out := make(map[string]any, len(values)/2)
+		for i := 0; i < len(values); i += 2 {
+			key, ok := redisString(values[i])
+			if !ok {
+				return nil, false
+			}
+			out[key] = values[i+1]
+		}
+		return out, true
+	default:
+		return nil, false
 	}
-	return out, true
 }
 
 func redisString(value any) (string, bool) {
