@@ -84,10 +84,12 @@ clients must be configured for Firebase Cloud Messaging.
 
 The baseline migration at `shared/migrations/000001_init.up.sql` creates the
 initial schema. Incremental migrations, including
-`shared/migrations/000002_presence.up.sql`, are applied in filename order when
-Compose initializes a new Postgres data volume. Existing databases must apply
-new incremental migrations separately; never reapply the baseline migration
-to an existing database.
+`shared/migrations/000002_presence.up.sql`,
+`shared/migrations/000003_receipt_chat_id.up.sql`, and
+`shared/migrations/000004_relay_snapshot_indexes.up.sql`, are applied in
+filename order when Compose initializes a new Postgres data volume. Existing
+databases must apply new incremental migrations separately; never reapply the
+baseline migration to an existing database.
 
 The baseline is not an incremental migration and must not be applied to an
 existing database. Existing databases created with an earlier migration set

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
+	wsmetrics "github.com/chat-platform/backend/services/ws-gateway/internal/metrics"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/port"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/gorilla/websocket"
@@ -57,6 +58,7 @@ type Hub struct {
 	entries               map[string]*socketEntry
 	presenceSubscribers   map[string]map[string]struct{}
 	presenceSubscriptions map[string]map[string]struct{}
+	metrics               *wsmetrics.Metrics
 }
 
 type ActiveSocket struct {
@@ -65,12 +67,22 @@ type ActiveSocket struct {
 	Socket       socketWriter
 }
 
-func NewHub() *Hub {
-	return &Hub{
+func NewHub(metrics ...*wsmetrics.Metrics) *Hub {
+	hub := &Hub{
 		entries:               make(map[string]*socketEntry),
 		presenceSubscribers:   make(map[string]map[string]struct{}),
 		presenceSubscriptions: make(map[string]map[string]struct{}),
 	}
+	if len(metrics) > 0 {
+		hub.metrics = metrics[0]
+	}
+	return hub
+}
+
+func (h *Hub) ActiveConnectionCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.entries)
 }
 
 func (h *Hub) Register(id string, socket socketWriter) {
@@ -219,7 +231,9 @@ func (h *Hub) Deliver(_ context.Context, id string, envelope wsframe.Envelope) e
 		entry.mu.Unlock()
 		return nil
 	}
-	if err := entry.socket.WriteJSON(envelope); err != nil {
+	err = entry.socket.WriteJSON(envelope)
+	h.metrics.RecordSocketWrite(wsmetrics.SocketWriteLive, err)
+	if err != nil {
 		entry.failed = true
 		entry.mu.Unlock()
 		h.Remove(id, entry.socket)
@@ -247,7 +261,9 @@ func (h *Hub) Ready(id string) error {
 		return entry.buffer[i].outboxID < entry.buffer[j].outboxID
 	})
 	for _, item := range entry.buffer {
-		if err := entry.socket.WriteJSON(item.envelope); err != nil {
+		err := entry.socket.WriteJSON(item.envelope)
+		h.metrics.RecordSocketWrite(wsmetrics.SocketWriteSyncFlush, err)
+		if err != nil {
 			entry.failed = true
 			entry.mu.Unlock()
 			h.Remove(id, entry.socket)

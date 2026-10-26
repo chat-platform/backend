@@ -8,7 +8,7 @@ import (
 func setValidCoreAPIEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"LISTEN_ADDR", "GRPC_ADDR", "POSTGRES_DSN", "REDIS_ADDR", "DEV_OTP_CODE",
+		"LISTEN_ADDR", "GRPC_ADDR", "METRICS_ADDR", "POSTGRES_DSN", "REDIS_ADDR", "DEV_OTP_CODE",
 		"SESSION_TTL", "MEDIA_URL_TTL", "MEDIA_S3_ENDPOINT", "MEDIA_S3_REGION",
 		"JWT_SECRET", "MEDIA_S3_BUCKET", "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY",
 	} {
@@ -22,14 +22,14 @@ func setValidCoreAPIEnv(t *testing.T) {
 
 func TestFromEnvDefaults(t *testing.T) {
 	setValidCoreAPIEnv(t)
-	for _, key := range []string{"LISTEN_ADDR", "GRPC_ADDR", "POSTGRES_DSN", "REDIS_ADDR", "DEV_OTP_CODE", "SESSION_TTL", "MEDIA_URL_TTL", "MEDIA_S3_ENDPOINT", "MEDIA_S3_REGION"} {
+	for _, key := range []string{"LISTEN_ADDR", "GRPC_ADDR", "METRICS_ADDR", "POSTGRES_DSN", "REDIS_ADDR", "DEV_OTP_CODE", "SESSION_TTL", "MEDIA_URL_TTL", "MEDIA_S3_ENDPOINT", "MEDIA_S3_REGION"} {
 		t.Setenv(key, "")
 	}
 	cfg, err := FromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ListenAddr != ":8081" || cfg.GRPCAddr != ":50052" || cfg.PostgresDSN != defaultPostgresDSN || cfg.RedisAddr != "localhost:6379" || cfg.DevOTPCode != "000000" {
+	if cfg.ListenAddr != ":8081" || cfg.GRPCAddr != ":50052" || cfg.MetricsAddr != "127.0.0.1:9091" || cfg.PostgresDSN != defaultPostgresDSN || cfg.RedisAddr != "localhost:6379" || cfg.DevOTPCode != "000000" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 	if cfg.SessionTTL != 24*time.Hour || cfg.Media.URLTTL != 5*time.Minute || cfg.Media.Region != "us-east-1" || cfg.Media.Endpoint != "https://s3.us-east-1.amazonaws.com" {
@@ -41,6 +41,7 @@ func TestFromEnvOverrides(t *testing.T) {
 	setValidCoreAPIEnv(t)
 	t.Setenv("LISTEN_ADDR", ":9001")
 	t.Setenv("GRPC_ADDR", ":9002")
+	t.Setenv("METRICS_ADDR", "127.0.0.1:9191")
 	t.Setenv("POSTGRES_DSN", "postgres://test/db")
 	t.Setenv("REDIS_ADDR", "redis:6380")
 	t.Setenv("DEV_OTP_CODE", "123456")
@@ -55,7 +56,7 @@ func TestFromEnvOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ListenAddr != ":9001" || cfg.GRPCAddr != ":9002" || cfg.PostgresDSN != "postgres://test/db" || cfg.RedisAddr != "redis:6380" || cfg.DevOTPCode != "123456" || cfg.SessionTTL != 48*time.Hour {
+	if cfg.ListenAddr != ":9001" || cfg.GRPCAddr != ":9002" || cfg.MetricsAddr != "127.0.0.1:9191" || cfg.PostgresDSN != "postgres://test/db" || cfg.RedisAddr != "redis:6380" || cfg.DevOTPCode != "123456" || cfg.SessionTTL != 48*time.Hour {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 	if cfg.Media.URLTTL != 30*time.Minute || cfg.Media.Endpoint != "http://minio:9000" || cfg.Media.Region != "eu-west-1" || cfg.Media.Bucket != "test-bucket" || cfg.Media.AccessKey != "test-access" || cfg.Media.SecretKey != "test-secret" {

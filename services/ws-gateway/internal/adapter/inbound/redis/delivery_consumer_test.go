@@ -3,16 +3,21 @@ package redisinbound
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"testing"
 	"time"
 
+	wsadapter "github.com/chat-platform/backend/services/ws-gateway/internal/adapter/inbound/websocket"
+	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
+	wsmetrics "github.com/chat-platform/backend/services/ws-gateway/internal/metrics"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/port"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
-	"testing"
 )
 
 func TestDecodeDeliveryPreservesOutboxAndMessageIdentity(t *testing.T) {
@@ -86,6 +91,120 @@ func TestDecodeDeliveryRejectsMissingFields(t *testing.T) {
 	if _, err := decodeDelivery(redis.XMessage{Values: map[string]any{}}); err == nil {
 		t.Fatal("expected malformed stream event error")
 	}
+}
+
+func TestHandleRecordsOutcomeBeforeAckFailure(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+	client.AddHook(ackFailureHook{})
+	t.Cleanup(func() { _ = client.Close() })
+
+	for _, tc := range []struct {
+		name       string
+		message    redis.XMessage
+		deliverErr error
+		outcome    string
+		ackFails   bool
+	}{
+		{name: "accepted despite ack failure", message: validDeliveryMessage(), outcome: wsmetrics.DeliveryAccepted, ackFails: true},
+		{name: "gone despite ack failure", message: validDeliveryMessage(), deliverErr: port.ErrConnectionGone, outcome: wsmetrics.DeliveryConnectionGone, ackFails: true},
+		{name: "malformed despite ack failure", message: redis.XMessage{ID: "3-0", Values: map[string]any{}}, outcome: wsmetrics.DeliveryMalformed, ackFails: true},
+		{name: "delivery error remains pending", message: validDeliveryMessage(), deliverErr: errors.New("hub failed"), outcome: wsmetrics.DeliveryError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			metrics, err := wsmetrics.New(registry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			consumer := &DeliveryConsumer{
+				client: client, nodeID: "test", stream: "ws:deliver:test", group: "test-group",
+				deliverer: &testDeliverer{err: tc.deliverErr}, logger: logger, metrics: metrics,
+			}
+			err = consumer.handle(context.Background(), tc.message)
+			if tc.ackFails && err == nil {
+				t.Fatal("expected XACK failure from unavailable Redis")
+			}
+			if !tc.ackFails && !errors.Is(err, tc.deliverErr) {
+				t.Fatalf("handle err=%v, want delivery error %v", err, tc.deliverErr)
+			}
+			assertDeliveryOutcome(t, registry, tc.outcome, 1)
+		})
+	}
+}
+
+func TestHandleCountsBufferedHubAcceptanceOnEachAttempt(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+	client.AddHook(ackFailureHook{})
+	t.Cleanup(func() { _ = client.Close() })
+	registry := prometheus.NewRegistry()
+	metrics, err := wsmetrics.New(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := wsadapter.NewHub()
+	hub.RegisterAuthenticated("conn", "session", "device", domain.Connection{}, &consumerTestSocket{})
+	consumer := &DeliveryConsumer{client: client, nodeID: "test", stream: "ws:deliver:test", group: "test-group", deliverer: hub, logger: logger, metrics: metrics}
+	message := validDeliveryMessage()
+
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := consumer.handle(context.Background(), message); err == nil {
+			t.Fatal("expected XACK failure from test hook")
+		}
+	}
+	assertDeliveryOutcome(t, registry, wsmetrics.DeliveryAccepted, 2)
+}
+
+type consumerTestSocket struct{}
+
+func (*consumerTestSocket) WriteJSON(any) error             { return nil }
+func (*consumerTestSocket) Close() error                    { return nil }
+func (*consumerTestSocket) CloseWithCode(int, string) error { return nil }
+
+type ackFailureHook struct{}
+
+func (ackFailureHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (ackFailureHook) ProcessHook(redis.ProcessHook) redis.ProcessHook {
+	return func(context.Context, redis.Cmder) error { return errors.New("forced XACK failure") }
+}
+func (ackFailureHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+func validDeliveryMessage() redis.XMessage {
+	return redis.XMessage{ID: "1-0", Values: map[string]any{
+		"outbox_id": "42", "outbox_type": "direct", "event_type": "NEW_MESSAGE",
+		"device_id": "device", "conn_id": "conn", "payload": `{"chatId":"chat","senderId":"sender","clientMsgId":"client","content":"hello","ts":123}`,
+	}}
+}
+
+func assertDeliveryOutcome(t *testing.T, registry *prometheus.Registry, outcome string, want float64) {
+	t.Helper()
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != "ws_delivery_handling_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			if len(metric.GetLabel()) == 1 && metric.GetLabel()[0].GetName() == "outcome" && metric.GetLabel()[0].GetValue() == outcome {
+				if got := metric.GetCounter().GetValue(); got != want {
+					t.Fatalf("outcome %q count=%v, want %v", outcome, got, want)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("delivery outcome %q not found", outcome)
 }
 
 type testDeliverer struct {

@@ -19,9 +19,11 @@ import (
 	"github.com/chat-platform/backend/services/ws-gateway/internal/app"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
+	wsmetrics "github.com/chat-platform/backend/services/ws-gateway/internal/metrics"
 	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
 	sessionv1 "github.com/chat-platform/backend/shared/gen/session/v1"
 	"github.com/chat-platform/backend/shared/pkg/logging"
+	sharedmetrics "github.com/chat-platform/backend/shared/pkg/metrics"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -71,8 +73,37 @@ func main() {
 	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn))
 	presenceCoreAPI := coreapiadapter.NewPresenceClient(sessionv1.NewSessionServiceClient(coreAPIConn))
 	operations := app.NewWithPresence(cfg.NodeID, registry, messageService, sessionAuthenticator, presenceRegistry, presenceCoreAPI)
-	hub := wsadapter.NewHub()
-	consumer := deliveryadapter.NewDeliveryConsumer(redisClient, cfg.NodeID, hub, logger.With("component", "delivery_consumer"))
+	metricsRegistry, err := sharedmetrics.NewRegistry()
+	if err != nil {
+		logger.Error(ctx, "could not create metrics registry", "error", err)
+		os.Exit(1)
+	}
+	gatewayMetrics, err := wsmetrics.New(metricsRegistry)
+	if err != nil {
+		logger.Error(ctx, "could not register WebSocket Gateway metrics", "error", err)
+		os.Exit(1)
+	}
+	hub := wsadapter.NewHub(gatewayMetrics)
+	if err := gatewayMetrics.RegisterActiveConnections(metricsRegistry, hub.ActiveConnectionCount); err != nil {
+		logger.Error(ctx, "could not register active connections gauge", "error", err)
+		os.Exit(1)
+	}
+	metricsServer, err := sharedmetrics.Start(cfg.MetricsAddr, metricsRegistry)
+	if err != nil {
+		logger.Error(ctx, "metrics listener failed to start", "address", cfg.MetricsAddr, "error", err)
+		os.Exit(1)
+	}
+	logger.Info(ctx, "metrics listener started", "address", cfg.MetricsAddr)
+	go func() {
+		if err, ok := <-metricsServer.Done(); ok && ctx.Err() == nil {
+			if err == nil {
+				err = errors.New("metrics listener stopped unexpectedly")
+			}
+			logger.Error(context.Background(), "metrics server failed", "address", cfg.MetricsAddr, "error", err)
+			stop()
+		}
+	}()
+	consumer := deliveryadapter.NewDeliveryConsumer(redisClient, cfg.NodeID, hub, logger.With("component", "delivery_consumer"), gatewayMetrics)
 	consumerFailed := make(chan error, 1)
 	go func() {
 		if err := consumer.Run(ctx); err != nil && ctx.Err() == nil {
@@ -113,16 +144,25 @@ func main() {
 			logger.Error(shutdownCtx, "http server shutdown failed", "error", err)
 		}
 	}()
-	logger.Info(ctx, "ws-gateway listening", "address", cfg.ListenAddr, "path", cfg.Path, "node_id", cfg.NodeID)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Error(ctx, "http server failed", "error", err)
-		os.Exit(1)
+	logger.Info(ctx, "ws-gateway listening", "address", cfg.ListenAddr, "path", cfg.Path, "node_id", cfg.NodeID, "metrics_address", cfg.MetricsAddr)
+	serveErr := server.ListenAndServe()
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		logger.Error(ctx, "http server failed", "error", serveErr)
+		stop()
 	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error(shutdownCtx, "metrics server shutdown failed", "address", cfg.MetricsAddr, "error", err)
+	}
+	cancel()
 	select {
 	case err := <-consumerFailed:
 		logger.Error(context.Background(), "ws-gateway stopped because delivery consumer failed", "error", err, "node_id", cfg.NodeID)
 		os.Exit(1)
 	default:
+	}
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		os.Exit(1)
 	}
 	logger.Info(context.Background(), "ws-gateway stopped", "node_id", cfg.NodeID)
 }

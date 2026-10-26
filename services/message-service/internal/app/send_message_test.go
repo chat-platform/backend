@@ -35,9 +35,9 @@ func (r *chatRepositoryStub) EnqueueGroupMessageEvent(_ context.Context, _ domai
 	r.groupEnqueued = true
 	return domain.MessageAck{ClientMsgID: "client", TimestampMS: 1}, nil
 }
-func (r *chatRepositoryStub) MarkDelivered(_ context.Context, receipt domain.Receipt) error {
+func (r *chatRepositoryStub) MarkDelivered(_ context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {
 	r.deliveredType = receipt.OutboxType
-	return nil
+	return domain.DeliveryAck{}, nil
 }
 func (r *chatRepositoryStub) MarkRead(context.Context, domain.Receipt) error   { return nil }
 func (r *chatRepositoryStub) MarkPlayed(context.Context, domain.Receipt) error { return nil }
@@ -58,7 +58,7 @@ func TestGroupSendAllowsNoEchoRecipientsAndMarksGroupDelivery(t *testing.T) {
 	if !repo.groupEnqueued || repo.directEnqueued || repo.resolvedCalls != 0 {
 		t.Fatalf("group dispatch: group=%v direct=%v recipient queries=%d", repo.groupEnqueued, repo.directEnqueued, repo.resolvedCalls)
 	}
-	if err := operations.MarkDelivered(context.Background(), domain.Receipt{DeviceID: "device", ReceiptSenderID: "reader", ChatID: "chat", MessageSenderID: "sender", ClientMsgID: "client", OutboxType: "group", OutboxID: 7}); err != nil || repo.deliveredType != "group" {
+	if _, err := operations.MarkDelivered(context.Background(), domain.Receipt{DeviceID: "device", ReceiptSenderID: "reader", ChatID: "chat", MessageSenderID: "sender", ClientMsgID: "client", OutboxType: "group", OutboxID: 7}); err != nil || repo.deliveredType != "group" {
 		t.Fatalf("group delivery mark type=%q error=%v", repo.deliveredType, err)
 	}
 }

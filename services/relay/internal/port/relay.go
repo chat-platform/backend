@@ -9,10 +9,15 @@ import (
 type OutboxRepository interface {
 	ClaimBatch(context.Context, string, int, time.Duration) ([]domain.OutboxEvent, error)
 	ClaimRetryBatch(context.Context, string, int, time.Duration) ([]domain.OutboxEvent, error)
-	MarkDispatched(context.Context, string, int64, domain.Route) error
-	MarkRetryAttempt(context.Context, string, int64, time.Time) error
+	MarkDispatched(context.Context, string, int64, domain.Route) (time.Duration, error)
+	MarkRetryAttempt(context.Context, string, int64, time.Time) (bool, error)
 	ReleaseRetryClaim(context.Context, string, int64, time.Time, time.Duration) error
 }
+
+type OutboxSnapshotter interface {
+	Snapshot(context.Context) ([]domain.OutboxSnapshot, error)
+}
+
 type ConnectionRegistry interface {
 	Lookup(context.Context, string) (domain.Connection, bool, error)
 }

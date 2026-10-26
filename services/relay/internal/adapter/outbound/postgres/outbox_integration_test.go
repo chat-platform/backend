@@ -65,7 +65,19 @@ func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewOutboxRepository(pool), pool
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX direct_outbox_undispatched_idx ON direct_outbox(id) WHERE dispatched_at IS NULL;
+		CREATE INDEX direct_outbox_ws_retry_pending_snapshot_idx ON direct_outbox(dispatched_at,id) WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count<10;
+		CREATE INDEX direct_outbox_ws_retry_exhausted_snapshot_idx ON direct_outbox(id) WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count>=10;
+		CREATE INDEX direct_outbox_ws_overdue_message_snapshot_idx ON direct_outbox(created_at) WHERE event_type='NEW_MESSAGE' AND routed_to='WS' AND delivered_at IS NULL;
+		CREATE INDEX group_outbox_undispatched_idx ON group_outbox(id) WHERE dispatched_at IS NULL;
+		CREATE INDEX group_outbox_ws_retry_pending_snapshot_idx ON group_outbox(dispatched_at,id) WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count<10;
+		CREATE INDEX group_outbox_ws_retry_exhausted_snapshot_idx ON group_outbox(id) WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count>=10;
+		CREATE INDEX group_outbox_ws_overdue_snapshot_idx ON group_outbox(created_at,event_id) WHERE routed_to='WS' AND delivered_at IS NULL`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewOutboxRepository(pool, 1000), pool
 }
 
 func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
@@ -88,8 +100,10 @@ func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].ID != id {
 		t.Fatalf("first retry claim=(%+v,%v)", events, err)
 	}
-	if err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
+	if exhausted, err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
 		t.Fatal(err)
+	} else if exhausted {
+		t.Fatal("ordinary retry attempt reported exhaustion")
 	}
 	var attempts int
 	var dispatched time.Time
@@ -106,8 +120,10 @@ func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
 	if err != nil || len(events) != 1 {
 		t.Fatalf("second retry should be eligible after maximum jittered delay: events=%+v err=%v", events, err)
 	}
-	if err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
+	if exhausted, err := repo.MarkRetryAttempt(ctx, "direct", id, events[0].ClaimExpiry); err != nil {
 		t.Fatal(err)
+	} else if exhausted {
+		t.Fatal("ordinary retry attempt reported exhaustion")
 	}
 	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET attempt_count=10, dispatched_at=now()-interval '1 day', claim_expiry=NULL WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
@@ -116,6 +132,210 @@ func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
 	if err != nil || len(events) != 0 {
 		t.Fatalf("exhausted retry claim=(%+v,%v), want none", events, err)
 	}
+}
+
+func TestMarkRetryAttemptReportsExhaustionExactlyOnce(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	device := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	lease := time.Now().UTC().Truncate(time.Microsecond)
+	directID := insertEvent(t, pool, device, "direct transition")
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET routed_to='WS',dispatched_at=now()-interval '1 day',attempt_count=9,claim_expiry=$2 WHERE id=$1`, directID, lease); err != nil {
+		t.Fatal(err)
+	}
+	var eventID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO group_event(payload) VALUES ('group transition') RETURNING event_id`).Scan(&eventID); err != nil {
+		t.Fatal(err)
+	}
+	var groupID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO group_outbox(event_id,device_id,routed_to,dispatched_at,attempt_count,claim_expiry)
+		VALUES ($1,$2,'WS',now()-interval '1 day',9,$3) RETURNING id`, eventID, device, lease).Scan(&groupID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, row := range []struct {
+		outboxType string
+		id         int64
+	}{
+		{outboxType: "direct", id: directID},
+		{outboxType: "group", id: groupID},
+	} {
+		exhausted, err := repo.MarkRetryAttempt(ctx, row.outboxType, row.id, lease)
+		if err != nil || !exhausted {
+			t.Fatalf("MarkRetryAttempt(%s)=(%v,%v), want transition", row.outboxType, exhausted, err)
+		}
+		exhausted, err = repo.MarkRetryAttempt(ctx, row.outboxType, row.id, lease)
+		if err == nil || exhausted {
+			t.Fatalf("repeated MarkRetryAttempt(%s)=(%v,%v), want stale-claim error without transition", row.outboxType, exhausted, err)
+		}
+	}
+
+	var directAttempts, groupAttempts int
+	if err := pool.QueryRow(ctx, `SELECT attempt_count FROM direct_outbox WHERE id=$1`, directID).Scan(&directAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT attempt_count FROM group_outbox WHERE id=$1`, groupID).Scan(&groupAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if directAttempts != 10 || groupAttempts != 10 {
+		t.Fatalf("attempt counts=(direct %d, group %d), want 10 for both", directAttempts, groupAttempts)
+	}
+}
+
+func TestSnapshotReportsEmptyAndPopulatedDirectAndGroupOutboxes(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+
+	snapshots, err := repo.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byType := snapshotsByType(t, snapshots)
+	for _, outboxType := range []string{"direct", "group"} {
+		if snapshot := byType[outboxType]; snapshot.PendingRows != 0 || snapshot.RetryPendingRows != 0 || snapshot.RetryExhaustedRows != 0 || snapshot.Overdue500msRows != 0 || snapshot.Overdue1sRows != 0 || snapshot.OldestPendingAgeSeconds != 0 || snapshot.RetryOldestAgeSeconds != 0 {
+			t.Fatalf("empty %s snapshot=%+v", outboxType, snapshot)
+		}
+	}
+
+	firstPending := insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "lowest id")
+	secondPending := insertEvent(t, pool, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "older timestamp")
+	if _, err := pool.Exec(ctx, `UPDATE direct_outbox SET created_at=now()-interval '5 seconds' WHERE id=$1;
+		UPDATE direct_outbox SET created_at=now()-interval '50 seconds' WHERE id=$2`, firstPending, secondPending); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(device_id,event_type,payload,created_at,routed_to,dispatched_at,attempt_count) VALUES
+		('cccccccc-cccc-4ccc-8ccc-cccccccccccc','NEW_MESSAGE','eligible',now()-interval '2 seconds','WS',now()-interval '4 seconds',1),
+		('dddddddd-dddd-4ddd-8ddd-dddddddddddd','NEW_MESSAGE','recent',now()-interval '800 milliseconds','WS',now()-interval '1 second',1),
+		('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee','NEW_MESSAGE','exhausted',now()-interval '3 seconds','WS',now()-interval '3 seconds',10),
+		('ffffffff-ffff-4fff-8fff-ffffffffffff','DELIVERY_RECEIPT','receipt',now()-interval '10 seconds','WS',now()-interval '1 second',1)`); err != nil {
+		t.Fatal(err)
+	}
+	var newEventID, receiptEventID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO group_event(event_type,payload) VALUES ('NEW_MESSAGE','group message') RETURNING event_id`).Scan(&newEventID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO group_event(event_type,payload) VALUES ('DELIVERY_RECEIPT','group receipt') RETURNING event_id`).Scan(&receiptEventID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(event_id,device_id,created_at,routed_to,dispatched_at,attempt_count) VALUES
+		($1,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',now()-interval '2 seconds','WS',now()-interval '3 seconds',1),
+		($2,'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',now()-interval '10 seconds','WS',now()-interval '10 seconds',1)`, newEventID, receiptEventID); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshots, err = repo.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byType = snapshotsByType(t, snapshots)
+	direct := byType["direct"]
+	if direct.PendingRows != 2 {
+		t.Fatalf("direct pending rows=%d, want 2", direct.PendingRows)
+	}
+	if direct.OldestPendingAgeSeconds < 3 || direct.OldestPendingAgeSeconds > 10 {
+		t.Fatalf("direct lowest-ID pending age=%v, want approximately 5s rather than the later row's 50s", direct.OldestPendingAgeSeconds)
+	}
+	if direct.RetryPendingRows != 3 || direct.RetryExhaustedRows != 1 {
+		t.Fatalf("direct retry counts=(pending %d, exhausted %d), want (3,1)", direct.RetryPendingRows, direct.RetryExhaustedRows)
+	}
+	if direct.RetryOldestAgeSeconds < 3 || direct.RetryOldestAgeSeconds > 6 {
+		t.Fatalf("direct oldest retry age=%v, want approximately 4s", direct.RetryOldestAgeSeconds)
+	}
+	if direct.Overdue500msRows != 3 || direct.Overdue1sRows != 2 {
+		t.Fatalf("direct overdue counts=(500ms %d, 1s %d), want (3,2); receipt rows must be excluded", direct.Overdue500msRows, direct.Overdue1sRows)
+	}
+	group := byType["group"]
+	if group.PendingRows != 0 || group.RetryPendingRows != 2 || group.Overdue500msRows != 1 || group.Overdue1sRows != 1 {
+		t.Fatalf("group snapshot=%+v, want no undispatched rows, two retry rows, and only the message overdue", group)
+	}
+}
+
+func TestSnapshotBoundsCountsAndReportsSaturation(t *testing.T) {
+	repo, pool := testRepository(t)
+	repo = NewOutboxRepository(pool, 2)
+	ctx := context.Background()
+	device := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	for i := 0; i < 3; i++ {
+		insertEvent(t, pool, device, "pending")
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(device_id,event_type,payload,created_at,routed_to,dispatched_at,attempt_count)
+		SELECT $1,'NEW_MESSAGE','retry',now()-interval '3 seconds','WS',now()-interval '3 seconds',1 FROM generate_series(1,3)`, device); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(device_id,event_type,payload,created_at,routed_to,dispatched_at,attempt_count)
+		SELECT $1,'NEW_MESSAGE','exhausted',now()-interval '3 seconds','WS',now()-interval '3 seconds',10 FROM generate_series(1,3)`, device); err != nil {
+		t.Fatal(err)
+	}
+
+	var groupIDs [7]int64
+	for i := range groupIDs {
+		if err := pool.QueryRow(ctx, `INSERT INTO group_event(event_type,payload) VALUES ('NEW_MESSAGE','message') RETURNING event_id`).Scan(&groupIDs[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(event_id,device_id,created_at) SELECT event_id,$1,now() FROM unnest($2::bigint[]) AS event_id`, device, groupIDs[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(event_id,device_id,created_at,routed_to,dispatched_at,attempt_count)
+		SELECT event_id,$1,now()-interval '3 seconds','WS',now()-interval '3 seconds',1 FROM unnest($2::bigint[]) AS event_id`, device, groupIDs[2:5]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(event_id,device_id,created_at,routed_to,dispatched_at,attempt_count)
+		SELECT event_id,$1,now()-interval '3 seconds','WS',now()-interval '3 seconds',10 FROM unnest($2::bigint[]) AS event_id`, device, groupIDs[5:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `WITH receipts AS (
+		INSERT INTO group_event(event_type,payload)
+		SELECT 'DELIVERY_RECEIPT','receipt' FROM generate_series(1,100)
+		RETURNING event_id
+	) INSERT INTO group_outbox(event_id,device_id,created_at,routed_to,dispatched_at,attempt_count)
+	SELECT event_id,$1,now()-interval '4 seconds','WS',now()-interval '4 seconds',10 FROM receipts`, device); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshots, err := repo.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byType := snapshotsByType(t, snapshots)
+	direct := byType["direct"]
+	if direct.PendingRows != 2 || !direct.PendingRowsSaturated || direct.RetryPendingRows != 2 || !direct.RetryPendingSaturated || direct.RetryExhaustedRows != 2 || !direct.RetryExhaustedSaturated {
+		t.Fatalf("direct bounded counts=%+v, want cap 2 with saturation", direct)
+	}
+	if direct.Overdue500msRows != 2 || !direct.Overdue500msSaturated || direct.Overdue1sRows != 2 || !direct.Overdue1sSaturated {
+		t.Fatalf("direct overdue counts=%+v, want cap 2 with saturation", direct)
+	}
+	group := byType["group"]
+	if group.PendingRows != 2 || group.PendingRowsSaturated {
+		t.Fatalf("group pending count=%d saturated=%v, want exact cap 2", group.PendingRows, group.PendingRowsSaturated)
+	}
+	if group.RetryPendingRows != 2 || !group.RetryPendingSaturated || group.RetryExhaustedRows != 2 || !group.RetryExhaustedSaturated {
+		t.Fatalf("group bounded retry counts=%+v, want cap 2 with saturation", group)
+	}
+	if group.Overdue500msRows != 2 || !group.Overdue500msSaturated || group.Overdue1sRows != 2 || !group.Overdue1sSaturated {
+		t.Fatalf("group overdue counts=%+v, want cap 2 with saturation", group)
+	}
+}
+
+func snapshotsByType(t *testing.T, snapshots []domain.OutboxSnapshot) map[string]domain.OutboxSnapshot {
+	t.Helper()
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshot count=%d, want 2", len(snapshots))
+	}
+	result := make(map[string]domain.OutboxSnapshot, len(snapshots))
+	for _, snapshot := range snapshots {
+		if _, exists := result[snapshot.OutboxType]; exists {
+			t.Fatalf("duplicate snapshot for %s", snapshot.OutboxType)
+		}
+		result[snapshot.OutboxType] = snapshot
+	}
+	if _, ok := result["direct"]; !ok {
+		t.Fatal("missing direct snapshot")
+	}
+	if _, ok := result["group"]; !ok {
+		t.Fatal("missing group snapshot")
+	}
+	return result
 }
 
 func TestRetryClaimsDirectAndGroupExclusively(t *testing.T) {
@@ -211,11 +431,18 @@ func TestClaimBatchAndMarkDispatched(t *testing.T) {
 	if !lease.After(time.Now()) {
 		t.Fatalf("claim expiry=%v, want future lease", lease)
 	}
-	if err := repo.MarkDispatched(ctx, "direct", ids[0], domain.Route{To: domain.RouteWebSocket}); err != nil {
+	wait, err := repo.MarkDispatched(ctx, "direct", ids[0], domain.Route{To: domain.RouteWebSocket})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkDispatched(ctx, "direct", ids[1], domain.Route{}); err != nil {
+	if wait < 0 {
+		t.Fatalf("dispatch wait=%v, want non-negative", wait)
+	}
+	if _, err := repo.MarkDispatched(ctx, "direct", ids[1], domain.Route{}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := repo.MarkDispatched(ctx, "direct", ids[0], domain.Route{To: domain.RouteWebSocket}); err == nil {
+		t.Fatal("duplicate MarkDispatched succeeded; expected no first-transition duration")
 	}
 	var routed *string
 	var dispatched time.Time
@@ -272,8 +499,12 @@ func TestClaimGroupBatchJoinsPayloadAndMarksGroupRow(t *testing.T) {
 	if events[0].OutboxType != "group" || events[0].DeviceID != device || string(events[0].Payload) != `{"chatId":"group"}` {
 		t.Fatalf("claimed group event=%+v", events[0])
 	}
-	if err := repo.MarkDispatched(ctx, "group", events[0].ID, domain.Route{To: domain.RouteWebSocket}); err != nil {
+	wait, err := repo.MarkDispatched(ctx, "group", events[0].ID, domain.Route{To: domain.RouteWebSocket})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if wait < 0 {
+		t.Fatalf("group dispatch wait=%v, want non-negative", wait)
 	}
 	var route string
 	if err := pool.QueryRow(ctx, `SELECT routed_to FROM group_outbox WHERE id=$1`, events[0].ID).Scan(&route); err != nil || route != domain.RouteWebSocket {

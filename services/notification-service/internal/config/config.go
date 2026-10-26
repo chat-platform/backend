@@ -14,6 +14,7 @@ type Config struct {
 	RedisAddr                  string
 	GoogleCloudProject         string
 	NotificationCoalesceWindow time.Duration
+	MetricsAddr                string
 }
 
 func FromEnv() (Config, error) {
@@ -30,6 +31,7 @@ func FromEnv() (Config, error) {
 		RedisAddr:                  stringEnv("REDIS_ADDR", "localhost:6379"),
 		GoogleCloudProject:         strings.TrimSpace(os.Getenv("GOOGLE_CLOUD_PROJECT")),
 		NotificationCoalesceWindow: coalesceWindow,
+		MetricsAddr:                stringEnv("METRICS_ADDR", "127.0.0.1:9095"),
 	}, nil
 }
 

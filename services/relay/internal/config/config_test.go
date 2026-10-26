@@ -21,6 +21,8 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 		t.Setenv("RELAY_CLAIM_LEASE", "")
 		t.Setenv("RELAY_RETRY_INTERVAL", "")
 		t.Setenv("RELAY_RETRY_BATCH_SIZE", "")
+		t.Setenv("RELAY_SNAPSHOT_COUNT_CAP", "")
+		t.Setenv("METRICS_ADDR", "")
 		cfg, err := FromEnv(logger)
 		if err != nil {
 			t.Fatal(err)
@@ -37,8 +39,14 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 		if cfg.Outbox.ClaimLease != 30*time.Second {
 			t.Fatalf("Outbox.ClaimLease=%s, want 30s", cfg.Outbox.ClaimLease)
 		}
+		if cfg.Outbox.SnapshotCountCap != DefaultSnapshotCountCap {
+			t.Fatalf("Outbox.SnapshotCountCap=%d, want %d", cfg.Outbox.SnapshotCountCap, DefaultSnapshotCountCap)
+		}
 		if cfg.Retry.Interval != 10*time.Second || cfg.Retry.BatchSize != 100 {
 			t.Fatalf("Retry=%+v, want 10s and 100", cfg.Retry)
+		}
+		if cfg.MetricsAddr != "127.0.0.1:9093" {
+			t.Fatalf("MetricsAddr=%q, want 127.0.0.1:9093", cfg.MetricsAddr)
 		}
 	})
 
@@ -79,4 +87,35 @@ func TestFromEnvRelayWorkers(t *testing.T) {
 			t.Fatalf("Retry=%+v, want 15s and 35", cfg.Retry)
 		}
 	})
+
+	t.Run("accepts metrics address override", func(t *testing.T) {
+		t.Setenv("METRICS_ADDR", "127.0.0.1:19093")
+		cfg, err := FromEnv(logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MetricsAddr != "127.0.0.1:19093" {
+			t.Fatalf("MetricsAddr=%q, want 127.0.0.1:19093", cfg.MetricsAddr)
+		}
+	})
+
+	t.Run("accepts snapshot count cap override", func(t *testing.T) {
+		t.Setenv("RELAY_SNAPSHOT_COUNT_CAP", "2500")
+		cfg, err := FromEnv(logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Outbox.SnapshotCountCap != 2500 {
+			t.Fatalf("Outbox.SnapshotCountCap=%d, want 2500", cfg.Outbox.SnapshotCountCap)
+		}
+	})
+
+	for _, value := range []string{"0", "-1", "abc", "2147483647"} {
+		t.Run("rejects snapshot count cap "+value, func(t *testing.T) {
+			t.Setenv("RELAY_SNAPSHOT_COUNT_CAP", value)
+			if _, err := FromEnv(logger); err == nil {
+				t.Fatalf("FromEnv() accepted RELAY_SNAPSHOT_COUNT_CAP=%q", value)
+			}
+		})
+	}
 }

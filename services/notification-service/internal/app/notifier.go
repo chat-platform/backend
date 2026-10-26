@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	servicemetrics "github.com/chat-platform/backend/services/notification-service/internal/metrics"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 )
 
@@ -32,21 +33,24 @@ type Sender interface {
 }
 
 type Notifier struct {
-	tokens TokenRepository
-	sender Sender
-	logger logging.Logger
+	tokens  TokenRepository
+	sender  Sender
+	logger  logging.Logger
+	metrics *servicemetrics.Metrics
 }
 
-func New(tokens TokenRepository, sender Sender, logger logging.Logger) *Notifier {
-	return &Notifier{tokens: tokens, sender: sender, logger: logger}
+func New(tokens TokenRepository, sender Sender, logger logging.Logger, metrics *servicemetrics.Metrics) *Notifier {
+	return &Notifier{tokens: tokens, sender: sender, logger: logger, metrics: metrics}
 }
 
 func (n *Notifier) Send(ctx context.Context, hint PushHint) error {
 	token, platform, err := n.tokens.PushToken(ctx, hint.DeviceID)
 	if err != nil {
+		n.metrics.RecordTokenLookupError()
 		return fmt.Errorf("lookup push token for device %s: %w", hint.DeviceID, err)
 	}
 	if token == "" {
+		n.metrics.RecordNoTokenSkip()
 		n.logger.Info(ctx, "push hint skipped because device has no push token", "device_id", hint.DeviceID, "chat_id", hint.ChatID)
 		return nil
 	}

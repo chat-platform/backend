@@ -8,6 +8,7 @@ import (
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
 	"github.com/chat-platform/backend/services/notification-service/internal/app"
+	servicemetrics "github.com/chat-platform/backend/services/notification-service/internal/metrics"
 )
 
 type MessagingClient interface {
@@ -17,14 +18,15 @@ type MessagingClient interface {
 type Sender struct {
 	client         MessagingClient
 	isUnregistered func(error) bool
+	metrics        *servicemetrics.Metrics
 }
 
-func NewSender(client MessagingClient) *Sender {
-	return &Sender{client: client, isUnregistered: messaging.IsUnregistered}
+func NewSender(client MessagingClient, metrics *servicemetrics.Metrics) *Sender {
+	return &Sender{client: client, isUnregistered: messaging.IsUnregistered, metrics: metrics}
 }
 
-func newSender(client MessagingClient, isUnregistered func(error) bool) *Sender {
-	return &Sender{client: client, isUnregistered: isUnregistered}
+func newSender(client MessagingClient, isUnregistered func(error) bool, metrics *servicemetrics.Metrics) *Sender {
+	return &Sender{client: client, isUnregistered: isUnregistered, metrics: metrics}
 }
 
 // NewADCClient initializes the Firebase Messaging client using Application Default Credentials.
@@ -48,10 +50,13 @@ func (s *Sender) Send(ctx context.Context, push app.Push) error {
 	}
 	if _, err := s.client.Send(ctx, message); err != nil {
 		if s.isUnregistered(err) {
+			s.metrics.RecordProviderCall(servicemetrics.ProviderUnregistered)
 			return app.ErrTokenUnregistered
 		}
+		s.metrics.RecordProviderCall(servicemetrics.ProviderError)
 		return fmt.Errorf("Firebase Cloud Messaging send failed: %w", err)
 	}
+	s.metrics.RecordProviderCall(servicemetrics.ProviderAccepted)
 	return nil
 }
 

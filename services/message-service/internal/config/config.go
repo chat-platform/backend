@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	GRPCAddr    string
+	MetricsAddr string
 	PostgresDSN string
 	RedisAddr   string
 }
@@ -16,6 +17,7 @@ type Config struct {
 func FromEnv(logger logging.Logger) Config {
 	return Config{
 		GRPCAddr:    getenv(logger, "GRPC_ADDR", ":50051"),
+		MetricsAddr: getenv(logger, "METRICS_ADDR", "127.0.0.1:9092"),
 		PostgresDSN: getenv(logger, "POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"),
 		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"),
 	}

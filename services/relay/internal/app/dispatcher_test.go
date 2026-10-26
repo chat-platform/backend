@@ -9,15 +9,21 @@ import (
 	"time"
 
 	"github.com/chat-platform/backend/services/relay/internal/domain"
+	relaymetrics "github.com/chat-platform/backend/services/relay/internal/metrics"
 	"github.com/chat-platform/backend/shared/pkg/logging"
+	sharedmetrics "github.com/chat-platform/backend/shared/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type testOutbox struct {
-	events      []domain.OutboxEvent
-	retryEvents []domain.OutboxEvent
-	marked      map[string]domain.Route
-	retried     []string
-	markErr     error
+	events       []domain.OutboxEvent
+	retryEvents  []domain.OutboxEvent
+	marked       map[string]domain.Route
+	retried      []string
+	markErr      error
+	retryMarkErr error
+	releaseErr   error
+	exhausted    map[string]bool
 }
 
 func (o *testOutbox) ClaimBatch(_ context.Context, outboxType string, _ int, _ time.Duration) ([]domain.OutboxEvent, error) {
@@ -42,22 +48,25 @@ func (o *testOutbox) ClaimRetryBatch(_ context.Context, outboxType string, _ int
 	}
 	return events, nil
 }
-func (o *testOutbox) MarkDispatched(_ context.Context, outboxType string, id int64, route domain.Route) error {
+func (o *testOutbox) MarkDispatched(_ context.Context, outboxType string, id int64, route domain.Route) (time.Duration, error) {
 	if o.markErr != nil {
-		return o.markErr
+		return 0, o.markErr
 	}
 	if o.marked == nil {
 		o.marked = make(map[string]domain.Route)
 	}
 	o.marked[fmt.Sprintf("%s:%d", outboxType, id)] = route
-	return nil
+	return 100 * time.Millisecond, nil
 }
-func (o *testOutbox) MarkRetryAttempt(_ context.Context, outboxType string, id int64, _ time.Time) error {
+func (o *testOutbox) MarkRetryAttempt(_ context.Context, outboxType string, id int64, _ time.Time) (bool, error) {
+	if o.retryMarkErr != nil {
+		return false, o.retryMarkErr
+	}
 	o.retried = append(o.retried, fmt.Sprintf("%s:%d", outboxType, id))
-	return nil
+	return o.exhausted[fmt.Sprintf("%s:%d", outboxType, id)], nil
 }
 func (o *testOutbox) ReleaseRetryClaim(context.Context, string, int64, time.Time, time.Duration) error {
-	return nil
+	return o.releaseErr
 }
 
 type testRegistry struct {
@@ -208,6 +217,242 @@ func TestRetryOncePublishesDirectAndGroupAndMarksAttempts(t *testing.T) {
 	if len(publisher.events) != 2 || publisher.events[0].OutboxType != "direct" || publisher.events[1].OutboxType != "group" {
 		t.Fatalf("published retry events=%+v", publisher.events)
 	}
+}
+
+func TestRetryExhaustionMetricCountsOnlyNewTransitions(t *testing.T) {
+	registry := newMetricsRegistry(t)
+	metrics, err := relaymetrics.NewDispatchMetrics(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := time.Now().Add(time.Minute)
+	outbox := &testOutbox{
+		retryEvents: []domain.OutboxEvent{
+			{ID: 41, OutboxType: "direct", DeviceID: "online", ClaimExpiry: lease},
+			{ID: 42, OutboxType: "group", DeviceID: "online", ClaimExpiry: lease},
+			{ID: 43, OutboxType: "direct", DeviceID: "online", ClaimExpiry: lease},
+		},
+		exhausted: map[string]bool{"direct:41": true, "group:42": true},
+	}
+	d := New(outbox, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "c"}}}, &testPublisher{}, OutboxOptions{RetryBatchSize: 10}, quietLogger(t), metrics)
+	if count, err := d.RetryOnce(context.Background()); err != nil || count != 3 {
+		t.Fatalf("RetryOnce()=(%d,%v), want (3,nil)", count, err)
+	}
+	assertCounterByOutboxType(t, registry, "relay_retry_exhaustions_total", "direct", 1)
+	assertCounterByOutboxType(t, registry, "relay_retry_exhaustions_total", "group", 1)
+}
+
+func TestDispatchMetricsRecordEachRouteAndFailureOnce(t *testing.T) {
+	registry := newMetricsRegistry(t)
+	metrics, err := relaymetrics.NewDispatchMetrics(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := []domain.OutboxEvent{
+		{ID: 21, DeviceID: "online", OutboxType: "direct"},
+		{ID: 22, DeviceID: "offline", EventType: "NEW_MESSAGE", Payload: []byte(`{"chatId":"chat"}`)},
+		{ID: 23, DeviceID: "offline", EventType: "RECEIPT"},
+	}
+	d := New(&testOutbox{events: events}, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "conn"}}}, &testPublisher{}, OutboxOptions{BatchSize: 10}, quietLogger(t), metrics)
+	if count, err := d.RunOnce(context.Background()); err != nil || count != 3 {
+		t.Fatalf("RunOnce()=(%d,%v), want (3,nil)", count, err)
+	}
+	assertCounter(t, registry, "relay_dispatch_events_total", "direct", relaymetrics.DispatchWS, 1)
+	assertCounter(t, registry, "relay_dispatch_events_total", "direct", relaymetrics.DispatchNotification, 1)
+	assertCounter(t, registry, "relay_dispatch_events_total", "direct", relaymetrics.DispatchOfflineSkip, 1)
+	assertHistogram(t, registry, "outbox_dispatch_wait_seconds", map[string]string{"outbox_type": "direct", "outcome": relaymetrics.DispatchWS}, 1)
+	assertHistogram(t, registry, "outbox_dispatch_wait_seconds", map[string]string{"outbox_type": "direct", "outcome": relaymetrics.DispatchNotification}, 1)
+	assertHistogram(t, registry, "outbox_dispatch_wait_seconds", map[string]string{"outbox_type": "direct", "outcome": relaymetrics.DispatchOfflineSkip}, 1)
+
+	failedRegistry := prometheus.NewRegistry()
+	failureMetrics, err := relaymetrics.NewDispatchMetrics(failedRegistry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := New(&testOutbox{events: []domain.OutboxEvent{{ID: 24, DeviceID: "offline"}}}, testRegistry{err: errors.New("redis unavailable")}, &testPublisher{}, OutboxOptions{BatchSize: 1}, quietLogger(t), failureMetrics)
+	if _, err := failed.RunOnce(context.Background()); err == nil {
+		t.Fatal("RunOnce expected registry failure")
+	}
+	assertCounter(t, failedRegistry, "relay_dispatch_events_total", "direct", relaymetrics.DispatchRegistryError, 1)
+	assertHistogram(t, failedRegistry, "outbox_dispatch_wait_seconds", map[string]string{"outbox_type": "direct", "outcome": relaymetrics.DispatchWS}, 0)
+
+	for _, tc := range []struct {
+		name      string
+		outbox    *testOutbox
+		registry  testRegistry
+		publisher *testPublisher
+		outcome   string
+	}{
+		{name: "publish error", outbox: &testOutbox{events: []domain.OutboxEvent{{ID: 25, DeviceID: "online"}}}, registry: testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "conn"}}}, publisher: &testPublisher{err: errors.New("redis unavailable")}, outcome: relaymetrics.DispatchPublishError},
+		{name: "mark error", outbox: &testOutbox{events: []domain.OutboxEvent{{ID: 26, DeviceID: "online"}}, markErr: errors.New("postgres unavailable")}, registry: testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "conn"}}}, publisher: &testPublisher{}, outcome: relaymetrics.DispatchMarkError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := prometheus.NewRegistry()
+			m, err := relaymetrics.NewDispatchMetrics(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dispatcher := New(tc.outbox, tc.registry, tc.publisher, OutboxOptions{BatchSize: 1}, quietLogger(t), m)
+			if _, err := dispatcher.RunOnce(context.Background()); err == nil {
+				t.Fatal("RunOnce expected failure")
+			}
+			assertCounter(t, r, "relay_dispatch_events_total", "direct", tc.outcome, 1)
+			assertHistogram(t, r, "relay_dispatch_event_duration_seconds", map[string]string{"outbox_type": "direct", "outcome": tc.outcome}, 1)
+			assertHistogram(t, r, "outbox_dispatch_wait_seconds", map[string]string{"outbox_type": "direct", "outcome": relaymetrics.DispatchWS}, 0)
+		})
+	}
+}
+
+func TestRetryMetricsRecordPublishedDeferredAndErrorsOnce(t *testing.T) {
+	registry := newMetricsRegistry(t)
+	metrics, err := relaymetrics.NewDispatchMetrics(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := time.Now().Add(time.Minute)
+	outbox := &testOutbox{retryEvents: []domain.OutboxEvent{
+		{ID: 31, OutboxType: "direct", DeviceID: "online", ClaimExpiry: lease},
+		{ID: 32, OutboxType: "direct", DeviceID: "offline", ClaimExpiry: lease},
+	}}
+	d := New(outbox, testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "conn"}}}, &testPublisher{}, OutboxOptions{RetryBatchSize: 10}, quietLogger(t), metrics)
+	if count, err := d.RetryOnce(context.Background()); err != nil || count != 1 {
+		t.Fatalf("RetryOnce()=(%d,%v), want (1,nil)", count, err)
+	}
+	assertCounter(t, registry, "relay_retry_events_total", "direct", relaymetrics.RetryPublished, 1)
+	assertCounter(t, registry, "relay_retry_events_total", "direct", relaymetrics.RetryOfflineDeferred, 1)
+
+	failedRegistry := prometheus.NewRegistry()
+	failureMetrics, err := relaymetrics.NewDispatchMetrics(failedRegistry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := New(&testOutbox{retryEvents: []domain.OutboxEvent{{ID: 33, OutboxType: "group", DeviceID: "online", ClaimExpiry: lease}}}, testRegistry{err: errors.New("redis unavailable")}, &testPublisher{}, OutboxOptions{RetryBatchSize: 1}, quietLogger(t), failureMetrics)
+	if _, err := failed.RetryOnce(context.Background()); err == nil {
+		t.Fatal("RetryOnce expected registry failure")
+	}
+	assertCounter(t, failedRegistry, "relay_retry_events_total", "group", relaymetrics.RetryLookupError, 1)
+	assertHistogram(t, failedRegistry, "relay_retry_event_duration_seconds", map[string]string{"outbox_type": "group", "outcome": relaymetrics.RetryLookupError}, 1)
+
+	for _, tc := range []struct {
+		name      string
+		outbox    *testOutbox
+		registry  testRegistry
+		publisher *testPublisher
+		outcome   string
+	}{
+		{name: "mark attempt error", outbox: &testOutbox{retryEvents: []domain.OutboxEvent{{ID: 34, OutboxType: "direct", DeviceID: "online", ClaimExpiry: lease}}, retryMarkErr: errors.New("postgres unavailable")}, registry: testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "conn"}}}, publisher: &testPublisher{}, outcome: relaymetrics.RetryMarkAttemptError},
+		{name: "publish error", outbox: &testOutbox{retryEvents: []domain.OutboxEvent{{ID: 35, OutboxType: "direct", DeviceID: "online", ClaimExpiry: lease}}}, registry: testRegistry{connections: map[string]domain.Connection{"online": {NodeID: "ws", ConnID: "conn"}}}, publisher: &testPublisher{err: errors.New("redis unavailable")}, outcome: relaymetrics.RetryPublishError},
+		{name: "release error", outbox: &testOutbox{retryEvents: []domain.OutboxEvent{{ID: 36, OutboxType: "direct", DeviceID: "offline", ClaimExpiry: lease}}, releaseErr: errors.New("postgres unavailable")}, registry: testRegistry{}, publisher: &testPublisher{}, outcome: relaymetrics.RetryReleaseError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := prometheus.NewRegistry()
+			m, err := relaymetrics.NewDispatchMetrics(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dispatcher := New(tc.outbox, tc.registry, tc.publisher, OutboxOptions{RetryBatchSize: 1}, quietLogger(t), m)
+			if _, err := dispatcher.RetryOnce(context.Background()); err == nil {
+				t.Fatal("RetryOnce expected failure")
+			}
+			assertCounter(t, r, "relay_retry_events_total", "direct", tc.outcome, 1)
+			assertHistogram(t, r, "relay_retry_event_duration_seconds", map[string]string{"outbox_type": "direct", "outcome": tc.outcome}, 1)
+			assertCounterByOutboxType(t, r, "relay_retry_exhaustions_total", "direct", 0)
+		})
+	}
+}
+
+func newMetricsRegistry(t *testing.T) *prometheus.Registry {
+	t.Helper()
+	registry, err := sharedmetrics.NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
+}
+
+func assertCounter(t *testing.T, registry *prometheus.Registry, name, outboxType, outcome string, want float64) {
+	t.Helper()
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, pair := range metric.GetLabel() {
+				labels[pair.GetName()] = pair.GetValue()
+			}
+			if labels["outbox_type"] == outboxType && labels["outcome"] == outcome {
+				if got := metric.GetCounter().GetValue(); got != want {
+					t.Fatalf("%s{%s,%s}=%v, want %v", name, outboxType, outcome, got, want)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("counter %s{%s,%s} not found", name, outboxType, outcome)
+}
+
+func assertCounterByOutboxType(t *testing.T, registry *prometheus.Registry, name, outboxType string, want float64) {
+	t.Helper()
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, pair := range metric.GetLabel() {
+				if pair.GetName() == "outbox_type" && pair.GetValue() == outboxType {
+					if got := metric.GetCounter().GetValue(); got != want {
+						t.Fatalf("%s{outbox_type=%q}=%v, want %v", name, outboxType, got, want)
+					}
+					return
+				}
+			}
+		}
+	}
+	if want == 0 {
+		return
+	}
+	t.Fatalf("counter %s{outbox_type=%q} not found", name, outboxType)
+}
+
+func assertHistogram(t *testing.T, registry *prometheus.Registry, name string, labels map[string]string, want uint64) {
+	t.Helper()
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			matches := true
+			for _, pair := range metric.GetLabel() {
+				if expected, ok := labels[pair.GetName()]; !ok || expected != pair.GetValue() {
+					matches = false
+				}
+			}
+			if matches {
+				found = true
+				if metric.GetHistogram().GetSampleCount() == want {
+					return
+				}
+			}
+		}
+	}
+	if want == 0 && !found {
+		return
+	}
+	t.Fatalf("histogram %s labels=%v sample count=%d not found", name, labels, want)
 }
 
 func quietLogger(t *testing.T) logging.Logger {

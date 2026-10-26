@@ -66,11 +66,34 @@ services:
     environment:
       POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
       REDIS_ADDR: redis:6379
+      METRICS_ADDR: :9092
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      message-service:
+        condition: service_started
+      relay:
+        condition: service_started
+      ws-gateway:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      core-api:
+        condition: service_started
 
   core-api:
     build:
@@ -81,6 +104,7 @@ services:
     environment:
       LISTEN_ADDR: :8081
       GRPC_ADDR: :50052
+      METRICS_ADDR: :9091
       POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
       REDIS_ADDR: redis:6379
       DEV_OTP_CODE: "000000"
@@ -114,6 +138,7 @@ services:
       MESSAGE_SERVICE_ADDR: message-service:50051
       CORE_API_GRPC_ADDR: core-api:50052
       NODE_ID: ws-1
+      METRICS_ADDR: :9094
       JWT_SECRET: local-development-secret-change-before-deployment-000000
     ports:
       - "8080:8080"
@@ -135,9 +160,11 @@ services:
       POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
       REDIS_ADDR: redis:6379
       RELAY_POLL_INTERVAL: 250ms
+      METRICS_ADDR: :9093
       RELAY_BATCH_SIZE: 100
       RELAY_WORKERS: 2
       RELAY_CLAIM_LEASE: 30s
+      RELAY_SNAPSHOT_COUNT_CAP: ${RELAY_SNAPSHOT_COUNT_CAP:-1000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -154,6 +181,7 @@ services:
       POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
       REDIS_ADDR: redis:6379
       NOTIFICATION_COALESCE_WINDOW: 5s
+      METRICS_ADDR: :9095
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
     volumes:
@@ -167,3 +195,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  prometheus_data:

@@ -1,0 +1,34 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: core-api
+    static_configs:
+      - targets: ["core-api:9091"]
+        labels:
+          service: core-api
+
+  - job_name: message-service
+    static_configs:
+      - targets: ["message-service:9092"]
+        labels:
+          service: message-service
+
+  - job_name: relay
+    static_configs:
+      - targets: ["relay:9093"]
+        labels:
+          service: relay
+
+  - job_name: ws-gateway
+    static_configs:
+      - targets: ["ws-gateway:9094"]
+        labels:
+          service: ws-gateway
+
+  - job_name: notification-service
+    static_configs:
+      - targets: ["notification-service:9095"]
+        labels:
+          service: notification-service
