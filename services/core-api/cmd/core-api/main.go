@@ -18,7 +18,9 @@ import (
 	s3adapter "github.com/chat-platform/backend/services/core-api/internal/adapter/outbound/s3"
 	"github.com/chat-platform/backend/services/core-api/internal/app"
 	"github.com/chat-platform/backend/services/core-api/internal/config"
+	coremetrics "github.com/chat-platform/backend/services/core-api/internal/metrics"
 	"github.com/chat-platform/backend/shared/pkg/logging"
+	sharedmetrics "github.com/chat-platform/backend/shared/pkg/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -63,14 +65,38 @@ func main() {
 	service := app.NewWithMedia(postgresadapter.New(pool), redisadapter.NewSessionCache(redisClient), mediaSigner, app.Config{
 		OTPCode: cfg.DevOTPCode, Secret: []byte(cfg.JWTSecret), SessionTTL: cfg.SessionTTL, MediaURLTTL: cfg.Media.URLTTL,
 	})
-	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpadapter.New(service, logger.With("component", "http_server")), ReadHeaderTimeout: 5 * time.Second}
+	registry, err := sharedmetrics.NewRegistry()
+	if err != nil {
+		fatal(ctx, logger, "create metrics registry", err)
+	}
+	httpMetrics, err := coremetrics.NewHTTP(registry)
+	if err != nil {
+		fatal(ctx, logger, "register Core API HTTP metrics", err)
+	}
+	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpadapter.NewWithMetrics(service, logger.With("component", "http_server"), httpMetrics), ReadHeaderTimeout: 5 * time.Second}
 	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
 		fatal(ctx, logger, "listen for gRPC", err, "address", cfg.GRPCAddr)
 	}
+	metricsServer, err := sharedmetrics.Start(cfg.MetricsAddr, registry)
+	if err != nil {
+		fatal(ctx, logger, "start metrics listener", err, "address", cfg.MetricsAddr)
+	}
+	logger.Info(ctx, "Core API metrics listener started", "address", cfg.MetricsAddr)
+	go func() {
+		if err, ok := <-metricsServer.Done(); ok && ctx.Err() == nil {
+			if err == nil {
+				err = errors.New("metrics listener stopped unexpectedly")
+			}
+			logger.Error(context.Background(), "Core API metrics server failed", "address", cfg.MetricsAddr, "error", err)
+			stop()
+		}
+	}()
 	grpcServer := grpc.NewServer()
 	grpcadapter.RegisterSession(grpcServer, service, logger.With("component", "grpc_server"))
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		logger.Info(context.Background(), "core-api shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -95,8 +121,22 @@ func main() {
 		}
 	}()
 	logger.Info(ctx, "core-api HTTP listening", "address", httpServer.Addr)
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		fatal(ctx, logger, "core-api HTTP server failed", err)
+	serveErr := httpServer.ListenAndServe()
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		logger.Error(ctx, "core-api HTTP server failed", "error", serveErr)
+		stop()
+	}
+	if ctx.Err() == nil {
+		stop()
+	}
+	<-shutdownDone
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error(shutdownCtx, "Core API metrics server shutdown failed", "address", cfg.MetricsAddr, "error", err)
+	}
+	cancel()
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		os.Exit(1)
 	}
 }
 

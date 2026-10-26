@@ -22,6 +22,7 @@ type MediaStorage struct {
 type Config struct {
 	ListenAddr  string
 	GRPCAddr    string
+	MetricsAddr string
 	PostgresDSN string
 	RedisAddr   string
 	DevOTPCode  string
@@ -68,6 +69,7 @@ func FromEnv() (Config, error) {
 	return Config{
 		ListenAddr:  stringEnv("LISTEN_ADDR", ":8081"),
 		GRPCAddr:    stringEnv("GRPC_ADDR", ":50052"),
+		MetricsAddr: stringEnv("METRICS_ADDR", "127.0.0.1:9091"),
 		PostgresDSN: stringEnv("POSTGRES_DSN", defaultPostgresDSN),
 		RedisAddr:   stringEnv("REDIS_ADDR", "localhost:6379"),
 		DevOTPCode:  stringEnv("DEV_OTP_CODE", "000000"),

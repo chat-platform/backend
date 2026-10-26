@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/chat-platform/backend/services/core-api/internal/app"
+	coremetrics "github.com/chat-platform/backend/services/core-api/internal/metrics"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/labstack/echo/v4"
 )
@@ -15,6 +16,10 @@ type Server struct {
 }
 
 func New(service *app.Service, logger logging.Logger) *Server {
+	return NewWithMetrics(service, logger, nil)
+}
+
+func NewWithMetrics(service *app.Service, logger logging.Logger, metrics *coremetrics.HTTPMetrics) *Server {
 	const (
 		GET    = http.MethodGet
 		HEAD   = http.MethodHead
@@ -59,6 +64,9 @@ func New(service *app.Service, logger logging.Logger) *Server {
 	v1.Add(DELETE, "/groups/:id/members/:userId", s.removeGroupMember)
 	v1.Add(POST, "/groups/:id/admins", s.addGroupAdmins)
 	v1.Add(DELETE, "/groups/:id/admins/:userId", s.removeGroupAdmin)
+	if metrics != nil {
+		metrics.Install(e)
+	}
 	return s
 }
 
