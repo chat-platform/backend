@@ -156,7 +156,7 @@ func TestGetDirectChatPeerRequiresActiveDirectChatMembership(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
 	member, peer, outsider := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	_, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15550000201'),($2,'+15550000202'),($3,'+15550000203')`, member, peer, outsider)
+	_, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone,display_name) VALUES($1,'+15550000201','Member'),($2,'+15550000202','Alice'),($3,'+15550000203','Outsider')`, member, peer, outsider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,8 +165,8 @@ func TestGetDirectChatPeerRequiresActiveDirectChatMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := repo.GetDirectChatPeer(ctx, member, chatID)
-	if err != nil || got != peer {
-		t.Fatalf("member peer=(%q,%v), want %q", got, err, peer)
+	if err != nil || got.UserID != peer || got.DisplayName != "Alice" {
+		t.Fatalf("member peer=(%+v,%v), want user %q and display name Alice", got, err, peer)
 	}
 	if _, err := repo.GetDirectChatPeer(ctx, outsider, chatID); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("outsider lookup error=%v, want not found", err)

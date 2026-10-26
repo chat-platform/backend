@@ -53,8 +53,8 @@ func (r *repoFake) ClearPushToken(context.Context, string) error       { return 
 func (r *repoFake) GetOrCreateDirectChat(context.Context, string, string) (string, error) {
 	return "chat-1", nil
 }
-func (r *repoFake) GetDirectChatPeer(context.Context, string, string) (string, error) {
-	return "peer-1", nil
+func (r *repoFake) GetDirectChatPeer(context.Context, string, string) (DirectChatPeer, error) {
+	return DirectChatPeer{UserID: "peer-1", DisplayName: "Alice"}, nil
 }
 func (r *repoFake) ListGroupChats(context.Context, string) ([]GroupChat, error) { return nil, nil }
 func (r *repoFake) CreateGroup(context.Context, string, string, []string) (string, error) {

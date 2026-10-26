@@ -24,6 +24,10 @@ var (
 )
 
 type User struct{ ID, Phone, DisplayName string }
+type DirectChatPeer struct {
+	UserID      string `json:"peerUserId"`
+	DisplayName string `json:"displayName"`
+}
 type Device struct{ ID, UserID string }
 type Session struct {
 	ID, DeviceID string
@@ -55,7 +59,7 @@ type Repository interface {
 	SetPushToken(context.Context, string, string) error
 	ClearPushToken(context.Context, string) error
 	GetOrCreateDirectChat(context.Context, string, string) (string, error)
-	GetDirectChatPeer(context.Context, string, string) (string, error)
+	GetDirectChatPeer(context.Context, string, string) (DirectChatPeer, error)
 	ListGroupChats(context.Context, string) ([]GroupChat, error)
 	CreateGroup(context.Context, string, string, []string) (string, error)
 	UpdateGroup(context.Context, string, string, *string, *string) error
@@ -318,18 +322,18 @@ func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string,
 // DirectChatPeer returns the other participant only when userID is an active
 // member of the requested direct chat. The repository intentionally reports
 // unauthorized and missing chats as the same not-found result.
-func (s *Service) DirectChatPeer(ctx context.Context, userID, chatID string) (string, error) {
+func (s *Service) DirectChatPeer(ctx context.Context, userID, chatID string) (DirectChatPeer, error) {
 	if _, err := uuid.Parse(chatID); err != nil {
-		return "", ErrNotFound
+		return DirectChatPeer{}, ErrNotFound
 	}
-	peerID, err := s.repo.GetDirectChatPeer(ctx, userID, chatID)
+	peer, err := s.repo.GetDirectChatPeer(ctx, userID, chatID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return "", ErrNotFound
+			return DirectChatPeer{}, ErrNotFound
 		}
-		return "", ErrUnavailable
+		return DirectChatPeer{}, ErrUnavailable
 	}
-	return peerID, nil
+	return peer, nil
 }
 
 func (s *Service) Sync(ctx context.Context, claims sessiontoken.Claims, directCursor, groupCursor int64, limit int) (SyncResponse, error) {

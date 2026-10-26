@@ -64,9 +64,9 @@ func (r *sessionRepoStub) ClearPushToken(_ context.Context, device string) error
 func (r *sessionRepoStub) GetOrCreateDirectChat(context.Context, string, string) (string, error) {
 	return "", nil
 }
-func (r *sessionRepoStub) GetDirectChatPeer(_ context.Context, userID, chatID string) (string, error) {
+func (r *sessionRepoStub) GetDirectChatPeer(_ context.Context, userID, chatID string) (app.DirectChatPeer, error) {
 	r.peerLookupUser, r.peerLookupChat = userID, chatID
-	return "peer-user", nil
+	return app.DirectChatPeer{UserID: "peer-user", DisplayName: "Alice"}, nil
 }
 func (r *sessionRepoStub) ListGroupChats(context.Context, string) ([]app.GroupChat, error) {
 	return nil, nil
@@ -261,7 +261,7 @@ func TestDirectChatPeerRequiresAuthenticationAndReturnsPeer(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if recorder.Code != http.StatusOK || response["peerUserId"] != "peer-user" || repo.peerLookupUser != claims.UserID || repo.peerLookupChat != "123e4567-e89b-12d3-a456-426614174000" {
+	if recorder.Code != http.StatusOK || response["peerUserId"] != "peer-user" || response["displayName"] != "Alice" || repo.peerLookupUser != claims.UserID || repo.peerLookupChat != "123e4567-e89b-12d3-a456-426614174000" {
 		t.Fatalf("status=%d response=%v peer lookup=(%q,%q)", recorder.Code, response, repo.peerLookupUser, repo.peerLookupChat)
 	}
 }
