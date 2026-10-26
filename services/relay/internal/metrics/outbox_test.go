@@ -36,9 +36,29 @@ func TestRecordSuccessUpdatesDirectAndGroupSnapshots(t *testing.T) {
 	assertGauge(t, registry, "outbox_ws_retry_exhausted_rows", map[string]string{"outbox_type": "group"}, 1)
 	assertGauge(t, registry, "outbox_ws_overdue_unacknowledged_rows", map[string]string{"outbox_type": "direct", "threshold": "500ms"}, 4)
 	assertGauge(t, registry, "outbox_ws_overdue_unacknowledged_rows", map[string]string{"outbox_type": "direct", "threshold": "1s"}, 2)
+	assertGauge(t, registry, "outbox_snapshot_count_saturated", map[string]string{"outbox_type": "direct", "metric": "pending_rows"}, 0)
 	assertGauge(t, registry, "outbox_snapshot_success", nil, 1)
 	assertGauge(t, registry, "outbox_snapshot_last_success_timestamp_seconds", nil, 1_700_000_000)
 	assertHistogramCount(t, registry, "outbox_snapshot_duration_seconds", map[string]string{"result": "success"}, 1)
+}
+
+func TestRecordSuccessExposesSaturatedCounts(t *testing.T) {
+	registry := newRegistry(t)
+	metrics, err := NewOutboxMetrics(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshots := []domain.OutboxSnapshot{
+		{OutboxType: OutboxDirect, PendingRows: 1000, PendingRowsSaturated: true, RetryPendingRows: 1000, RetryPendingSaturated: true, RetryExhaustedRows: 1000, RetryExhaustedSaturated: true, Overdue500msRows: 1000, Overdue500msSaturated: true, Overdue1sRows: 1000, Overdue1sSaturated: true},
+		{OutboxType: OutboxGroup},
+	}
+	if err := metrics.RecordSuccess(snapshots, time.Now(), time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	for _, metric := range []string{"pending_rows", "retry_pending_rows", "retry_exhausted_rows", "overdue_500ms_rows", "overdue_1s_rows"} {
+		assertGauge(t, registry, "outbox_snapshot_count_saturated", map[string]string{"outbox_type": "direct", "metric": metric}, 1)
+	}
+	assertGauge(t, registry, "outbox_pending_rows", map[string]string{"outbox_type": "direct"}, 1000)
 }
 
 func TestSnapshotFailureRetainsCachedGaugesAndLastSuccess(t *testing.T) {

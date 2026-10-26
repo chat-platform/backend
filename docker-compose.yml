@@ -156,6 +156,7 @@ services:
       RELAY_BATCH_SIZE: 100
       RELAY_WORKERS: 2
       RELAY_CLAIM_LEASE: 30s
+      RELAY_SNAPSHOT_COUNT_CAP: ${RELAY_SNAPSHOT_COUNT_CAP:-1000}
     depends_on:
       postgres:
         condition: service_healthy

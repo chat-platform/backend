@@ -26,6 +26,7 @@ type OutboxMetrics struct {
 	retryOldestAge   *prometheus.GaugeVec
 	retryExhausted   *prometheus.GaugeVec
 	overdueRows      *prometheus.GaugeVec
+	countSaturated   *prometheus.GaugeVec
 	snapshotSuccess  prometheus.Gauge
 	lastSuccess      prometheus.Gauge
 	snapshotDuration *prometheus.HistogramVec
@@ -51,6 +52,9 @@ func NewOutboxMetrics(registry prometheus.Registerer) (*OutboxMetrics, error) {
 		overdueRows: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "outbox_ws_overdue_unacknowledged_rows", Help: "WS-routed new-message rows without acknowledgement beyond the age threshold.",
 		}, []string{"outbox_type", "threshold"}),
+		countSaturated: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "outbox_snapshot_count_saturated", Help: "Whether the corresponding outbox snapshot count is capped and represents a lower bound.",
+		}, []string{"outbox_type", "metric"}),
 		snapshotSuccess: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "outbox_snapshot_success", Help: "Whether the latest complete outbox snapshot succeeded (1) or failed (0).",
 		}),
@@ -63,7 +67,7 @@ func NewOutboxMetrics(registry prometheus.Registerer) (*OutboxMetrics, error) {
 	}
 	collectors := []prometheus.Collector{
 		m.pendingRows, m.oldestPendingAge, m.retryPendingRows, m.retryOldestAge,
-		m.retryExhausted, m.overdueRows, m.snapshotSuccess, m.lastSuccess, m.snapshotDuration,
+		m.retryExhausted, m.overdueRows, m.countSaturated, m.snapshotSuccess, m.lastSuccess, m.snapshotDuration,
 	}
 	for _, collector := range collectors {
 		if err := registry.Register(collector); err != nil {
@@ -105,6 +109,19 @@ func (m *OutboxMetrics) RecordSuccess(snapshots []domain.OutboxSnapshot, collect
 		m.retryExhausted.WithLabelValues(outboxType).Set(float64(snapshot.RetryExhaustedRows))
 		m.overdueRows.WithLabelValues(outboxType, "500ms").Set(float64(snapshot.Overdue500msRows))
 		m.overdueRows.WithLabelValues(outboxType, "1s").Set(float64(snapshot.Overdue1sRows))
+		for metric, saturated := range map[string]bool{
+			"pending_rows":         snapshot.PendingRowsSaturated,
+			"retry_pending_rows":   snapshot.RetryPendingSaturated,
+			"retry_exhausted_rows": snapshot.RetryExhaustedSaturated,
+			"overdue_500ms_rows":   snapshot.Overdue500msSaturated,
+			"overdue_1s_rows":      snapshot.Overdue1sSaturated,
+		} {
+			value := 0.0
+			if saturated {
+				value = 1
+			}
+			m.countSaturated.WithLabelValues(outboxType, metric).Set(value)
+		}
 	}
 	m.snapshotDuration.WithLabelValues("success").Observe(duration.Seconds())
 	m.lastSuccess.Set(float64(collectedAt.UnixNano()) / float64(time.Second))

@@ -14,12 +14,17 @@ type OutboxEvent struct {
 type OutboxSnapshot struct {
 	OutboxType              string
 	PendingRows             int64
+	PendingRowsSaturated    bool
 	OldestPendingAgeSeconds float64
 	RetryPendingRows        int64
+	RetryPendingSaturated   bool
 	RetryOldestAgeSeconds   float64
 	RetryExhaustedRows      int64
+	RetryExhaustedSaturated bool
 	Overdue500msRows        int64
+	Overdue500msSaturated   bool
 	Overdue1sRows           int64
+	Overdue1sSaturated      bool
 }
 
 type Connection struct {

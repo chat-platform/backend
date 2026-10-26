@@ -47,7 +47,7 @@ func main() {
 	if err := rc.Ping(ctx).Err(); err != nil {
 		fatal(ctx, logger, "ping redis", err)
 	}
-	outboxRepository := postgresadapter.NewOutboxRepository(pool)
+	outboxRepository := postgresadapter.NewOutboxRepository(pool, cfg.Outbox.SnapshotCountCap)
 	registry, err := sharedmetrics.NewRegistry()
 	if err != nil {
 		fatal(ctx, logger, "create metrics registry", err)

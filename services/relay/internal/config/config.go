@@ -25,9 +25,12 @@ type WorkerSettings struct {
 }
 
 type OutboxSettings struct {
-	BatchSize  int
-	ClaimLease time.Duration
+	BatchSize        int
+	ClaimLease       time.Duration
+	SnapshotCountCap int
 }
+
+const DefaultSnapshotCountCap = 1000
 
 type RetrySettings struct {
 	Interval  time.Duration
@@ -83,12 +86,20 @@ func FromEnv(logger logging.Logger) (Config, error) {
 			logger.Warn(context.Background(), "invalid relay retry batch size; using default", "value", value)
 		}
 	}
+	snapshotCountCap := DefaultSnapshotCountCap
+	if value := os.Getenv("RELAY_SNAPSHOT_COUNT_CAP"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 || parsed >= int(^uint32(0)>>1) {
+			return Config{}, fmt.Errorf("invalid RELAY_SNAPSHOT_COUNT_CAP %q: must be a positive integer below %d", value, int(^uint32(0)>>1))
+		}
+		snapshotCountCap = parsed
+	}
 	return Config{
 		PostgresDSN: getenv(logger, "POSTGRES_DSN", "postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable"),
 		RedisAddr:   getenv(logger, "REDIS_ADDR", "localhost:6379"),
 		MetricsAddr: getenv(logger, "METRICS_ADDR", "127.0.0.1:9093"),
 		Workers:     WorkerSettings{Count: workers, PollInterval: poll},
-		Outbox:      OutboxSettings{BatchSize: batch, ClaimLease: lease},
+		Outbox:      OutboxSettings{BatchSize: batch, ClaimLease: lease, SnapshotCountCap: snapshotCountCap},
 		Retry:       RetrySettings{Interval: retryInterval, BatchSize: retryBatch},
 	}, nil
 }

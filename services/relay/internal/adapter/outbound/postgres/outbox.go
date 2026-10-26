@@ -10,52 +10,86 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type OutboxRepository struct{ pool *pgxpool.Pool }
+type OutboxRepository struct {
+	pool             *pgxpool.Pool
+	snapshotCountCap int
+}
 
-func NewOutboxRepository(pool *pgxpool.Pool) *OutboxRepository { return &OutboxRepository{pool: pool} }
+func NewOutboxRepository(pool *pgxpool.Pool, snapshotCountCap int) *OutboxRepository {
+	return &OutboxRepository{pool: pool, snapshotCountCap: snapshotCountCap}
+}
 
 func (r *OutboxRepository) Snapshot(ctx context.Context) ([]domain.OutboxSnapshot, error) {
+	countCap := r.snapshotCountCap
+	if countCap <= 0 || countCap >= int(^uint32(0)>>1) {
+		return nil, fmt.Errorf("snapshot count cap must be positive and below %d", int(^uint32(0)>>1))
+	}
 	const query = `
-WITH sample_time AS (
-	SELECT statement_timestamp() AS at
-), direct AS (
-	SELECT
-		count(*) FILTER (WHERE outbox.dispatched_at IS NULL) AS pending_rows,
-		COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (sample_time.at - (
-			SELECT pending.created_at FROM direct_outbox AS pending
-			WHERE pending.dispatched_at IS NULL ORDER BY pending.id LIMIT 1
-		)))), 0)::double precision AS oldest_pending_age_seconds,
-		count(*) FILTER (WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count < 10) AS retry_pending_rows,
-		COALESCE(MAX(GREATEST(0, EXTRACT(EPOCH FROM (sample_time.at - outbox.dispatched_at)))) FILTER (
-			WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count < 10
-		), 0)::double precision AS retry_oldest_age_seconds,
-		count(*) FILTER (WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count >= 10) AS retry_exhausted_rows,
-		count(*) FILTER (WHERE outbox.event_type = 'NEW_MESSAGE' AND outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.created_at <= sample_time.at - interval '500 milliseconds') AS overdue_500ms_rows,
-		count(*) FILTER (WHERE outbox.event_type = 'NEW_MESSAGE' AND outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.created_at <= sample_time.at - interval '1 second') AS overdue_1s_rows
-	FROM direct_outbox AS outbox CROSS JOIN sample_time
-), grouped AS (
-	SELECT
-		count(*) FILTER (WHERE outbox.dispatched_at IS NULL) AS pending_rows,
-		COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (sample_time.at - (
-			SELECT pending.created_at FROM group_outbox AS pending
-			WHERE pending.dispatched_at IS NULL ORDER BY pending.id LIMIT 1
-		)))), 0)::double precision AS oldest_pending_age_seconds,
-		count(*) FILTER (WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count < 10) AS retry_pending_rows,
-		COALESCE(MAX(GREATEST(0, EXTRACT(EPOCH FROM (sample_time.at - outbox.dispatched_at)))) FILTER (
-			WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count < 10
-		), 0)::double precision AS retry_oldest_age_seconds,
-		count(*) FILTER (WHERE outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.attempt_count >= 10) AS retry_exhausted_rows,
-		count(*) FILTER (WHERE event.event_type = 'NEW_MESSAGE' AND outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.created_at <= sample_time.at - interval '500 milliseconds') AS overdue_500ms_rows,
-		count(*) FILTER (WHERE event.event_type = 'NEW_MESSAGE' AND outbox.routed_to = 'WS' AND outbox.delivered_at IS NULL AND outbox.created_at <= sample_time.at - interval '1 second') AS overdue_1s_rows
-	FROM group_outbox AS outbox
-	JOIN group_event AS event ON event.event_id = outbox.event_id
+WITH sample_time AS (SELECT statement_timestamp() AS at),
+direct_pending AS (
+	SELECT id, created_at FROM direct_outbox WHERE dispatched_at IS NULL ORDER BY id LIMIT $1 + 1
+), direct_retry AS (
+	SELECT dispatched_at FROM direct_outbox
+	WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count < 10
+	ORDER BY dispatched_at, id LIMIT $1 + 1
+), direct_exhausted AS (
+	SELECT id FROM direct_outbox
+	WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count >= 10
+	ORDER BY id LIMIT $1 + 1
+), direct_overdue AS (
+	SELECT created_at FROM direct_outbox CROSS JOIN sample_time
+	WHERE event_type='NEW_MESSAGE' AND routed_to='WS' AND delivered_at IS NULL
+	AND created_at <= sample_time.at - interval '500 milliseconds'
+	ORDER BY created_at LIMIT $1 + 1
+), group_pending AS (
+	SELECT id, created_at FROM group_outbox WHERE dispatched_at IS NULL ORDER BY id LIMIT $1 + 1
+), group_retry AS (
+	SELECT dispatched_at FROM group_outbox
+	WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count < 10
+	ORDER BY dispatched_at, id LIMIT $1 + 1
+), group_exhausted AS (
+	SELECT id FROM group_outbox
+	WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count >= 10
+	ORDER BY id LIMIT $1 + 1
+), group_overdue AS (
+	SELECT outbox.created_at FROM group_outbox AS outbox
+	JOIN group_event AS event ON event.event_id=outbox.event_id
 	CROSS JOIN sample_time
+	WHERE event.event_type='NEW_MESSAGE' AND outbox.routed_to='WS' AND outbox.delivered_at IS NULL
+	AND outbox.created_at <= sample_time.at - interval '500 milliseconds'
+	ORDER BY outbox.created_at, outbox.event_id LIMIT $1 + 1
+), direct_metrics AS (
+	SELECT 'direct'::text AS outbox_type,
+		LEAST((SELECT count(*) FROM direct_pending), $1)::bigint AS pending_rows,
+		(SELECT count(*) > $1 FROM direct_pending) AS pending_saturated,
+		COALESCE(GREATEST(0, EXTRACT(EPOCH FROM ((SELECT at FROM sample_time) - (SELECT created_at FROM direct_pending ORDER BY id LIMIT 1)))), 0)::double precision AS oldest_pending_age_seconds,
+		LEAST((SELECT count(*) FROM direct_retry), $1)::bigint AS retry_pending_rows,
+		(SELECT count(*) > $1 FROM direct_retry) AS retry_pending_saturated,
+		COALESCE(GREATEST(0, EXTRACT(EPOCH FROM ((SELECT at FROM sample_time) - (SELECT dispatched_at FROM direct_retry WHERE dispatched_at IS NOT NULL ORDER BY dispatched_at LIMIT 1)))), 0)::double precision AS retry_oldest_age_seconds,
+		LEAST((SELECT count(*) FROM direct_exhausted), $1)::bigint AS retry_exhausted_rows,
+		(SELECT count(*) > $1 FROM direct_exhausted) AS retry_exhausted_saturated,
+		LEAST((SELECT count(*) FROM direct_overdue), $1)::bigint AS overdue_500ms_rows,
+		(SELECT count(*) > $1 FROM direct_overdue) AS overdue_500ms_saturated,
+		LEAST((SELECT count(*) FILTER (WHERE created_at <= (SELECT at FROM sample_time) - interval '1 second') FROM direct_overdue), $1)::bigint AS overdue_1s_rows,
+		((SELECT count(*) FILTER (WHERE created_at <= (SELECT at FROM sample_time) - interval '1 second') FROM direct_overdue) > $1) AS overdue_1s_saturated
+), group_metrics AS (
+	SELECT 'group'::text AS outbox_type,
+		LEAST((SELECT count(*) FROM group_pending), $1)::bigint AS pending_rows,
+		(SELECT count(*) > $1 FROM group_pending) AS pending_saturated,
+		COALESCE(GREATEST(0, EXTRACT(EPOCH FROM ((SELECT at FROM sample_time) - (SELECT created_at FROM group_pending ORDER BY id LIMIT 1)))), 0)::double precision AS oldest_pending_age_seconds,
+		LEAST((SELECT count(*) FROM group_retry), $1)::bigint AS retry_pending_rows,
+		(SELECT count(*) > $1 FROM group_retry) AS retry_pending_saturated,
+		COALESCE(GREATEST(0, EXTRACT(EPOCH FROM ((SELECT at FROM sample_time) - (SELECT dispatched_at FROM group_retry WHERE dispatched_at IS NOT NULL ORDER BY dispatched_at LIMIT 1)))), 0)::double precision AS retry_oldest_age_seconds,
+		LEAST((SELECT count(*) FROM group_exhausted), $1)::bigint AS retry_exhausted_rows,
+		(SELECT count(*) > $1 FROM group_exhausted) AS retry_exhausted_saturated,
+		LEAST((SELECT count(*) FROM group_overdue), $1)::bigint AS overdue_500ms_rows,
+		(SELECT count(*) > $1 FROM group_overdue) AS overdue_500ms_saturated,
+		LEAST((SELECT count(*) FILTER (WHERE created_at <= (SELECT at FROM sample_time) - interval '1 second') FROM group_overdue), $1)::bigint AS overdue_1s_rows,
+		((SELECT count(*) FILTER (WHERE created_at <= (SELECT at FROM sample_time) - interval '1 second') FROM group_overdue) > $1) AS overdue_1s_saturated
 )
-SELECT 'direct', pending_rows, oldest_pending_age_seconds, retry_pending_rows, retry_oldest_age_seconds, retry_exhausted_rows, overdue_500ms_rows, overdue_1s_rows FROM direct
-UNION ALL
-SELECT 'group', pending_rows, oldest_pending_age_seconds, retry_pending_rows, retry_oldest_age_seconds, retry_exhausted_rows, overdue_500ms_rows, overdue_1s_rows FROM grouped`
+SELECT * FROM direct_metrics UNION ALL SELECT * FROM group_metrics`
 
-	rows, err := r.pool.Query(ctx, query)
+	rows, err := r.pool.Query(ctx, query, countCap)
 	if err != nil {
 		return nil, fmt.Errorf("query outbox metrics snapshot: %w", err)
 	}
@@ -67,12 +101,17 @@ SELECT 'group', pending_rows, oldest_pending_age_seconds, retry_pending_rows, re
 		if err := rows.Scan(
 			&snapshot.OutboxType,
 			&snapshot.PendingRows,
+			&snapshot.PendingRowsSaturated,
 			&snapshot.OldestPendingAgeSeconds,
 			&snapshot.RetryPendingRows,
+			&snapshot.RetryPendingSaturated,
 			&snapshot.RetryOldestAgeSeconds,
 			&snapshot.RetryExhaustedRows,
+			&snapshot.RetryExhaustedSaturated,
 			&snapshot.Overdue500msRows,
+			&snapshot.Overdue500msSaturated,
 			&snapshot.Overdue1sRows,
+			&snapshot.Overdue1sSaturated,
 		); err != nil {
 			return nil, fmt.Errorf("scan outbox metrics snapshot: %w", err)
 		}

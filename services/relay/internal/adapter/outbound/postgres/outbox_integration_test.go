@@ -65,7 +65,19 @@ func testRepository(t *testing.T) (*OutboxRepository, *pgxpool.Pool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewOutboxRepository(pool), pool
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX direct_outbox_undispatched_idx ON direct_outbox(id) WHERE dispatched_at IS NULL;
+		CREATE INDEX direct_outbox_ws_retry_pending_snapshot_idx ON direct_outbox(dispatched_at,id) WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count<10;
+		CREATE INDEX direct_outbox_ws_retry_exhausted_snapshot_idx ON direct_outbox(id) WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count>=10;
+		CREATE INDEX direct_outbox_ws_overdue_message_snapshot_idx ON direct_outbox(created_at) WHERE event_type='NEW_MESSAGE' AND routed_to='WS' AND delivered_at IS NULL;
+		CREATE INDEX group_outbox_undispatched_idx ON group_outbox(id) WHERE dispatched_at IS NULL;
+		CREATE INDEX group_outbox_ws_retry_pending_snapshot_idx ON group_outbox(dispatched_at,id) WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count<10;
+		CREATE INDEX group_outbox_ws_retry_exhausted_snapshot_idx ON group_outbox(id) WHERE routed_to='WS' AND delivered_at IS NULL AND attempt_count>=10;
+		CREATE INDEX group_outbox_ws_overdue_snapshot_idx ON group_outbox(created_at,event_id) WHERE routed_to='WS' AND delivered_at IS NULL`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewOutboxRepository(pool, 1000), pool
 }
 
 func TestRetryClaimsBackoffProgressionAndAttemptLimit(t *testing.T) {
@@ -183,6 +195,73 @@ func TestSnapshotReportsEmptyAndPopulatedDirectAndGroupOutboxes(t *testing.T) {
 	group := byType["group"]
 	if group.PendingRows != 0 || group.RetryPendingRows != 2 || group.Overdue500msRows != 1 || group.Overdue1sRows != 1 {
 		t.Fatalf("group snapshot=%+v, want no undispatched rows, two retry rows, and only the message overdue", group)
+	}
+}
+
+func TestSnapshotBoundsCountsAndReportsSaturation(t *testing.T) {
+	repo, pool := testRepository(t)
+	repo = NewOutboxRepository(pool, 2)
+	ctx := context.Background()
+	device := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	for i := 0; i < 3; i++ {
+		insertEvent(t, pool, device, "pending")
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(device_id,event_type,payload,created_at,routed_to,dispatched_at,attempt_count)
+		SELECT $1,'NEW_MESSAGE','retry',now()-interval '3 seconds','WS',now()-interval '3 seconds',1 FROM generate_series(1,3)`, device); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(device_id,event_type,payload,created_at,routed_to,dispatched_at,attempt_count)
+		SELECT $1,'NEW_MESSAGE','exhausted',now()-interval '3 seconds','WS',now()-interval '3 seconds',10 FROM generate_series(1,3)`, device); err != nil {
+		t.Fatal(err)
+	}
+
+	var groupIDs [7]int64
+	for i := range groupIDs {
+		if err := pool.QueryRow(ctx, `INSERT INTO group_event(event_type,payload) VALUES ('NEW_MESSAGE','message') RETURNING event_id`).Scan(&groupIDs[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(event_id,device_id,created_at) SELECT event_id,$1,now() FROM unnest($2::bigint[]) AS event_id`, device, groupIDs[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(event_id,device_id,created_at,routed_to,dispatched_at,attempt_count)
+		SELECT event_id,$1,now()-interval '3 seconds','WS',now()-interval '3 seconds',1 FROM unnest($2::bigint[]) AS event_id`, device, groupIDs[2:5]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO group_outbox(event_id,device_id,created_at,routed_to,dispatched_at,attempt_count)
+		SELECT event_id,$1,now()-interval '3 seconds','WS',now()-interval '3 seconds',10 FROM unnest($2::bigint[]) AS event_id`, device, groupIDs[5:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `WITH receipts AS (
+		INSERT INTO group_event(event_type,payload)
+		SELECT 'DELIVERY_RECEIPT','receipt' FROM generate_series(1,100)
+		RETURNING event_id
+	) INSERT INTO group_outbox(event_id,device_id,created_at,routed_to,dispatched_at,attempt_count)
+	SELECT event_id,$1,now()-interval '4 seconds','WS',now()-interval '4 seconds',10 FROM receipts`, device); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshots, err := repo.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byType := snapshotsByType(t, snapshots)
+	direct := byType["direct"]
+	if direct.PendingRows != 2 || !direct.PendingRowsSaturated || direct.RetryPendingRows != 2 || !direct.RetryPendingSaturated || direct.RetryExhaustedRows != 2 || !direct.RetryExhaustedSaturated {
+		t.Fatalf("direct bounded counts=%+v, want cap 2 with saturation", direct)
+	}
+	if direct.Overdue500msRows != 2 || !direct.Overdue500msSaturated || direct.Overdue1sRows != 2 || !direct.Overdue1sSaturated {
+		t.Fatalf("direct overdue counts=%+v, want cap 2 with saturation", direct)
+	}
+	group := byType["group"]
+	if group.PendingRows != 2 || group.PendingRowsSaturated {
+		t.Fatalf("group pending count=%d saturated=%v, want exact cap 2", group.PendingRows, group.PendingRowsSaturated)
+	}
+	if group.RetryPendingRows != 2 || !group.RetryPendingSaturated || group.RetryExhaustedRows != 2 || !group.RetryExhaustedSaturated {
+		t.Fatalf("group bounded retry counts=%+v, want cap 2 with saturation", group)
+	}
+	if group.Overdue500msRows != 2 || !group.Overdue500msSaturated || group.Overdue1sRows != 2 || !group.Overdue1sSaturated {
+		t.Fatalf("group overdue counts=%+v, want cap 2 with saturation", group)
 	}
 }
 
