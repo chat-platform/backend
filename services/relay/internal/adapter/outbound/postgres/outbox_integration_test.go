@@ -300,11 +300,18 @@ func TestClaimBatchAndMarkDispatched(t *testing.T) {
 	if !lease.After(time.Now()) {
 		t.Fatalf("claim expiry=%v, want future lease", lease)
 	}
-	if err := repo.MarkDispatched(ctx, "direct", ids[0], domain.Route{To: domain.RouteWebSocket}); err != nil {
+	wait, err := repo.MarkDispatched(ctx, "direct", ids[0], domain.Route{To: domain.RouteWebSocket})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkDispatched(ctx, "direct", ids[1], domain.Route{}); err != nil {
+	if wait < 0 {
+		t.Fatalf("dispatch wait=%v, want non-negative", wait)
+	}
+	if _, err := repo.MarkDispatched(ctx, "direct", ids[1], domain.Route{}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := repo.MarkDispatched(ctx, "direct", ids[0], domain.Route{To: domain.RouteWebSocket}); err == nil {
+		t.Fatal("duplicate MarkDispatched succeeded; expected no first-transition duration")
 	}
 	var routed *string
 	var dispatched time.Time
@@ -361,8 +368,12 @@ func TestClaimGroupBatchJoinsPayloadAndMarksGroupRow(t *testing.T) {
 	if events[0].OutboxType != "group" || events[0].DeviceID != device || string(events[0].Payload) != `{"chatId":"group"}` {
 		t.Fatalf("claimed group event=%+v", events[0])
 	}
-	if err := repo.MarkDispatched(ctx, "group", events[0].ID, domain.Route{To: domain.RouteWebSocket}); err != nil {
+	wait, err := repo.MarkDispatched(ctx, "group", events[0].ID, domain.Route{To: domain.RouteWebSocket})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if wait < 0 {
+		t.Fatalf("group dispatch wait=%v, want non-negative", wait)
 	}
 	var route string
 	if err := pool.QueryRow(ctx, `SELECT routed_to FROM group_outbox WHERE id=$1`, events[0].ID).Scan(&route); err != nil || route != domain.RouteWebSocket {

@@ -9,7 +9,7 @@ import (
 type OutboxRepository interface {
 	ClaimBatch(context.Context, string, int, time.Duration) ([]domain.OutboxEvent, error)
 	ClaimRetryBatch(context.Context, string, int, time.Duration) ([]domain.OutboxEvent, error)
-	MarkDispatched(context.Context, string, int64, domain.Route) error
+	MarkDispatched(context.Context, string, int64, domain.Route) (time.Duration, error)
 	MarkRetryAttempt(context.Context, string, int64, time.Time) error
 	ReleaseRetryClaim(context.Context, string, int64, time.Time, time.Duration) error
 }

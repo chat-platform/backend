@@ -56,6 +56,10 @@ func main() {
 	if err != nil {
 		fatal(ctx, logger, "register outbox metrics", err)
 	}
+	dispatchMetrics, err := relaymetrics.NewDispatchMetrics(registry)
+	if err != nil {
+		fatal(ctx, logger, "register dispatch metrics", err)
+	}
 	metricsServer, err := sharedmetrics.Start(cfg.MetricsAddr, registry)
 	if err != nil {
 		logger.Error(ctx, "metrics listener failed to start", "address", cfg.MetricsAddr, "error", err)
@@ -72,7 +76,7 @@ func main() {
 	}()
 	dispatcher := app.New(outboxRepository, redisadapter.NewRegistry(rc), redisadapter.NewPublisher(rc), app.OutboxOptions{
 		BatchSize: cfg.Outbox.BatchSize, RetryBatchSize: cfg.Retry.BatchSize, ClaimLease: cfg.Outbox.ClaimLease,
-	}, logger.With("component", "dispatcher"))
+	}, logger.With("component", "dispatcher"), dispatchMetrics)
 	logger.Info(ctx, "relay started", "workers", cfg.Workers.Count, "batch_size", cfg.Outbox.BatchSize, "poll_interval", cfg.Workers.PollInterval.String(), "claim_lease", cfg.Outbox.ClaimLease.String(), "metrics_address", cfg.MetricsAddr)
 	var workers sync.WaitGroup
 	workers.Add(cfg.Workers.Count + 3)

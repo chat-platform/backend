@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
+
 	"github.com/chat-platform/backend/services/relay/internal/domain"
+	relaymetrics "github.com/chat-platform/backend/services/relay/internal/metrics"
 	"github.com/chat-platform/backend/services/relay/internal/port"
 	"github.com/chat-platform/backend/shared/pkg/logging"
-	"time"
 )
 
 type Dispatcher struct {
@@ -16,6 +18,7 @@ type Dispatcher struct {
 	publisher     port.StreamPublisher
 	outboxOptions OutboxOptions
 	logger        logging.Logger
+	metrics       *relaymetrics.DispatchMetrics
 }
 
 type OutboxOptions struct {
@@ -24,7 +27,7 @@ type OutboxOptions struct {
 	ClaimLease     time.Duration
 }
 
-func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publisher port.StreamPublisher, options OutboxOptions, logger logging.Logger) *Dispatcher {
+func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publisher port.StreamPublisher, options OutboxOptions, logger logging.Logger, metrics ...*relaymetrics.DispatchMetrics) *Dispatcher {
 	if options.BatchSize <= 0 {
 		options.BatchSize = 100
 	}
@@ -34,7 +37,11 @@ func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publish
 	if options.ClaimLease <= 0 {
 		options.ClaimLease = 30 * time.Second
 	}
-	return &Dispatcher{outbox: outbox, registry: registry, publisher: publisher, outboxOptions: options, logger: logger}
+	var dispatchMetrics *relaymetrics.DispatchMetrics
+	if len(metrics) > 0 {
+		dispatchMetrics = metrics[0]
+	}
+	return &Dispatcher{outbox: outbox, registry: registry, publisher: publisher, outboxOptions: options, logger: logger, metrics: dispatchMetrics}
 }
 
 func (d *Dispatcher) RetryOnce(ctx context.Context) (int, error) {
@@ -45,24 +52,16 @@ func (d *Dispatcher) RetryOnce(ctx context.Context) (int, error) {
 			return count, err
 		}
 		for _, event := range events {
-			connection, online, err := d.registry.Lookup(ctx, event.DeviceID)
-			if err != nil {
-				return count, fmt.Errorf("lookup retry device %s: %w", event.DeviceID, err)
-			}
-			if !online {
-				if err := d.outbox.ReleaseRetryClaim(ctx, outboxType, event.ID, event.ClaimExpiry, 10*time.Second); err != nil {
-					return count, err
-				}
-				continue
-			}
 			event.OutboxType = outboxType
-			if err := d.outbox.MarkRetryAttempt(ctx, outboxType, event.ID, event.ClaimExpiry); err != nil {
+			started := time.Now()
+			outcome, published, err := d.retryEvent(ctx, outboxType, event)
+			d.metrics.RecordRetry(outboxType, outcome, time.Since(started))
+			if err != nil {
 				return count, err
 			}
-			if err := d.publisher.Publish(ctx, connection, event); err != nil {
-				return count, fmt.Errorf("publish retry outbox %d: %w", event.ID, err)
+			if published {
+				count++
 			}
-			count++
 		}
 	}
 	d.logger.Info(ctx, "outbox retry batch completed", "rows_retried", count, "batch_size", d.outboxOptions.RetryBatchSize)
@@ -92,37 +91,73 @@ func (d *Dispatcher) dispatchBatch(ctx context.Context, outboxType string, event
 	count := 0
 	for _, event := range events {
 		event.OutboxType = outboxType
-		connection, online, err := d.registry.Lookup(ctx, event.DeviceID)
+		started := time.Now()
+		outcome, err := d.dispatchEvent(ctx, outboxType, event)
+		d.metrics.RecordDispatch(outboxType, outcome, time.Since(started))
 		if err != nil {
-			d.logger.Error(ctx, "device registry lookup failed", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "error", err)
-			return count, fmt.Errorf("lookup device %s: %w", event.DeviceID, err)
-		}
-		route := domain.Route{}
-		if !online {
-			if chatID, eligible := notificationChatID(event.EventType, event.Payload); eligible {
-				if err := d.publisher.PublishNotification(ctx, event); err != nil {
-					return count, fmt.Errorf("publish notification hint for outbox %d: %w", event.ID, err)
-				}
-				route = domain.Route{To: domain.RouteNotification}
-				d.logger.Info(ctx, "outbox event routed to notification stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "chat_id", chatID)
-			} else {
-				d.logger.Info(ctx, "outbox event skipped for offline device", "outbox_id", event.ID, "device_id", event.DeviceID)
-			}
-		} else {
-			if err := d.publisher.Publish(ctx, connection, event); err != nil {
-				d.logger.Error(ctx, "could not publish websocket delivery", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID, "error", err)
-				return count, fmt.Errorf("publish outbox %d: %w", event.ID, err)
-			}
-			route = domain.Route{To: domain.RouteWebSocket}
-			d.logger.Info(ctx, "outbox event routed to websocket stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID)
-		}
-		if err := d.outbox.MarkDispatched(ctx, outboxType, event.ID, route); err != nil {
-			d.logger.Error(ctx, "could not mark outbox dispatched", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "error", err)
-			return count, fmt.Errorf("mark outbox %d dispatched: %w", event.ID, err)
+			return count, err
 		}
 		count++
 	}
 	return count, nil
+}
+
+func (d *Dispatcher) dispatchEvent(ctx context.Context, outboxType string, event domain.OutboxEvent) (string, error) {
+	connection, online, err := d.registry.Lookup(ctx, event.DeviceID)
+	if err != nil {
+		d.logger.Error(ctx, "device registry lookup failed", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "error", err)
+		return relaymetrics.DispatchRegistryError, fmt.Errorf("lookup device %s: %w", event.DeviceID, err)
+	}
+	route := domain.Route{}
+	outcome := relaymetrics.DispatchOfflineSkip
+	if !online {
+		if chatID, eligible := notificationChatID(event.EventType, event.Payload); eligible {
+			if err := d.publisher.PublishNotification(ctx, event); err != nil {
+				d.logger.Error(ctx, "could not publish notification hint", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "error", err)
+				return relaymetrics.DispatchPublishError, fmt.Errorf("publish notification hint for outbox %d: %w", event.ID, err)
+			}
+			route = domain.Route{To: domain.RouteNotification}
+			outcome = relaymetrics.DispatchNotification
+			d.logger.Info(ctx, "outbox event routed to notification stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "chat_id", chatID)
+		} else {
+			d.logger.Info(ctx, "outbox event skipped for offline device", "outbox_id", event.ID, "device_id", event.DeviceID)
+		}
+	} else {
+		if err := d.publisher.Publish(ctx, connection, event); err != nil {
+			d.logger.Error(ctx, "could not publish websocket delivery", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID, "error", err)
+			return relaymetrics.DispatchPublishError, fmt.Errorf("publish outbox %d: %w", event.ID, err)
+		}
+		route = domain.Route{To: domain.RouteWebSocket}
+		outcome = relaymetrics.DispatchWS
+		d.logger.Info(ctx, "outbox event routed to websocket stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID)
+	}
+	wait, err := d.outbox.MarkDispatched(ctx, outboxType, event.ID, route)
+	if err != nil {
+		d.logger.Error(ctx, "could not mark outbox dispatched", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "error", err)
+		return relaymetrics.DispatchMarkError, fmt.Errorf("mark outbox %d dispatched: %w", event.ID, err)
+	}
+	d.metrics.RecordDispatchWait(outboxType, outcome, wait)
+	return outcome, nil
+}
+
+func (d *Dispatcher) retryEvent(ctx context.Context, outboxType string, event domain.OutboxEvent) (string, bool, error) {
+	connection, online, err := d.registry.Lookup(ctx, event.DeviceID)
+	if err != nil {
+		return relaymetrics.RetryLookupError, false, fmt.Errorf("lookup retry device %s: %w", event.DeviceID, err)
+	}
+	if !online {
+		if err := d.outbox.ReleaseRetryClaim(ctx, outboxType, event.ID, event.ClaimExpiry, 10*time.Second); err != nil {
+			return relaymetrics.RetryReleaseError, false, err
+		}
+		return relaymetrics.RetryOfflineDeferred, false, nil
+	}
+	if err := d.outbox.MarkRetryAttempt(ctx, outboxType, event.ID, event.ClaimExpiry); err != nil {
+		return relaymetrics.RetryMarkAttemptError, false, err
+	}
+	if err := d.publisher.Publish(ctx, connection, event); err != nil {
+		return relaymetrics.RetryPublishError, false, fmt.Errorf("publish retry outbox %d: %w", event.ID, err)
+	}
+	return relaymetrics.RetryPublished, true, nil
 }
 
 func notificationChatID(eventType string, payload []byte) (string, bool) {

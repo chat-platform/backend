@@ -143,23 +143,24 @@ func (r *OutboxRepository) ClaimBatch(ctx context.Context, outboxType string, ba
 	return events, nil
 }
 
-func (r *OutboxRepository) MarkDispatched(ctx context.Context, outboxType string, id int64, route domain.Route) error {
+func (r *OutboxRepository) MarkDispatched(ctx context.Context, outboxType string, id int64, route domain.Route) (time.Duration, error) {
 	table, err := outboxTable(outboxType)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var routed any
 	if route.To != "" {
 		routed = route.To
 	}
-	result, err := r.pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET dispatched_at=now(), routed_to=$2, attempt_count=1, claim_expiry=NULL WHERE id=$1 AND dispatched_at IS NULL`, table), id, routed)
+	var waitSeconds float64
+	err = r.pool.QueryRow(ctx, fmt.Sprintf(`UPDATE %s SET dispatched_at=statement_timestamp(), routed_to=$2, attempt_count=1, claim_expiry=NULL WHERE id=$1 AND dispatched_at IS NULL RETURNING GREATEST(0::double precision, EXTRACT(EPOCH FROM (dispatched_at-created_at))::double precision)`, table), id, routed).Scan(&waitSeconds)
 	if err != nil {
-		return fmt.Errorf("mark outbox %d dispatched: %w", id, err)
+		if err == pgx.ErrNoRows {
+			return 0, fmt.Errorf("outbox %d was not marked dispatched: row is missing or already dispatched", id)
+		}
+		return 0, fmt.Errorf("mark outbox %d dispatched: %w", id, err)
 	}
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("outbox %d was not marked dispatched: row is missing or already dispatched", id)
-	}
-	return nil
+	return time.Duration(waitSeconds * float64(time.Second)), nil
 }
 
 func (r *OutboxRepository) ClaimRetryBatch(ctx context.Context, outboxType string, batchSize int, lease time.Duration) ([]domain.OutboxEvent, error) {
