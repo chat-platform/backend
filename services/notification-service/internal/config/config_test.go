@@ -7,7 +7,7 @@ import (
 
 func clearNotificationEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"POSTGRES_DSN", "REDIS_ADDR", "GOOGLE_CLOUD_PROJECT", "NOTIFICATION_COALESCE_WINDOW"} {
+	for _, key := range []string{"POSTGRES_DSN", "REDIS_ADDR", "GOOGLE_CLOUD_PROJECT", "NOTIFICATION_COALESCE_WINDOW", "METRICS_ADDR"} {
 		t.Setenv(key, "")
 	}
 }
@@ -18,7 +18,7 @@ func TestFromEnvDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PostgresDSN != defaultPostgresDSN || cfg.RedisAddr != "localhost:6379" || cfg.GoogleCloudProject != "" || cfg.NotificationCoalesceWindow != 5*time.Second {
+	if cfg.PostgresDSN != defaultPostgresDSN || cfg.RedisAddr != "localhost:6379" || cfg.GoogleCloudProject != "" || cfg.NotificationCoalesceWindow != 5*time.Second || cfg.MetricsAddr != "127.0.0.1:9095" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 }
@@ -29,11 +29,12 @@ func TestFromEnvOverrides(t *testing.T) {
 	t.Setenv("REDIS_ADDR", "redis:6380")
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "push-project")
 	t.Setenv("NOTIFICATION_COALESCE_WINDOW", "250ms")
+	t.Setenv("METRICS_ADDR", "127.0.0.1:9195")
 	cfg, err := FromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PostgresDSN != "postgres://test/db" || cfg.RedisAddr != "redis:6380" || cfg.GoogleCloudProject != "push-project" || cfg.NotificationCoalesceWindow != 250*time.Millisecond {
+	if cfg.PostgresDSN != "postgres://test/db" || cfg.RedisAddr != "redis:6380" || cfg.GoogleCloudProject != "push-project" || cfg.NotificationCoalesceWindow != 250*time.Millisecond || cfg.MetricsAddr != "127.0.0.1:9195" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 }

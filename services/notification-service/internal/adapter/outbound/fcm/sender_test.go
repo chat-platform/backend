@@ -8,6 +8,8 @@ import (
 
 	"firebase.google.com/go/v4/messaging"
 	"github.com/chat-platform/backend/services/notification-service/internal/app"
+	servicemetrics "github.com/chat-platform/backend/services/notification-service/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type fakeMessagingClient struct {
@@ -65,7 +67,12 @@ func TestBuildMessageRejectsInvalidPush(t *testing.T) {
 func TestSenderMapsUnregisteredTokenAndReturnsTransientErrors(t *testing.T) {
 	unregistered := errors.New("unregistered token")
 	client := &fakeMessagingClient{messageID: "projects/project/messages/id"}
-	if err := NewSender(client).Send(context.Background(), app.Push{Token: "token", Platform: "ANDROID", ChatID: "chat"}); err != nil {
+	registry := prometheus.NewRegistry()
+	metrics, err := servicemetrics.New(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewSender(client, metrics).Send(context.Background(), app.Push{Token: "token", Platform: "ANDROID", ChatID: "chat"}); err != nil {
 		t.Fatal(err)
 	}
 	if client.message == nil || client.message.Notification != nil {
@@ -73,12 +80,32 @@ func TestSenderMapsUnregisteredTokenAndReturnsTransientErrors(t *testing.T) {
 	}
 	client.err = unregistered
 	classify := func(err error) bool { return errors.Is(err, unregistered) }
-	if err := newSender(client, classify).Send(context.Background(), app.Push{Token: "token", Platform: "ANDROID", ChatID: "chat"}); !errors.Is(err, app.ErrTokenUnregistered) {
+	if err := newSender(client, classify, metrics).Send(context.Background(), app.Push{Token: "token", Platform: "ANDROID", ChatID: "chat"}); !errors.Is(err, app.ErrTokenUnregistered) {
 		t.Fatalf("unregistered error=%v", err)
 	}
 	client.err = errors.New("service unavailable")
-	if err := newSender(client, classify).Send(context.Background(), app.Push{Token: "token", Platform: "ANDROID", ChatID: "chat"}); err == nil || errors.Is(err, app.ErrTokenUnregistered) {
+	if err := newSender(client, classify, metrics).Send(context.Background(), app.Push{Token: "token", Platform: "ANDROID", ChatID: "chat"}); err == nil || errors.Is(err, app.ErrTokenUnregistered) {
 		t.Fatalf("transient error=%v", err)
+	}
+	for label, want := range map[string]float64{servicemetrics.ProviderAccepted: 1, servicemetrics.ProviderUnregistered: 1, servicemetrics.ProviderError: 1} {
+		families, err := registry.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := float64(0)
+		for _, family := range families {
+			if family.GetName() != "notification_push_attempts_total" {
+				continue
+			}
+			for _, metric := range family.GetMetric() {
+				if metric.GetLabel()[0].GetValue() == "fcm" && metric.GetLabel()[1].GetValue() == label {
+					got = metric.GetCounter().GetValue()
+				}
+			}
+		}
+		if got != want {
+			t.Errorf("provider outcome %s count=%v, want %v", label, got, want)
+		}
 	}
 }
 

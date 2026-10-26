@@ -20,3 +20,9 @@ scrape_configs:
       - targets: ["ws-gateway:9094"]
         labels:
           service: ws-gateway
+
+  - job_name: notification-service
+    static_configs:
+      - targets: ["notification-service:9095"]
+        labels:
+          service: notification-service

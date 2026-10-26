@@ -21,6 +21,7 @@ type Consumer struct {
 	notifier *app.Notifier
 	logger   logging.Logger
 	window   time.Duration
+	prepared bool
 }
 
 type pendingBatch struct {
@@ -37,8 +38,8 @@ func NewConsumer(client *redis.Client, consumerID string, notifier *app.Notifier
 }
 
 func (c *Consumer) Run(ctx context.Context) error {
-	if err := c.client.XGroupCreateMkStream(ctx, notificationStream, notificationGroup, "0").Err(); err != nil && !strings.HasPrefix(err.Error(), "BUSYGROUP") {
-		return fmt.Errorf("create notification stream group: %w", err)
+	if err := c.Prepare(ctx); err != nil {
+		return err
 	}
 	c.logger.Info(ctx, "notification consumer started", "stream", notificationStream, "consumer_group", notificationGroup, "consumer_id", c.consumer, "coalesce_window", c.window.String())
 	pending := make(map[string]*pendingBatch)
@@ -69,6 +70,19 @@ func (c *Consumer) Run(ctx context.Context) error {
 			c.flushDue(ctx, now, pending, entryOwners)
 		}
 	}
+}
+
+// Prepare creates the consumer group before background queue sampling starts.
+// Run calls it too, so standalone users of Consumer retain the same behavior.
+func (c *Consumer) Prepare(ctx context.Context) error {
+	if c.prepared {
+		return nil
+	}
+	if err := c.client.XGroupCreateMkStream(ctx, notificationStream, notificationGroup, "0").Err(); err != nil && !strings.HasPrefix(err.Error(), "BUSYGROUP") {
+		return fmt.Errorf("create notification stream group: %w", err)
+	}
+	c.prepared = true
+	return nil
 }
 
 func (c *Consumer) addMessage(ctx context.Context, pending map[string]*pendingBatch, owners map[string]string, message redis.XMessage) {

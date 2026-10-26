@@ -90,6 +90,8 @@ services:
         condition: service_started
       ws-gateway:
         condition: service_started
+      notification-service:
+        condition: service_started
 
   core-api:
     build:
@@ -176,6 +178,7 @@ services:
       POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
       REDIS_ADDR: redis:6379
       NOTIFICATION_COALESCE_WINDOW: 5s
+      METRICS_ADDR: :9095
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
     volumes:
