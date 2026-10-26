@@ -14,3 +14,9 @@ scrape_configs:
       - targets: ["relay:9093"]
         labels:
           service: relay
+
+  - job_name: ws-gateway
+    static_configs:
+      - targets: ["ws-gateway:9094"]
+        labels:
+          service: ws-gateway

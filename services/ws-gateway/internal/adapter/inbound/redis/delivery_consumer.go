@@ -5,14 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	wsmetrics "github.com/chat-platform/backend/services/ws-gateway/internal/metrics"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/port"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const deliveryGroupPrefix = "ws-gateway:"
@@ -22,12 +24,17 @@ type DeliveryConsumer struct {
 	nodeID, consumerID, stream, group string
 	deliverer                         port.ConnectionDeliverer
 	logger                            logging.Logger
+	metrics                           *wsmetrics.Metrics
 }
 
-func NewDeliveryConsumer(client *redis.Client, nodeID string, deliverer port.ConnectionDeliverer, logger logging.Logger) *DeliveryConsumer {
+func NewDeliveryConsumer(client *redis.Client, nodeID string, deliverer port.ConnectionDeliverer, logger logging.Logger, metrics ...*wsmetrics.Metrics) *DeliveryConsumer {
 	consumer := uuid.NewString()
 	stream := "ws:deliver:" + nodeID
-	return &DeliveryConsumer{client: client, nodeID: nodeID, consumerID: consumer, stream: stream, group: deliveryGroupPrefix + nodeID, deliverer: deliverer, logger: logger}
+	var gatewayMetrics *wsmetrics.Metrics
+	if len(metrics) > 0 {
+		gatewayMetrics = metrics[0]
+	}
+	return &DeliveryConsumer{client: client, nodeID: nodeID, consumerID: consumer, stream: stream, group: deliveryGroupPrefix + nodeID, deliverer: deliverer, logger: logger, metrics: gatewayMetrics}
 }
 func (c *DeliveryConsumer) Run(ctx context.Context) error {
 	if err := c.client.XGroupCreateMkStream(ctx, c.stream, c.group, "0").Err(); err != nil && !strings.HasPrefix(err.Error(), "BUSYGROUP") {
@@ -186,18 +193,24 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 }
 
 func (c *DeliveryConsumer) handle(ctx context.Context, message redis.XMessage) error {
+	outcome := wsmetrics.DeliveryError
+	defer func() { c.metrics.RecordDeliveryHandling(outcome) }()
+
 	delivery, err := decodeDelivery(message)
 	if err != nil {
+		outcome = wsmetrics.DeliveryMalformed
 		return c.ackMalformed(ctx, message, err)
 	}
 	if err := c.deliverer.Deliver(ctx, delivery.connID, delivery.envelope); err != nil {
 		if errors.Is(err, port.ErrConnectionGone) {
+			outcome = wsmetrics.DeliveryConnectionGone
 			c.logger.Info(ctx, "websocket delivery dropped because connection is gone", "ws_node", c.nodeID, "conn_id", delivery.connID, "device_id", delivery.deviceID, "outbox_id", delivery.outboxID, "stream_entry_id", message.ID, "delivery_error", err)
 			return c.ack(ctx, message)
 		}
 		c.logger.Error(ctx, "could not write message to websocket", "ws_node", c.nodeID, "conn_id", delivery.connID, "device_id", delivery.deviceID, "outbox_id", delivery.outboxID, "stream_entry_id", message.ID, "error", err)
 		return err
 	}
+	outcome = wsmetrics.DeliveryAccepted
 	c.logger.Info(ctx, "message delivered to websocket", "ws_node", c.nodeID, "conn_id", delivery.connID, "device_id", delivery.deviceID, "outbox_id", delivery.outboxID, "outbox_type", delivery.outboxType, "stream_entry_id", message.ID)
 	return c.ack(ctx, message)
 }

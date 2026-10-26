@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
+	wsmetrics "github.com/chat-platform/backend/services/ws-gateway/internal/metrics"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/gorilla/websocket"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type captureSocket struct {
@@ -97,6 +99,124 @@ func TestHubConnectionCloseCleansLocalPresenceSubscriptions(t *testing.T) {
 	if len(socket.values) != 0 {
 		t.Fatalf("closed socket received presence: %+v", socket.values)
 	}
+}
+
+func TestHubActiveConnectionsGaugeTracksRegistrationAndRemoval(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics, err := wsmetrics.New(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := NewHub(metrics)
+	if err := metrics.RegisterActiveConnections(registry, hub.ActiveConnectionCount); err != nil {
+		t.Fatal(err)
+	}
+	first := &captureSocket{}
+	second := &captureSocket{}
+	firstConnection := domain.Connection{NodeID: "node", ConnID: "first", SessionID: "session-first"}
+	secondConnection := domain.Connection{NodeID: "node", ConnID: "second", SessionID: "session-second"}
+	hub.RegisterAuthenticated(firstConnection.ConnID, firstConnection.SessionID, "device-first", firstConnection, first)
+	hub.RegisterAuthenticated(secondConnection.ConnID, secondConnection.SessionID, "device-second", secondConnection, second)
+	assertMetricValue(t, registry, "ws_active_connections", nil, 2)
+
+	hub.Remove(firstConnection.ConnID, first)
+	assertMetricValue(t, registry, "ws_active_connections", nil, 1)
+	if hub.CloseConnection(secondConnection) == nil {
+		t.Fatal("expected active connection to be revoked")
+	}
+	assertMetricValue(t, registry, "ws_active_connections", nil, 0)
+}
+
+func TestHubCountsActualSocketWritesByPhaseAndResult(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics, err := wsmetrics.New(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := NewHub(metrics)
+
+	liveSocket := &captureSocket{}
+	hub.Register("live", liveSocket)
+	if err := hub.Deliver(context.Background(), "live", wsframe.Envelope{Type: wsframe.TypePresenceUpdate}); err != nil {
+		t.Fatal(err)
+	}
+	assertMetricValue(t, registry, "ws_socket_write_attempts_total", map[string]string{"phase": wsmetrics.SocketWriteLive, "result": wsmetrics.SocketWriteSuccess}, 1)
+
+	failedSocket := &captureSocket{writeErr: errors.New("socket write failed")}
+	hub.Register("failed", failedSocket)
+	if err := hub.Deliver(context.Background(), "failed", wsframe.Envelope{Type: wsframe.TypeMessageRecv}); !errors.Is(err, ErrConnectionGone) {
+		t.Fatalf("live write err=%v, want connection-gone", err)
+	}
+	assertMetricValue(t, registry, "ws_socket_write_attempts_total", map[string]string{"phase": wsmetrics.SocketWriteLive, "result": wsmetrics.SocketWriteError}, 1)
+
+	flushSocket := &captureSocket{}
+	hub.RegisterAuthenticated("flush", "session", "device", domain.Connection{}, flushSocket)
+	bufferedPayload, err := json.Marshal(wsframe.MessageRecvPayload{OutboxType: wsframe.OutboxTypeDirect, OutboxID: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.Deliver(context.Background(), "flush", wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: bufferedPayload}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.Ready("flush"); err != nil {
+		t.Fatal(err)
+	}
+	assertMetricValue(t, registry, "ws_socket_write_attempts_total", map[string]string{"phase": wsmetrics.SocketWriteSyncFlush, "result": wsmetrics.SocketWriteSuccess}, 1)
+
+	flushFailedSocket := &captureSocket{writeErr: errors.New("flush failed")}
+	hub.RegisterAuthenticated("flush-failed", "session", "device", domain.Connection{}, flushFailedSocket)
+	if err := hub.Deliver(context.Background(), "flush-failed", wsframe.Envelope{Type: wsframe.TypeMessageRecv, Payload: bufferedPayload}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.Ready("flush-failed"); err == nil {
+		t.Fatal("Ready succeeded despite socket write failure")
+	}
+	assertMetricValue(t, registry, "ws_socket_write_attempts_total", map[string]string{"phase": wsmetrics.SocketWriteSyncFlush, "result": wsmetrics.SocketWriteError}, 1)
+}
+
+func assertMetricValue(t *testing.T, registry *prometheus.Registry, name string, wantLabels map[string]string, want float64) {
+	t.Helper()
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, pair := range metric.GetLabel() {
+				labels[pair.GetName()] = pair.GetValue()
+			}
+			if !sameLabels(labels, wantLabels) {
+				continue
+			}
+			var got float64
+			if metric.GetGauge() != nil {
+				got = metric.GetGauge().GetValue()
+			} else {
+				got = metric.GetCounter().GetValue()
+			}
+			if got != want {
+				t.Fatalf("%s labels=%v value=%v, want %v", name, labels, got, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("metric %s labels=%v not found", name, wantLabels)
+}
+
+func sameLabels(got, want map[string]string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, value := range want {
+		if got[key] != value {
+			return false
+		}
+	}
+	return true
 }
 func TestHubRemoveDoesNotRemoveReplacement(t *testing.T) {
 	h := NewHub()
