@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	"github.com/chat-platform/backend/services/message-service/internal/port"
@@ -29,8 +31,11 @@ func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMes
 	switch chatType {
 	case "DIRECT":
 		allRecipients, err := s.chatRepository.ResolveMessageRecipients(ctx, command.ChatID)
-		if err != nil {
+		if err != nil && !errors.Is(err, domain.ErrNoRecipients) {
 			return domain.MessageAck{}, err
+		}
+		if errors.Is(err, domain.ErrNoRecipients) {
+			allRecipients = nil
 		}
 		recipients := make([]domain.RecipientDevice, 0, len(allRecipients))
 		for _, recipient := range allRecipients {
@@ -39,11 +44,11 @@ func (s *ChatOperations) SendMessage(ctx context.Context, command domain.SendMes
 			}
 		}
 		if len(recipients) == 0 {
-			s.logger.Warn(ctx, "no recipient devices remain after excluding sender device",
+			s.logger.Info(ctx, "direct message accepted without recipient devices; discarding",
 				"chat_id", command.ChatID,
 				"resolved_devices", len(allRecipients),
 			)
-			return domain.MessageAck{}, domain.ErrNoRecipients
+			return domain.MessageAck{ClientMsgID: command.ClientMsgID, TimestampMS: time.Now().UnixMilli()}, nil
 		}
 		return s.chatRepository.EnqueueDirectMessageEvent(ctx, command, recipients)
 	case "GROUP":

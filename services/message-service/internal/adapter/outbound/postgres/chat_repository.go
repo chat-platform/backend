@@ -77,7 +77,7 @@ func (r *ChatRepository) ResolveMessageRecipients(ctx context.Context, chatID st
 		return nil, fmt.Errorf("read message recipients: %w", err)
 	}
 	if len(recipients) == 0 {
-		r.logger.Warn(ctx, "database query returned no active chat recipient devices", "chat_id", chatID)
+		r.logger.Info(ctx, "database query found no active chat recipient devices", "chat_id", chatID)
 		return nil, domain.ErrNoRecipients
 	}
 	return recipients, nil
