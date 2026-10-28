@@ -164,6 +164,9 @@ func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message d
 		return domain.MessageAck{}, fmt.Errorf("begin group message write transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	// Insert first so the unique key serializes concurrent retries. If no
+	// recipient devices exist, the deferred rollback removes this provisional row.
 	var eventID int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO group_event (chat_id, sender_id, client_msg_id, event_type, payload, created_at)
@@ -180,12 +183,50 @@ func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message d
 	if err != nil {
 		return domain.MessageAck{}, fmt.Errorf("insert group event: %w", err)
 	}
-	_, err = tx.Exec(ctx, `
-		INSERT INTO group_outbox (event_id, recipient_id, device_id, created_at)
-		SELECT $1, cm.user_id, d.device_id, to_timestamp($2::double precision / 1000)
+
+	rows, err := tx.Query(ctx, `
+		SELECT cm.user_id, d.device_id
 		FROM chat_membership cm
 		JOIN device d ON d.user_id = cm.user_id AND d.revoked_at IS NULL
-		WHERE cm.chat_id = $3 AND d.device_id <> $4`, eventID, timestampMS, message.ChatID, message.DeviceID)
+		WHERE cm.chat_id = $1 AND d.device_id <> $2
+		ORDER BY cm.user_id, d.device_id`, message.ChatID, message.DeviceID)
+	if err != nil {
+		return domain.MessageAck{}, fmt.Errorf("resolve group message recipients: %w", err)
+	}
+	var recipients []domain.RecipientDevice
+	for rows.Next() {
+		var recipient domain.RecipientDevice
+		if err := rows.Scan(&recipient.UserID, &recipient.DeviceID); err != nil {
+			rows.Close()
+			return domain.MessageAck{}, fmt.Errorf("read group message recipient: %w", err)
+		}
+		recipients = append(recipients, recipient)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return domain.MessageAck{}, fmt.Errorf("read group message recipients: %w", err)
+	}
+	rows.Close()
+	if len(recipients) == 0 {
+		r.logger.Info(ctx, "group message accepted without recipient devices; discarding",
+			"chat_id", message.ChatID,
+			"sender_id", message.SenderID,
+			"client_msg_id", message.ClientMsgID,
+		)
+		return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, nil
+	}
+	recipientUserIDs := make([]string, len(recipients))
+	recipientDeviceIDs := make([]string, len(recipients))
+	for i, recipient := range recipients {
+		recipientUserIDs[i] = recipient.UserID
+		recipientDeviceIDs[i] = recipient.DeviceID
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO group_outbox (event_id, recipient_id, device_id, created_at)
+		SELECT $1, recipient_id::uuid, device_id::uuid, to_timestamp($2::double precision / 1000)
+		FROM unnest($3::text[], $4::text[]) AS r(recipient_id, device_id)`,
+		eventID, timestampMS, recipientUserIDs, recipientDeviceIDs)
 	if err != nil {
 		return domain.MessageAck{}, fmt.Errorf("insert group outbox recipients: %w", err)
 	}

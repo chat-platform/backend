@@ -83,6 +83,7 @@ chat.
 Single Postgres transaction per message. Order:
 
 1. Resolve recipients and their live devices. (Before transaction begins)
+    Resolve group recipients inside it after the idempotency check.
 2. BEGIN
    - DIRECT: INSERT direct_outbox × N devices (payload inline)
    - GROUP:  INSERT group_event (1 row)

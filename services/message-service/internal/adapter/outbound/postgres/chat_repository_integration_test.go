@@ -178,3 +178,144 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 		t.Fatalf("read receipt events=(%d,%v), want unchanged count after invalid chat", receipts, err)
 	}
 }
+
+func TestEnqueueGroupMessageDiscardsWithoutRecipientsAndKeepsRegisteredDeviceFanout(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set TEST_POSTGRES_DSN to run Message Service Postgres integration tests")
+	}
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(admin.Close)
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		t.Fatal(err)
+	}
+	schema := "group_send_test_" + hex.EncodeToString(random[:])
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE") })
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE users (user_id UUID PRIMARY KEY);
+		CREATE TABLE chat (chat_id UUID PRIMARY KEY, type TEXT NOT NULL, deleted_at TIMESTAMPTZ);
+		CREATE TABLE device (device_id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(user_id), revoked_at TIMESTAMPTZ);
+		CREATE TABLE chat_membership (chat_id UUID NOT NULL REFERENCES chat(chat_id), user_id UUID NOT NULL REFERENCES users(user_id));
+		CREATE TABLE group_event (
+			event_id BIGSERIAL PRIMARY KEY, chat_id UUID NOT NULL REFERENCES chat(chat_id),
+			sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL,
+			event_type TEXT NOT NULL, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			UNIQUE (sender_id, client_msg_id));
+		CREATE TABLE group_outbox (
+			id BIGSERIAL PRIMARY KEY, event_id BIGINT NOT NULL REFERENCES group_event(event_id),
+			recipient_id UUID NOT NULL REFERENCES users(user_id), device_id UUID NOT NULL REFERENCES device(device_id),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+	`); err != nil {
+		t.Fatal(err)
+	}
+	senderID := "11111111-1111-4111-8111-111111111111"
+	peerID := "22222222-2222-4222-8222-222222222222"
+	originDevice := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	peerDevice := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	senderOtherDevice := "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	singleMemberChat := "33333333-3333-4333-8333-333333333333"
+	multiMemberChat := "44444444-4444-4444-8444-444444444444"
+	if _, err := pool.Exec(ctx, `INSERT INTO users VALUES ($1), ($2)`, senderID, peerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO chat(chat_id,type) VALUES ($1,'GROUP'), ($2,'GROUP')`, singleMemberChat, multiMemberChat); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO device(device_id,user_id) VALUES ($1,$2), ($3,$4)`, originDevice, senderID, peerDevice, peerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO chat_membership(chat_id,user_id) VALUES ($1,$2), ($3,$2), ($3,$4)`, singleMemberChat, senderID, multiMemberChat, peerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE device SET revoked_at=now() WHERE device_id=$1`, peerDevice); err != nil {
+		t.Fatal(err)
+	}
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewChatRepository(pool, logger)
+	message := domain.SendMessage{SenderID: senderID, DeviceID: originDevice, ChatID: singleMemberChat, ClientMsgID: "0199d628-39d0-7000-8000-000000000001", Content: "single member"}
+	if ack, err := repo.EnqueueGroupMessageEvent(ctx, message); err != nil || ack.ClientMsgID != message.ClientMsgID || ack.TimestampMS <= 0 {
+		t.Fatalf("single-member send ack=%+v error=%v", ack, err)
+	}
+	message.ChatID = multiMemberChat
+	message.ClientMsgID = "0199d628-39d0-7000-8000-000000000002"
+	if ack, err := repo.EnqueueGroupMessageEvent(ctx, message); err != nil || ack.ClientMsgID != message.ClientMsgID || ack.TimestampMS <= 0 {
+		t.Fatalf("no-eligible-device send ack=%+v error=%v", ack, err)
+	}
+	assertGroupSendCounts(t, ctx, pool, 0, 0)
+
+	if _, err := pool.Exec(ctx, `INSERT INTO device(device_id,user_id) VALUES ($1,$2)`, senderOtherDevice, senderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE device SET revoked_at=NULL WHERE device_id=$1`, peerDevice); err != nil {
+		t.Fatal(err)
+	}
+	ack, err := repo.EnqueueGroupMessageEvent(ctx, message)
+	if err != nil || ack.ClientMsgID != message.ClientMsgID || ack.TimestampMS <= 0 {
+		t.Fatalf("retry with eligible devices ack=%+v error=%v", ack, err)
+	}
+	assertGroupSendCounts(t, ctx, pool, 1, 2)
+	var gotDevices []string
+	rows, err := pool.Query(ctx, `SELECT device_id::text FROM group_outbox ORDER BY device_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		gotDevices = append(gotDevices, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
+	rows.Close()
+	if len(gotDevices) != 2 || gotDevices[0] != peerDevice || gotDevices[1] != senderOtherDevice {
+		t.Fatalf("group outbox devices=%v, want offline peer and sender's other device", gotDevices)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE device SET revoked_at=now() WHERE device_id IN ($1,$2)`, peerDevice, senderOtherDevice); err != nil {
+		t.Fatal(err)
+	}
+	retryAck, err := repo.EnqueueGroupMessageEvent(ctx, message)
+	if err != nil || retryAck != ack {
+		t.Fatalf("persisted retry ack=%+v error=%v, want original %+v", retryAck, err, ack)
+	}
+	assertGroupSendCounts(t, ctx, pool, 1, 2)
+}
+
+func assertGroupSendCounts(t *testing.T, ctx context.Context, pool *pgxpool.Pool, wantEvents, wantOutbox int) {
+	t.Helper()
+	var events, outbox int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_event`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_outbox`).Scan(&outbox); err != nil {
+		t.Fatal(err)
+	}
+	if events != wantEvents || outbox != wantOutbox {
+		t.Fatalf("group event/outbox counts=(%d,%d), want (%d,%d)", events, outbox, wantEvents, wantOutbox)
+	}
+}
