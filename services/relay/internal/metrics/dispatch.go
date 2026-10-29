@@ -13,6 +13,7 @@ const (
 	DispatchNotification  = "notification"
 	DispatchOfflineSkip   = "offline_skip"
 	DispatchRegistryError = "registry_error"
+	DispatchPayloadError  = "payload_error"
 	DispatchPublishError  = "publish_error"
 	DispatchMarkError     = "mark_error"
 

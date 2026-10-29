@@ -46,11 +46,13 @@ func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publish
 
 func (d *Dispatcher) RetryOnce(ctx context.Context) (int, error) {
 	count := 0
+	totalClaimed := 0
 	for _, outboxType := range []string{"direct", "group"} {
 		events, err := d.outbox.ClaimRetryBatch(ctx, outboxType, d.outboxOptions.RetryBatchSize, d.outboxOptions.ClaimLease)
 		if err != nil {
 			return count, err
 		}
+		totalClaimed += len(events)
 		for _, event := range events {
 			event.OutboxType = outboxType
 			started := time.Now()
@@ -64,7 +66,11 @@ func (d *Dispatcher) RetryOnce(ctx context.Context) (int, error) {
 			}
 		}
 	}
-	d.logger.Info(ctx, "outbox retry batch completed", "rows_retried", count, "batch_size", d.outboxOptions.RetryBatchSize)
+	if totalClaimed > 0 {
+		d.logger.Info(ctx, "outbox retry batch completed", "rows_claimed", totalClaimed, "rows_retried", count, "batch_size", d.outboxOptions.RetryBatchSize)
+	} else {
+		d.logger.Debug(ctx, "outbox retry batch found no rows", "batch_size", d.outboxOptions.RetryBatchSize)
+	}
 	return count, nil
 }
 func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
@@ -83,7 +89,11 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
 			return count, err
 		}
 	}
-	d.logger.Info(ctx, "outbox drain batch completed", "rows_claimed", totalClaimed, "rows_dispatched", count, "batch_size", d.outboxOptions.BatchSize)
+	if totalClaimed > 0 {
+		d.logger.Info(ctx, "outbox drain batch completed", "rows_claimed", totalClaimed, "rows_dispatched", count, "batch_size", d.outboxOptions.BatchSize)
+	} else {
+		d.logger.Debug(ctx, "outbox drain found no undispatched rows", "batch_size", d.outboxOptions.BatchSize)
+	}
 	return count, nil
 }
 
@@ -111,16 +121,21 @@ func (d *Dispatcher) dispatchEvent(ctx context.Context, outboxType string, event
 	route := domain.Route{}
 	outcome := relaymetrics.DispatchOfflineSkip
 	if !online {
-		if chatID, eligible := notificationChatID(event.EventType, event.Payload); eligible {
+		chatID, eligible, err := notificationChatID(event.EventType, event.Payload)
+		if err != nil {
+			d.logger.Error(ctx, "invalid notification event payload", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "event_type", event.EventType, "error", err)
+			return relaymetrics.DispatchPayloadError, fmt.Errorf("validate notification payload for outbox %d: %w", event.ID, err)
+		}
+		if eligible {
 			if err := d.publisher.PublishNotification(ctx, event); err != nil {
 				d.logger.Error(ctx, "could not publish notification hint", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "error", err)
 				return relaymetrics.DispatchPublishError, fmt.Errorf("publish notification hint for outbox %d: %w", event.ID, err)
 			}
 			route = domain.Route{To: domain.RouteNotification}
 			outcome = relaymetrics.DispatchNotification
-			d.logger.Info(ctx, "outbox event routed to notification stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "chat_id", chatID)
+			d.logger.Debug(ctx, "outbox event routed to notification stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "chat_id", chatID)
 		} else {
-			d.logger.Info(ctx, "outbox event skipped for offline device", "outbox_id", event.ID, "device_id", event.DeviceID)
+			d.logger.Debug(ctx, "outbox event is not eligible for notification", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "event_type", event.EventType)
 		}
 	} else {
 		if err := d.publisher.Publish(ctx, connection, event); err != nil {
@@ -129,7 +144,7 @@ func (d *Dispatcher) dispatchEvent(ctx context.Context, outboxType string, event
 		}
 		route = domain.Route{To: domain.RouteWebSocket}
 		outcome = relaymetrics.DispatchWS
-		d.logger.Info(ctx, "outbox event routed to websocket stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID)
+		d.logger.Debug(ctx, "outbox event routed to websocket stream", "outbox_id", event.ID, "outbox_type", outboxType, "device_id", event.DeviceID, "ws_node", connection.NodeID, "conn_id", connection.ConnID)
 	}
 	wait, err := d.outbox.MarkDispatched(ctx, outboxType, event.ID, route)
 	if err != nil {
@@ -164,12 +179,18 @@ func (d *Dispatcher) retryEvent(ctx context.Context, outboxType string, event do
 	return relaymetrics.RetryPublished, true, nil
 }
 
-func notificationChatID(eventType string, payload []byte) (string, bool) {
+func notificationChatID(eventType string, payload []byte) (string, bool, error) {
+	if eventType != "NEW_MESSAGE" {
+		return "", false, nil
+	}
 	var event struct {
 		ChatID string `json:"chatId"`
 	}
-	if eventType != "NEW_MESSAGE" || json.Unmarshal(payload, &event) != nil || event.ChatID == "" {
-		return "", false
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return "", false, fmt.Errorf("decode NEW_MESSAGE payload: %w", err)
 	}
-	return event.ChatID, true
+	if event.ChatID == "" {
+		return "", false, fmt.Errorf("NEW_MESSAGE payload has no chatId")
+	}
+	return event.ChatID, true, nil
 }
