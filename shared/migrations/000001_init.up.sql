@@ -3,7 +3,7 @@
 
 CREATE TYPE device_platform AS ENUM ('ANDROID', 'IOS', 'WEB');
 CREATE TYPE chat_membership_role AS ENUM ('admin', 'member');
-CREATE TYPE direct_outbox_route AS ENUM ('WS', 'NOTIF');
+CREATE TYPE outbox_route AS ENUM ('WS', 'NOTIF');
 
 CREATE TABLE users (
     user_id UUID PRIMARY KEY,
@@ -84,7 +84,7 @@ CREATE TABLE direct_outbox (
     event_type TEXT NOT NULL,
     payload TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    routed_to direct_outbox_route,
+    routed_to outbox_route,
     dispatched_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
     claim_expiry TIMESTAMPTZ,
@@ -121,7 +121,7 @@ CREATE TABLE group_outbox (
     recipient_id UUID NOT NULL REFERENCES users (user_id),
     device_id UUID NOT NULL REFERENCES device (device_id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    routed_to TEXT CHECK (routed_to IN ('WS', 'NOTIF')),
+    routed_to outbox_route,
     dispatched_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
     claim_expiry TIMESTAMPTZ,

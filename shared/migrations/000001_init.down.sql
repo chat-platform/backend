@@ -10,4 +10,4 @@ DROP TABLE IF EXISTS user_blocks;
 DROP TABLE IF EXISTS users;
 DROP TYPE IF EXISTS device_platform;
 DROP TYPE IF EXISTS chat_membership_role;
-DROP TYPE IF EXISTS direct_outbox_route;
+DROP TYPE IF EXISTS outbox_route;
