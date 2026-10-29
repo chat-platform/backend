@@ -51,7 +51,7 @@ func (n *Notifier) Send(ctx context.Context, hint PushHint) error {
 	}
 	if token == "" {
 		n.metrics.RecordNoTokenSkip()
-		n.logger.Info(ctx, "push hint skipped because device has no push token", "device_id", hint.DeviceID, "chat_id", hint.ChatID)
+		n.logger.Debug(ctx, "push hint skipped because device has no push token", "device_id", hint.DeviceID, "chat_id", hint.ChatID)
 		return nil
 	}
 	if err := n.sender.Send(ctx, Push{DeviceID: hint.DeviceID, Platform: platform, Token: token, ChatID: hint.ChatID}); err != nil {
