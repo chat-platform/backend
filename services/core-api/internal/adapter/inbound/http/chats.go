@@ -21,9 +21,9 @@ func (s *Server) directChat(c echo.Context) error {
 }
 
 func (s *Server) directChatPeer(c echo.Context) error {
-	peerID, err := s.service.DirectChatPeer(c.Request().Context(), claimsFrom(c.Request()).UserID, c.Param("id"))
+	peer, err := s.service.DirectChatPeer(c.Request().Context(), claimsFrom(c.Request()).UserID, c.Param("id"))
 	if err != nil {
 		return s.writeServiceError(c, err)
 	}
-	return writeJSON(c, http.StatusOK, map[string]string{"peerUserId": peerID})
+	return writeJSON(c, http.StatusOK, peer)
 }

@@ -232,6 +232,7 @@ the outbox.
 
 Once `message.ack` is sent, the message is in Postgres. A crash of any
 downstream component cannot lose it.
+If no eligible devices exist, the send is acknowledged and discarded without being stored; A later retry may be delivered if an eligible device becomes available, which is a good case.
 
 ### 4.2 Delivery vs. read state
 

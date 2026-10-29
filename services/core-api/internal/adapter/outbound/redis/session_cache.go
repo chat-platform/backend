@@ -78,9 +78,19 @@ func (c *SessionCache) RevokeConnection(ctx context.Context, deviceID, sessionID
 	return c.client.Publish(ctx, sessiontoken.GatewayRevocationChannel(connection.NodeID), event).Err()
 }
 
+func (c *SessionCache) AllowPhoneLookup(ctx context.Context, userID string) (bool, error) {
+	const script = `local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], 60); end; return count`
+	count, err := c.client.Eval(ctx, script, []string{"core:phone-lookup:" + userID}).Int()
+	if err != nil {
+		return false, fmt.Errorf("increment phone lookup limit: %w", err)
+	}
+	return count <= 10, nil
+}
+
 var _ interface {
 	SetActive(context.Context, string, time.Duration) error
 	SetRevoked(context.Context, string, time.Duration) error
 	Status(context.Context, string) (string, error)
 	RevokeConnection(context.Context, string, string) error
+	AllowPhoneLookup(context.Context, string) (bool, error)
 } = (*SessionCache)(nil)

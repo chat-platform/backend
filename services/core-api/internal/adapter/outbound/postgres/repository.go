@@ -74,6 +74,17 @@ func (r *Repository) GetProfile(ctx context.Context, userID string) (app.User, e
 	}
 	return user, nil
 }
+func (r *Repository) LookupUserByPhone(ctx context.Context, phone string) (app.User, error) {
+	var user app.User
+	err := r.pool.QueryRow(ctx, `SELECT user_id::text, phone, COALESCE(display_name, '') FROM users WHERE phone = $1`, phone).Scan(&user.ID, &user.Phone, &user.DisplayName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return app.User{}, app.ErrNotFound
+	}
+	if err != nil {
+		return app.User{}, fmt.Errorf("lookup user by phone: %w", err)
+	}
+	return user, nil
+}
 func (r *Repository) SetDisplayName(ctx context.Context, userID, name string) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE users SET display_name = $2, updated_at = now() WHERE user_id = $1`, userID, name)
 	if err != nil {
@@ -179,23 +190,24 @@ func (r *Repository) GetOrCreateDirectChat(ctx context.Context, userID, phone st
 	return chatID, nil
 }
 
-func (r *Repository) GetDirectChatPeer(ctx context.Context, userID, chatID string) (string, error) {
-	var peerID string
+func (r *Repository) GetDirectChatPeer(ctx context.Context, userID, chatID string) (app.DirectChatPeer, error) {
+	var peer app.DirectChatPeer
 	err := r.pool.QueryRow(ctx, `
-		SELECT peer.user_id::text
+		SELECT peer.user_id::text, COALESCE(u.display_name, '')
 		FROM chat c
 		JOIN chat_membership member ON member.chat_id = c.chat_id AND member.user_id = $2
 		JOIN chat_membership peer ON peer.chat_id = c.chat_id AND peer.user_id <> $2
+		JOIN users u ON u.user_id = peer.user_id
 		WHERE c.chat_id = $1 AND c.type = 'DIRECT' AND c.deleted_at IS NULL
 		  AND (SELECT count(*) FROM chat_membership cm WHERE cm.chat_id = c.chat_id) = 2
-		LIMIT 1`, chatID, userID).Scan(&peerID)
+		LIMIT 1`, chatID, userID).Scan(&peer.UserID, &peer.DisplayName)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", app.ErrNotFound
+		return app.DirectChatPeer{}, app.ErrNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("get direct chat peer: %w", err)
+		return app.DirectChatPeer{}, fmt.Errorf("get direct chat peer: %w", err)
 	}
-	return peerID, nil
+	return peer, nil
 }
 
 func (r *Repository) RevokeSession(ctx context.Context, sessionID string, at time.Time) error {

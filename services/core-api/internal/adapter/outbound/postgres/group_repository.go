@@ -16,7 +16,7 @@ import (
 func (r *Repository) ListGroupChats(ctx context.Context, userID string) ([]app.GroupChat, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.chat_id::text, c.name, c.profile_pic, c.updated_at,
-			COALESCE((SELECT json_agg(json_build_object('userId', cm.user_id::text, 'phoneNumber', u.phone) ORDER BY cm.user_id)
+			COALESCE((SELECT json_agg(json_build_object('userId', cm.user_id::text, 'phoneNumber', u.phone, 'displayName', COALESCE(u.display_name, '')) ORDER BY cm.user_id)
 				FROM chat_membership cm JOIN users u ON u.user_id = cm.user_id WHERE cm.chat_id=c.chat_id), '[]'::json)::text
 		FROM chat c
 		JOIN chat_membership m ON m.chat_id = c.chat_id

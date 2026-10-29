@@ -82,7 +82,7 @@ func callGroupAPI(server *Server, token, method, path, body string) *httptest.Re
 func TestListGroupChatsReturnsAuthenticatedUsersGroups(t *testing.T) {
 	updated := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	name, picture := "study group", "media-1"
-	repo := &groupHTTPRepo{sessionRepoStub: &sessionRepoStub{}, chats: []app.GroupChat{{ID: groupTestID, Name: name, ProfilePic: &picture, UpdatedAt: updated, Members: []app.GroupMember{{UserID: groupTestID, PhoneNumber: "+15550000001"}, {UserID: groupOtherID, PhoneNumber: "+15550000002"}}}}}
+	repo := &groupHTTPRepo{sessionRepoStub: &sessionRepoStub{}, chats: []app.GroupChat{{ID: groupTestID, Name: name, ProfilePic: &picture, UpdatedAt: updated, Members: []app.GroupMember{{UserID: groupTestID, PhoneNumber: "+15550000001", DisplayName: "Abdu"}, {UserID: groupOtherID, PhoneNumber: "+15550000002"}}}}}
 	server, token := groupTestServer(repo)
 	recorder := callGroupAPI(server, token, http.MethodGet, "/v1/chats/groups", "")
 	if recorder.Code != http.StatusOK {
@@ -92,11 +92,48 @@ func TestListGroupChatsReturnsAuthenticatedUsersGroups(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &chats); err != nil {
 		t.Fatal(err)
 	}
-	if len(chats) != 1 || chats[0].ID != groupTestID || chats[0].Name != name || *chats[0].ProfilePic != picture || !chats[0].UpdatedAt.Equal(updated) || len(chats[0].Members) != 2 || chats[0].Members[1].UserID != groupOtherID || chats[0].Members[1].PhoneNumber != "+15550000002" {
+	if len(chats) != 1 || chats[0].ID != groupTestID || chats[0].Name != name || *chats[0].ProfilePic != picture || !chats[0].UpdatedAt.Equal(updated) || len(chats[0].Members) != 2 || chats[0].Members[0].DisplayName != "Abdu" || chats[0].Members[1].UserID != groupOtherID || chats[0].Members[1].PhoneNumber != "+15550000002" {
 		t.Fatalf("group chats=%+v", chats)
 	}
 	if got := callGroupAPI(server, "", http.MethodGet, "/v1/chats/groups", "").Code; got != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status=%d, want 401", got)
+	}
+}
+
+func TestLookupUserByPhoneRequiresAuthAndReturnsPhoneAndID(t *testing.T) {
+	repo := &groupHTTPRepo{sessionRepoStub: &sessionRepoStub{}}
+	server, token := groupTestServer(repo)
+	response := callGroupAPI(server, token, http.MethodGet, "/v1/users/lookup?phone=%2B15550000002", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var result map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["userId"] != "lookup-user" || result["phoneNumber"] != "+15550000002" {
+		t.Fatalf("lookup result=%v", result)
+	}
+	if got := callGroupAPI(server, "", http.MethodGet, "/v1/users/lookup?phone=%2B15550000002", "").Code; got != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status=%d, want 401", got)
+	}
+	if got := callGroupAPI(server, token, http.MethodGet, "/v1/users/lookup?phone=123", "").Code; got != http.StatusBadRequest {
+		t.Fatalf("invalid phone status=%d, want 400", got)
+	}
+}
+
+func TestLookupUserByPhoneIsRateLimited(t *testing.T) {
+	repo := &groupHTTPRepo{sessionRepoStub: &sessionRepoStub{}}
+	server, token := groupTestServer(repo)
+	for i := 0; i < 10; i++ {
+		response := callGroupAPI(server, token, http.MethodGet, "/v1/users/lookup?phone=%2B15550000002", "")
+		if response.Code != http.StatusOK {
+			t.Fatalf("lookup %d status=%d body=%s", i+1, response.Code, response.Body.String())
+		}
+	}
+	response := callGroupAPI(server, token, http.MethodGet, "/v1/users/lookup?phone=%2B15550000002", "")
+	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") == "" {
+		t.Fatalf("rate limited status=%d retry-after=%q", response.Code, response.Header().Get("Retry-After"))
 	}
 }
 

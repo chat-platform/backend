@@ -11,6 +11,7 @@ import (
 type GroupMember struct {
 	UserID      string `json:"userId"`
 	PhoneNumber string `json:"phoneNumber"`
+	DisplayName string `json:"displayName"`
 }
 
 type GroupChat struct {

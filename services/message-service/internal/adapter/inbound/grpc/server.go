@@ -76,12 +76,6 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 				"chat_id", request.GetChatId(), "sender_id", request.GetSenderId())
 			return nil, status.Error(codes.PermissionDenied, err.Error())
 		}
-		if errors.Is(err, domain.ErrNoRecipients) {
-			result = servicemetrics.SendRejected
-			s.logger.Warn(ctx, "message send rejected because chat has no recipient devices",
-				"chat_id", request.GetChatId(), "sender_id", request.GetSenderId())
-			return nil, status.Error(codes.FailedPrecondition, err.Error())
-		}
 		s.logger.Error(ctx, "message send failed",
 			"error", err,
 			"chat_id", request.GetChatId(),
@@ -91,7 +85,7 @@ func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessage
 		return nil, status.Error(codes.Internal, "could not persist message")
 	}
 	result = servicemetrics.SendAccepted
-	s.logger.Info(ctx, "message durably accepted",
+	s.logger.Info(ctx, "message send accepted",
 		"chat_id", request.GetChatId(), "sender_id", request.GetSenderId(),
 		"device_id", request.GetDeviceId(), "client_msg_id", ack.ClientMsgID,
 		"ts_unix_milli", ack.TimestampMS)

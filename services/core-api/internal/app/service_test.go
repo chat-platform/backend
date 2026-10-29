@@ -41,6 +41,9 @@ func (r *repoFake) CompleteOTP(_ context.Context, phone, _, _, deviceID, sid str
 	return r.user, r.device, r.session, nil
 }
 func (r *repoFake) GetProfile(context.Context, string) (User, error) { return r.user, nil }
+func (r *repoFake) LookupUserByPhone(_ context.Context, phone string) (User, error) {
+	return User{ID: "peer-1", Phone: phone}, nil
+}
 func (r *repoFake) SetDisplayName(_ context.Context, _ string, name string) error {
 	r.user.DisplayName = name
 	return nil
@@ -50,8 +53,8 @@ func (r *repoFake) ClearPushToken(context.Context, string) error       { return 
 func (r *repoFake) GetOrCreateDirectChat(context.Context, string, string) (string, error) {
 	return "chat-1", nil
 }
-func (r *repoFake) GetDirectChatPeer(context.Context, string, string) (string, error) {
-	return "peer-1", nil
+func (r *repoFake) GetDirectChatPeer(context.Context, string, string) (DirectChatPeer, error) {
+	return DirectChatPeer{UserID: "peer-1", DisplayName: "Alice"}, nil
 }
 func (r *repoFake) ListGroupChats(context.Context, string) ([]GroupChat, error) { return nil, nil }
 func (r *repoFake) CreateGroup(context.Context, string, string, []string) (string, error) {
@@ -214,6 +217,7 @@ func (c *cacheFake) RevokeConnection(context.Context, string, string) error {
 	}
 	return c.revokeConnectionErr
 }
+func (c *cacheFake) AllowPhoneLookup(context.Context, string) (bool, error) { return true, nil }
 
 func TestVerifyOTPCreatesSessionAndAuthenticateChecksCache(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)

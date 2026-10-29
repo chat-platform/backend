@@ -156,7 +156,7 @@ func TestGetDirectChatPeerRequiresActiveDirectChatMembership(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
 	member, peer, outsider := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	_, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone) VALUES($1,'+15550000201'),($2,'+15550000202'),($3,'+15550000203')`, member, peer, outsider)
+	_, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone,display_name) VALUES($1,'+15550000201','Member'),($2,'+15550000202','Alice'),($3,'+15550000203','Outsider')`, member, peer, outsider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,8 +165,8 @@ func TestGetDirectChatPeerRequiresActiveDirectChatMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := repo.GetDirectChatPeer(ctx, member, chatID)
-	if err != nil || got != peer {
-		t.Fatalf("member peer=(%q,%v), want %q", got, err, peer)
+	if err != nil || got.UserID != peer || got.DisplayName != "Alice" {
+		t.Fatalf("member peer=(%+v,%v), want user %q and display name Alice", got, err, peer)
 	}
 	if _, err := repo.GetDirectChatPeer(ctx, outsider, chatID); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("outsider lookup error=%v, want not found", err)
@@ -177,6 +177,22 @@ func TestGetDirectChatPeerRequiresActiveDirectChatMembership(t *testing.T) {
 	}
 	if _, err := repo.GetDirectChatPeer(ctx, member, groupID); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("group lookup error=%v, want not found", err)
+	}
+}
+
+func TestLookupUserByPhone(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id, phone) VALUES($1, '+15550000444')`, userID); err != nil {
+		t.Fatal(err)
+	}
+	user, err := repo.LookupUserByPhone(ctx, "+15550000444")
+	if err != nil || user.ID != userID || user.Phone != "+15550000444" {
+		t.Fatalf("lookup=(%+v,%v)", user, err)
+	}
+	if _, err := repo.LookupUserByPhone(ctx, "+15550000445"); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("missing lookup error=%v, want not found", err)
 	}
 }
 
@@ -234,6 +250,30 @@ func TestCreateAndManageGroupMembershipTransactionally(t *testing.T) {
 	chats, err := repo.ListGroupChats(ctx, member)
 	if err != nil || len(chats) != 1 || chats[0].ID != groupID || chats[0].Name != name || chats[0].ProfilePic == nil || *chats[0].ProfilePic != picture || len(chats[0].Members) != 1 || chats[0].Members[0].UserID != member || chats[0].Members[0].PhoneNumber != "+15551110002" {
 		t.Fatalf("listed groups=%+v error=%v", chats, err)
+	}
+}
+
+func TestListGroupChatsIncludesMemberDisplayNames(t *testing.T) {
+	repo, pool := testRepository(t)
+	ctx := context.Background()
+	creator, member := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO users(user_id,phone,display_name) VALUES($1,'+15552220001','Rae'),($2,'+15552220002','Abdu')`, creator, member); err != nil {
+		t.Fatal(err)
+	}
+	groupID, err := repo.CreateGroup(ctx, creator, "friends", []string{member})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chats, err := repo.ListGroupChats(ctx, member)
+	if err != nil || len(chats) != 1 || chats[0].ID != groupID || len(chats[0].Members) != 2 {
+		t.Fatalf("groups=%+v error=%v", chats, err)
+	}
+	names := map[string]string{}
+	for _, groupMember := range chats[0].Members {
+		names[groupMember.UserID] = groupMember.DisplayName
+	}
+	if names[creator] != "Rae" || names[member] != "Abdu" {
+		t.Fatalf("member display names=%v", names)
 	}
 }
 

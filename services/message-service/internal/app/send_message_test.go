@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 type chatRepositoryStub struct {
 	chatType       string
 	recipients     []domain.RecipientDevice
+	recipientsErr  error
 	resolvedCalls  int
 	directEnqueued bool
 	groupEnqueued  bool
@@ -24,7 +26,7 @@ func (r *chatRepositoryStub) AuthorizedChatType(context.Context, string, string)
 }
 func (r *chatRepositoryStub) ResolveMessageRecipients(context.Context, string) ([]domain.RecipientDevice, error) {
 	r.resolvedCalls++
-	return r.recipients, nil
+	return r.recipients, r.recipientsErr
 }
 func (r *chatRepositoryStub) EnqueueDirectMessageEvent(_ context.Context, _ domain.SendMessage, recipients []domain.RecipientDevice) (domain.MessageAck, error) {
 	r.directEnqueued = true
@@ -63,20 +65,66 @@ func TestGroupSendAllowsNoEchoRecipientsAndMarksGroupDelivery(t *testing.T) {
 	}
 }
 
-func TestDirectSendStillRequiresAtLeastOneOtherDevice(t *testing.T) {
+func TestDirectSendWithoutRecipientDevicesIsAcknowledgedAndDiscarded(t *testing.T) {
 	logger, err := logging.New(io.Discard, logging.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo := &chatRepositoryStub{
-		chatType:   "DIRECT",
-		recipients: []domain.RecipientDevice{{UserID: "sender", DeviceID: "origin"}},
+	for _, tc := range []struct {
+		name          string
+		recipients    []domain.RecipientDevice
+		recipientsErr error
+	}{
+		{name: "no registered devices", recipientsErr: domain.ErrNoRecipients},
+		{name: "sender device only", recipients: []domain.RecipientDevice{{UserID: "sender", DeviceID: "origin"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &chatRepositoryStub{chatType: "DIRECT", recipients: tc.recipients, recipientsErr: tc.recipientsErr}
+			command := domain.SendMessage{SenderID: "sender", DeviceID: "origin", ChatID: "chat", ClientMsgID: "client"}
+			ack, err := NewChatOperations(repo, logger).SendMessage(context.Background(), command)
+			if err != nil {
+				t.Fatalf("direct send returned error: %v", err)
+			}
+			if ack.ClientMsgID != command.ClientMsgID || ack.TimestampMS <= 0 {
+				t.Fatalf("ack=%+v, want client ID %q and a server timestamp", ack, command.ClientMsgID)
+			}
+			if repo.directEnqueued || repo.groupEnqueued {
+				t.Fatalf("message with no recipient was enqueued: direct=%v group=%v", repo.directEnqueued, repo.groupEnqueued)
+			}
+		})
 	}
-	_, err = NewChatOperations(repo, logger).SendMessage(context.Background(), domain.SendMessage{SenderID: "sender", DeviceID: "origin"})
-	if err != domain.ErrNoRecipients {
-		t.Fatalf("direct send error=%v, want ErrNoRecipients", err)
+}
+
+func TestDirectSendPreservesRecipientRepositoryErrors(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if repo.directEnqueued || repo.groupEnqueued {
-		t.Fatalf("empty direct recipient set enqueued: direct=%v group=%v", repo.directEnqueued, repo.groupEnqueued)
+	wantErr := errors.New("repository unavailable")
+	repo := &chatRepositoryStub{chatType: "DIRECT", recipientsErr: wantErr}
+	_, err = NewChatOperations(repo, logger).SendMessage(context.Background(), domain.SendMessage{SenderID: "sender", DeviceID: "origin", ChatID: "chat"})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("send error=%v, want wrapped repository error %v", err, wantErr)
+	}
+}
+
+func TestDirectSendRetryCanDeliverWhenRecipientDeviceAppears(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &chatRepositoryStub{chatType: "DIRECT", recipientsErr: domain.ErrNoRecipients}
+	operations := NewChatOperations(repo, logger)
+	command := domain.SendMessage{SenderID: "sender", DeviceID: "origin", ChatID: "chat", ClientMsgID: "client"}
+	if _, err := operations.SendMessage(context.Background(), command); err != nil {
+		t.Fatalf("first send returned error: %v", err)
+	}
+	repo.recipientsErr = nil
+	repo.recipients = []domain.RecipientDevice{{UserID: "recipient", DeviceID: "new-device"}}
+	if _, err := operations.SendMessage(context.Background(), command); err != nil {
+		t.Fatalf("retry returned error: %v", err)
+	}
+	if !repo.directEnqueued || len(repo.enqueued) != 1 || repo.enqueued[0].DeviceID != "new-device" {
+		t.Fatalf("retry did not enqueue for newly available recipient: %+v", repo.enqueued)
 	}
 }
