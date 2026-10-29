@@ -1,0 +1,285 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: core-api
+spec:
+  selector: {app: core-api}
+  ports:
+    - {name: http, port: 8081, targetPort: http}
+    - {name: grpc, port: 50052, targetPort: grpc}
+    - {name: metrics, port: 9091, targetPort: metrics}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-api
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: core-api}}
+  template:
+    metadata: {labels: {app: core-api}}
+    spec:
+      initContainers:
+        - name: wait-for-schema
+          image: postgres:16-alpine
+          command: ["sh", "-ec"]
+          args:
+            - |
+              until [ "$(psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT count(*) = 3 FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('users','device','direct_outbox')" 2>/dev/null || true)" = "t" ]; do sleep 2; done
+          env:
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: username}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: database}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+          resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 128Mi}}
+      containers:
+        - name: core-api
+          image: messenger-core-api:local
+          ports:
+            - {name: http, containerPort: 8081}
+            - {name: grpc, containerPort: 50052}
+            - {name: metrics, containerPort: 9091}
+          envFrom: [{configMapRef: {name: backend-config}}]
+          env:
+            - {name: METRICS_ADDR, value: ":9091"}
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: username}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: database}}
+            - name: POSTGRES_DSN
+              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)?sslmode=disable"
+            - name: JWT_SECRET
+              valueFrom: {secretKeyRef: {name: backend-secrets, key: jwt-secret}}
+            - name: DEV_OTP_CODE
+              valueFrom: {secretKeyRef: {name: backend-secrets, key: dev-otp-code}}
+            - name: MEDIA_S3_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: backend-secrets, key: media-access-key}}
+            - name: MEDIA_S3_SECRET_KEY
+              valueFrom: {secretKeyRef: {name: backend-secrets, key: media-secret-key}}
+          readinessProbe: {tcpSocket: {port: http}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: http}, initialDelaySeconds: 20, periodSeconds: 10}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: message-service
+spec:
+  selector: {app: message-service}
+  ports:
+    - {name: grpc, port: 50051, targetPort: grpc}
+    - {name: metrics, port: 9092, targetPort: metrics}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: message-service
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: message-service}}
+  template:
+    metadata: {labels: {app: message-service}}
+    spec:
+      initContainers:
+        - name: wait-for-schema
+          image: postgres:16-alpine
+          command: ["sh", "-ec"]
+          args:
+            - |
+              until [ "$(psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT count(*) = 3 FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('users','device','direct_outbox')" 2>/dev/null || true)" = "t" ]; do sleep 2; done
+          env:
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: username}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: database}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+          resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 128Mi}}
+      containers:
+        - name: message-service
+          image: messenger-message-service:local
+          ports:
+            - {name: grpc, containerPort: 50051}
+            - {name: metrics, containerPort: 9092}
+          envFrom: [{configMapRef: {name: backend-config}}]
+          env:
+            - {name: GRPC_ADDR, value: ":50051"}
+            - {name: METRICS_ADDR, value: ":9092"}
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: username}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: database}}
+            - name: POSTGRES_DSN
+              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)?sslmode=disable"
+          readinessProbe: {tcpSocket: {port: grpc}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: grpc}, initialDelaySeconds: 20, periodSeconds: 10}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ws-gateway
+spec:
+  selector: {app: ws-gateway}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+    - {name: metrics, port: 9094, targetPort: metrics}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ws-gateway
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: ws-gateway}}
+  template:
+    metadata: {labels: {app: ws-gateway}}
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: ws-gateway
+          image: messenger-ws-gateway:local
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: metrics, containerPort: 9094}
+          envFrom: [{configMapRef: {name: backend-config}}]
+          env:
+            - {name: LISTEN_ADDR, value: ":8080"}
+            - {name: METRICS_ADDR, value: ":9094"}
+            - name: NODE_ID
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: JWT_SECRET
+              valueFrom: {secretKeyRef: {name: backend-secrets, key: jwt-secret}}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+          readinessProbe: {tcpSocket: {port: http}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: http}, initialDelaySeconds: 20, periodSeconds: 10}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: relay
+spec:
+  selector: {app: relay}
+  ports:
+    - {name: metrics, port: 9093, targetPort: metrics}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: relay}}
+  template:
+    metadata: {labels: {app: relay}}
+    spec:
+      initContainers:
+        - name: wait-for-schema
+          image: postgres:16-alpine
+          command: ["sh", "-ec"]
+          args:
+            - |
+              until [ "$(psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT count(*) = 3 FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('users','device','direct_outbox')" 2>/dev/null || true)" = "t" ]; do sleep 2; done
+          env:
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: username}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: database}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+          resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 128Mi}}
+      containers:
+        - name: relay
+          image: messenger-relay:local
+          ports: [{name: metrics, containerPort: 9093}]
+          envFrom: [{configMapRef: {name: backend-config}}]
+          env:
+            - {name: METRICS_ADDR, value: ":9093"}
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: username}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: database}}
+            - name: POSTGRES_DSN
+              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)?sslmode=disable"
+          readinessProbe: {tcpSocket: {port: metrics}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: metrics}, initialDelaySeconds: 20, periodSeconds: 10}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+spec:
+  selector: {app: notification-service}
+  ports: [{name: metrics, port: 9095, targetPort: metrics}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: notification-service}}
+  template:
+    metadata: {labels: {app: notification-service}}
+    spec:
+      initContainers:
+        - name: wait-for-schema
+          image: postgres:16-alpine
+          command: ["sh", "-ec"]
+          args:
+            - |
+              until [ "$(psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT count(*) = 3 FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('users','device','direct_outbox')" 2>/dev/null || true)" = "t" ]; do sleep 2; done
+          env:
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: username}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: database}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+          resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 128Mi}}
+      containers:
+        - name: notification-service
+          image: messenger-notification-service:local
+          ports: [{name: metrics, containerPort: 9095}]
+          envFrom: [{configMapRef: {name: backend-config}}]
+          env:
+            - {name: METRICS_ADDR, value: ":9095"}
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: username}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: password}}
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: postgres-auth, key: database}}
+            - name: POSTGRES_DSN
+              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)?sslmode=disable"
+            - name: GOOGLE_CLOUD_PROJECT
+              valueFrom: {secretKeyRef: {name: firebase-config, key: project-id, optional: true}}
+          volumeMounts:
+            - {name: firebase, mountPath: /var/run/firebase, readOnly: true}
+          readinessProbe: {tcpSocket: {port: metrics}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: metrics}, initialDelaySeconds: 20, periodSeconds: 10}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+      volumes:
+        - name: firebase
+          secret: {secretName: firebase-service-account}

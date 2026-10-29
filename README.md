@@ -13,6 +13,9 @@ distributed-system concepts.
 See [implementation/README.md](implementation/README.md) for implementation
 details, local setup, and current limitations.
 
+Kubernetes deployment manifests and Kind/production instructions are in
+[`deployments/k8s/README.md`](deployments/k8s/README.md).
+
 ## System Design and Plans
 
 The system design documents and implementation plans are in [`docs/`](docs/):

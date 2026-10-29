@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: messenger
+resources:
+  - ../kind
+patches:
+  - path: ingress-tls.yaml
+  - path: media-endpoint.yaml

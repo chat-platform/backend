@@ -138,6 +138,7 @@ func main() {
 	go func() {
 		<-ctx.Done()
 		logger.Info(context.Background(), "ws-gateway shutting down", "node_id", cfg.NodeID)
+		hub.CloseAll(1001, "server shutting down; reconnect")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {

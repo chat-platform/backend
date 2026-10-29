@@ -1,6 +1,7 @@
-.PHONY: proto up down tidy running run-all stop-all status-all logs-all logs-app
+.PHONY: proto up down tidy running run-all stop-all status-all logs-all logs-app k8s-images-kind k8s-load-kind
 
 BUF ?= buf
+KIND_CLUSTER ?= kind
 
 proto:
 	$(BUF) generate
@@ -43,3 +44,15 @@ logs-all:
 
 logs-app:
 	./scripts/local-services.sh logs-without-relay
+
+# Build the Kubernetes service images with their local Kind tags.
+k8s-images-kind:
+	docker build -f services/Dockerfile --build-arg SERVICE=core-api -t messenger-core-api:local .
+	docker build -f services/Dockerfile --build-arg SERVICE=message-service -t messenger-message-service:local .
+	docker build -f services/Dockerfile --build-arg SERVICE=ws-gateway -t messenger-ws-gateway:local .
+	docker build -f services/Dockerfile --build-arg SERVICE=relay -t messenger-relay:local .
+	docker build -f services/Dockerfile --build-arg SERVICE=notification-service -t messenger-notification-service:local .
+	docker build -f deployments/k8s/migration.Dockerfile -t messenger-migrate:local .
+
+k8s-load-kind: k8s-images-kind
+	kind load docker-image --name $(KIND_CLUSTER) messenger-core-api:local messenger-message-service:local messenger-ws-gateway:local messenger-relay:local messenger-notification-service:local messenger-migrate:local

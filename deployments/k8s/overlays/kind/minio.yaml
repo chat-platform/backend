@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+spec:
+  clusterIP: None
+  selector: {app: minio}
+  ports:
+    - {name: api, port: 9000, targetPort: api}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+spec:
+  serviceName: minio
+  replicas: 1
+  selector: {matchLabels: {app: minio}}
+  template:
+    metadata: {labels: {app: minio}}
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          ports:
+            - {name: api, containerPort: 9000}
+            - {name: console, containerPort: 9001}
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom: {secretKeyRef: {name: backend-secrets, key: media-access-key}}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: backend-secrets, key: media-secret-key}}
+          volumeMounts: [{name: data, mountPath: /data}]
+          readinessProbe: {httpGet: {path: /minio/health/ready, port: api}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /minio/health/live, port: api}, initialDelaySeconds: 20, periodSeconds: 10}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 1Gi}}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 10Gi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-init
+spec:
+  backoffLimit: 5
+  template:
+    metadata: {labels: {app: minio-bucket-init}}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-bucket
+          image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 && mc ready local; do sleep 2; done
+              mc mb --ignore-existing local/chat-media
+              mc cors set local/chat-media /config/cors.json
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom: {secretKeyRef: {name: backend-secrets, key: media-access-key}}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: backend-secrets, key: media-secret-key}}
+          volumeMounts:
+            - {name: cors, mountPath: /config, readOnly: true}
+          resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 250m, memory: 128Mi}}
+      volumes:
+        - name: cors
+          configMap: {name: minio-cors}

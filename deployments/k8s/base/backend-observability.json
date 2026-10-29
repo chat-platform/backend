@@ -1,0 +1,1840 @@
+{
+  "id": null,
+  "uid": "backend-observability",
+  "title": "Backend Observability",
+  "tags": [
+    "backend",
+    "prometheus"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "backend-prometheus"
+        },
+        "definition": "label_values(up, service)",
+        "query": {
+          "query": "label_values(up, service)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1000,
+      "type": "row",
+      "title": "Overview",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Service scrape status",
+      "description": "Prometheus target availability. A value of 1 means the scrape succeeded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "up{service=~\"$service\"}",
+          "legendFormat": "{{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bool",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Active WebSocket connections",
+      "description": "Authenticated connections currently held by each Gateway instance; values remain distinct by service target.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service)(ws_active_connections{service=~\"$service\"})",
+          "legendFormat": "{{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Core API HTTP 5xx rate",
+      "description": "Completed HTTP requests with 5xx status.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service)(rate(core_api_http_requests_total{service=~\"$service\",status_class=\"5xx\"}[$__rate_interval]))",
+          "legendFormat": "Core API {{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Message send internal-error rate",
+      "description": "Unexpected SendMessage RPC failures; expected rejections are shown in the service section.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service)(rate(message_send_requests_total{service=~\"$service\",result=\"error\"}[$__rate_interval]))",
+          "legendFormat": "Message Service {{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      }
+    },
+    {
+      "id": 1005,
+      "type": "row",
+      "title": "Core API & Message Service",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Core API request rate",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service,operation,status_class)(rate(core_api_http_requests_total{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "{{service}} {{operation}} {{status_class}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Message send outcomes",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service,result)(rate(message_send_requests_total{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "{{service}} {{result}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      }
+    },
+    {
+      "id": 1008,
+      "type": "row",
+      "title": "Relay",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Undispatched outbox rows",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service,outbox_type)(outbox_pending_rows{service=~\"$service\"})",
+          "legendFormat": "{{service}} {{outbox_type}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 27
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Oldest pending row age",
+      "description": "Age follows Relay lowest-ID processing order; it may differ from earliest created_at.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service,outbox_type)(outbox_oldest_pending_age_seconds{service=~\"$service\"})",
+          "legendFormat": "{{service}} {{outbox_type}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 27
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "WS retry backlog",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service,outbox_type)(outbox_ws_retry_pending_rows{service=~\"$service\"})",
+          "legendFormat": "pending {{outbox_type}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service,outbox_type)(outbox_ws_retry_exhausted_rows{service=~\"$service\"})",
+          "legendFormat": "exhausted {{outbox_type}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Overdue unacknowledged WS messages",
+      "description": "Point-in-time backlog count using created_at age; not an SLO percentage.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service,outbox_type,threshold)(outbox_ws_overdue_unacknowledged_rows{service=~\"$service\"})",
+          "legendFormat": "{{outbox_type}} {{threshold}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Dispatch outcomes",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service,outbox_type,outcome)(rate(relay_dispatch_events_total{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "{{service}} {{outbox_type}} {{outcome}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 43
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Retry outcomes",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service,outbox_type,outcome)(rate(relay_retry_events_total{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "{{service}} {{outbox_type}} {{outcome}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 43
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Snapshot status and count saturation",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "min by (service)(outbox_snapshot_success{service=~\"$service\"})",
+          "legendFormat": "snapshot success {{service}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service,outbox_type,metric)(outbox_snapshot_count_saturated{service=~\"$service\"})",
+          "legendFormat": "saturated {{outbox_type}} {{metric}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 51
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Outbox snapshot age",
+      "description": "Worst sample age across active Relay reporters. Check snapshot health and Prometheus target status alongside queue gauges.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service)(time() - outbox_snapshot_last_success_timestamp_seconds{service=~\"$service\"})",
+          "legendFormat": "{{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 51
+      }
+    },
+    {
+      "id": 1017,
+      "type": "row",
+      "title": "WS Gateway",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Delivery handling rate",
+      "description": "Accepted means Hub acceptance, including buffering; it is not client delivery.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service,outcome)(rate(ws_delivery_handling_total{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "{{service}} {{outcome}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 60
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Socket write rate",
+      "description": "Actual Hub WriteJSON outcomes; successful writes are not client acknowledgements.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service,phase,result)(rate(ws_socket_write_attempts_total{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "{{service}} {{phase}} {{result}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 60
+      }
+    },
+    {
+      "id": 1020,
+      "type": "row",
+      "title": "Notifications",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Unread stream entries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service)(notification_stream_lag{service=~\"$service\"})",
+          "legendFormat": "{{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 69
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Pending stream entries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service)(notification_stream_pending_entries{service=~\"$service\"})",
+          "legendFormat": "{{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 69
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Oldest unresolved queue age",
+      "description": "Approximate age across unread and pending entries, derived from Redis stream IDs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service)(notification_stream_oldest_unresolved_age_seconds{service=~\"$service\"})",
+          "legendFormat": "{{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 77
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Queue snapshot status",
+      "description": "A failed sample is distinct from an empty queue. See Queue snapshot age for freshness.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "min by (service)(notification_queue_snapshot_success{service=~\"$service\"})",
+          "legendFormat": "snapshot success {{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 77
+      }
+    },
+    {
+      "id": 1028,
+      "type": "timeseries",
+      "title": "Queue snapshot age",
+      "description": "Age of the last complete queue snapshot. Check snapshot status and scrape health alongside queue values.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "max by (service)(time() - notification_queue_snapshot_last_success_timestamp_seconds{service=~\"$service\"})",
+          "legendFormat": "{{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 85
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "FCM provider calls",
+      "description": "Provider acceptance does not confirm delivery to a device.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service,result)(rate(notification_push_attempts_total{service=~\"$service\",provider=\"fcm\"}[$__rate_interval]))",
+          "legendFormat": "{{service}} {{result}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 85
+      }
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Token lookup errors and no-token skips",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service)(rate(notification_push_token_lookup_errors_total{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "lookup errors {{service}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service)(rate(notification_push_no_token_skips_total{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "no-token skips {{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 93
+      }
+    },
+    {
+      "id": 1027,
+      "type": "row",
+      "title": "Latency",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 101
+      }
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "Core API HTTP duration",
+      "description": "Request duration includes Core API handler and dependency work.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le,service)(rate(core_api_http_request_duration_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{service}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le,service)(rate(core_api_http_request_duration_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{service}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le,service)(rate(core_api_http_request_duration_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{service}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service)(rate(core_api_http_request_duration_seconds_count{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "observations/s {{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 102
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Durable send duration",
+      "description": "Message Service RPC handling through durable acknowledgement readiness.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le,service,result)(rate(message_send_duration_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{service}} {{result}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le,service,result)(rate(message_send_duration_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{service}} {{result}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le,service,result)(rate(message_send_duration_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{service}} {{result}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service ,result)(rate(message_send_duration_seconds_count{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "observations/s {{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 102
+      }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Acknowledged delivery latency",
+      "description": "Approximate event-created-to-first-ack latency for acknowledged WS-routed rows only. Not an end-to-end SLO or compliance measure; unacknowledged messages are absent.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le,service,outbox_type)(rate(message_delivery_ack_latency_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{service}} {{outbox_type}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le,service,outbox_type)(rate(message_delivery_ack_latency_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{service}} {{outbox_type}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le,service,outbox_type)(rate(message_delivery_ack_latency_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{service}} {{outbox_type}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service ,outbox_type)(rate(message_delivery_ack_latency_seconds_count{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "observations/s {{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 110
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Outbox dispatch wait",
+      "description": "Event-created-to-first-successful-dispatch wait, distinct from Relay processing time.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "backend-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le,service,outbox_type)(rate(outbox_dispatch_wait_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{service}} {{outbox_type}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le,service,outbox_type)(rate(outbox_dispatch_wait_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{service}} {{outbox_type}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le,service,outbox_type)(rate(outbox_dispatch_wait_seconds_bucket{service=~\"$service\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{service}} {{outbox_type}}",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "backend-prometheus"
+          },
+          "expr": "sum by (service ,outbox_type)(rate(outbox_dispatch_wait_seconds_count{service=~\"$service\"}[$__rate_interval]))",
+          "legendFormat": "observations/s {{service}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 110
+      }
+    }
+  ]
+}

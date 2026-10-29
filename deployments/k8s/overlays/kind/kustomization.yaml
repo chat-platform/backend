@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: messenger
+resources:
+  - ../../base
+  - minio.yaml
+patches:
+  - path: ingress-media.yaml
+configMapGenerator:
+  - name: backend-config
+    behavior: merge
+    literals:
+      - MEDIA_S3_ENDPOINT=http://messenger.local
+      - MEDIA_S3_REGION=us-east-1
+      - MEDIA_S3_BUCKET=chat-media
+  - name: minio-cors
+    files:
+      - cors.json
+secretGenerator:
+  - name: postgres-auth
+    envs: [postgres.env]
+  - name: backend-secrets
+    envs: [backend.env]
+  - name: grafana-auth
+    envs: [grafana.env]
+generatorOptions:
+  disableNameSuffixHash: true

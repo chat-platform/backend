@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+data:
+  LISTEN_ADDR: ":8081"
+  GRPC_ADDR: ":50052"
+  METRICS_ADDR: ":9091"
+  POSTGRES_DSN: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)?sslmode=disable"
+  REDIS_ADDR: "redis:6379"
+  SESSION_TTL: "24h"
+  MEDIA_URL_TTL: "5m"
+  MEDIA_S3_REGION: "us-east-1"
+  MEDIA_S3_BUCKET: "chat-media"
+  MEDIA_S3_ENDPOINT: "https://s3.us-east-1.amazonaws.com"
+  LOG_FORMAT: "json"
+  LOG_LEVEL: "info"
+  MESSAGE_SERVICE_ADDR: "message-service:50051"
+  CORE_API_GRPC_ADDR: "core-api:50052"
+  WS_PATH: "/ws"
+  RELAY_POLL_INTERVAL: "250ms"
+  RELAY_BATCH_SIZE: "100"
+  RELAY_WORKERS: "2"
+  RELAY_CLAIM_LEASE: "30s"
+  NOTIFICATION_COALESCE_WINDOW: "5s"
+  GOOGLE_APPLICATION_CREDENTIALS: "/var/run/firebase/service-account.json"

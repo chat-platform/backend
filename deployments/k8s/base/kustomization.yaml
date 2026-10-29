@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: messenger
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - redis.yaml
+  - migration.yaml
+  - services.yaml
+  - observability.yaml
+  - ingress.yaml
+configMapGenerator:
+  - name: prometheus-config
+    files:
+      - prometheus.yml
+  - name: grafana-provisioning
+    files:
+      - grafana-dashboard-provider.yml
+      - grafana-datasource.yml
+  - name: grafana-dashboard
+    files:
+      - backend-observability.json
+generatorOptions:
+  disableNameSuffixHash: true

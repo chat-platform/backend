@@ -59,6 +59,24 @@ func TestHubReportsMissingConnection(t *testing.T) {
 	}
 }
 
+func TestHubCloseAllRequestsReconnectAndRemovesConnections(t *testing.T) {
+	h := NewHub()
+	first, second := &captureSocket{}, &captureSocket{}
+	h.Register("conn-a", first)
+	h.Register("conn-b", second)
+
+	h.CloseAll(websocket.CloseGoingAway, "server shutting down; reconnect")
+
+	for name, socket := range map[string]*captureSocket{"first": first, "second": second} {
+		if !socket.closed || socket.closeCode != websocket.CloseGoingAway {
+			t.Errorf("%s socket close=(closed %t, code %d)", name, socket.closed, socket.closeCode)
+		}
+	}
+	if got := h.ActiveConnectionCount(); got != 0 {
+		t.Fatalf("active connections=%d, want 0", got)
+	}
+}
+
 func TestHubPresenceDeliveryIsScopedToLocalSubscriptions(t *testing.T) {
 	h := NewHub()
 	first, second := &captureSocket{}, &captureSocket{}
