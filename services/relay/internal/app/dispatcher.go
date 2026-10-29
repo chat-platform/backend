@@ -46,11 +46,13 @@ func New(outbox port.OutboxRepository, registry port.ConnectionRegistry, publish
 
 func (d *Dispatcher) RetryOnce(ctx context.Context) (int, error) {
 	count := 0
+	totalClaimed := 0
 	for _, outboxType := range []string{"direct", "group"} {
 		events, err := d.outbox.ClaimRetryBatch(ctx, outboxType, d.outboxOptions.RetryBatchSize, d.outboxOptions.ClaimLease)
 		if err != nil {
 			return count, err
 		}
+		totalClaimed += len(events)
 		for _, event := range events {
 			event.OutboxType = outboxType
 			started := time.Now()
@@ -64,7 +66,11 @@ func (d *Dispatcher) RetryOnce(ctx context.Context) (int, error) {
 			}
 		}
 	}
-	d.logger.Info(ctx, "outbox retry batch completed", "rows_retried", count, "batch_size", d.outboxOptions.RetryBatchSize)
+	if totalClaimed > 0 {
+		d.logger.Info(ctx, "outbox retry batch completed", "rows_claimed", totalClaimed, "rows_retried", count, "batch_size", d.outboxOptions.RetryBatchSize)
+	} else {
+		d.logger.Debug(ctx, "outbox retry batch found no rows", "batch_size", d.outboxOptions.RetryBatchSize)
+	}
 	return count, nil
 }
 func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
@@ -83,7 +89,11 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
 			return count, err
 		}
 	}
-	d.logger.Info(ctx, "outbox drain batch completed", "rows_claimed", totalClaimed, "rows_dispatched", count, "batch_size", d.outboxOptions.BatchSize)
+	if totalClaimed > 0 {
+		d.logger.Info(ctx, "outbox drain batch completed", "rows_claimed", totalClaimed, "rows_dispatched", count, "batch_size", d.outboxOptions.BatchSize)
+	} else {
+		d.logger.Debug(ctx, "outbox drain found no undispatched rows", "batch_size", d.outboxOptions.BatchSize)
+	}
 	return count, nil
 }
 

@@ -183,13 +183,10 @@ func runWorker(ctx context.Context, workerID int, pollInterval time.Duration, di
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			count, err := dispatcher.RunOnce(ctx)
+			_, err := dispatcher.RunOnce(ctx)
 			if err != nil {
 				workerLogger.Error(ctx, "relay drain iteration failed", "error", err)
 				continue
-			}
-			if count == 0 {
-				workerLogger.Debug(ctx, "relay found no undispatched rows")
 			}
 		}
 	}
