@@ -46,7 +46,7 @@ func TestWriteServiceErrorLogsUnderlyingFailureOnceWithRequestContext(t *testing
 	}
 }
 
-func TestWriteInvalidRequestLogsAtDebugWithoutRequestBody(t *testing.T) {
+func TestWriteInvalidRequestLogsAtInfoWithoutRequestBody(t *testing.T) {
 	var output bytes.Buffer
 	logger, err := logging.New(&output, logging.Config{Level: "debug", Format: "json"})
 	if err != nil {
@@ -64,8 +64,8 @@ func TestWriteInvalidRequestLogsAtDebugWithoutRequestBody(t *testing.T) {
 	}
 
 	logLine := strings.TrimSpace(output.String())
-	if !strings.Contains(logLine, `"level":"DEBUG"`) || !strings.Contains(logLine, `"status":400`) {
-		t.Fatalf("expected debug rejection log, got %q", logLine)
+	if !strings.Contains(logLine, `"level":"INFO"`) || !strings.Contains(logLine, `"status":400`) {
+		t.Fatalf("expected info rejection log, got %q", logLine)
 	}
 	if strings.Contains(logLine, "sensitive-code") {
 		t.Fatalf("log contains request body data: %q", logLine)
