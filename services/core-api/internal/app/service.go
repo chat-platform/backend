@@ -21,6 +21,7 @@ var (
 	ErrUnavailable    = errors.New("dependency unavailable")
 	ErrForbidden      = errors.New("forbidden")
 	ErrConflict       = errors.New("conflict")
+	ErrDirectChatSelf = errors.New("cannot start a direct chat with yourself")
 )
 
 type User struct{ ID, Phone, DisplayName string }

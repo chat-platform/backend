@@ -75,6 +75,8 @@ func (s *Server) writeExpectedError(c echo.Context, message string, cause error,
 func (s *Server) writeServiceError(c echo.Context, err error) error {
 	statusCode, code, message, debug, info := http.StatusInternalServerError, "internal_error", "request could not be completed", false, false
 	switch {
+	case errors.Is(err, app.ErrDirectChatSelf):
+		statusCode, code, message, info = http.StatusBadRequest, "invalid_request", "request is invalid", true
 	case errors.Is(err, app.ErrInvalidRequest):
 		statusCode, code, message, info = http.StatusBadRequest, "invalid_request", "request is invalid", true
 	case errors.Is(err, app.ErrUnauthorized):
