@@ -2,6 +2,7 @@
 -- application schema; existing databases must not apply it again.
 
 CREATE TYPE device_platform AS ENUM ('ANDROID', 'IOS', 'WEB');
+CREATE TYPE chat_membership_role AS ENUM ('admin', 'member');
 
 CREATE TABLE users (
     user_id UUID PRIMARY KEY,
@@ -64,7 +65,7 @@ CREATE TABLE chat (
 CREATE TABLE chat_membership (
     chat_id UUID NOT NULL REFERENCES chat (chat_id),
     user_id UUID NOT NULL REFERENCES users (user_id),
-    role TEXT NOT NULL DEFAULT 'member',-- Consider ENUM later for more compact storage.
+    role chat_membership_role NOT NULL DEFAULT 'member',
     joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     member_tag TEXT,
     PRIMARY KEY (chat_id, user_id)
