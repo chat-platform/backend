@@ -1,6 +1,8 @@
 -- Baseline schema for a new database. Keep this file aligned with the current
 -- application schema; existing databases must not apply it again.
 
+CREATE TYPE device_platform AS ENUM ('ANDROID', 'IOS', 'WEB');
+
 CREATE TABLE users (
     user_id UUID PRIMARY KEY,
     phone TEXT NOT NULL UNIQUE,
@@ -26,7 +28,7 @@ CREATE INDEX user_blocks_blocked_id_idx ON user_blocks (blocked_id);
 CREATE TABLE device (
     device_id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users (user_id),
-    platform TEXT NOT NULL CHECK (platform IN ('ANDROID', 'IOS', 'WEB')),-- Consider ENUM later for more compact storage.
+    platform device_platform NOT NULL,
     is_primary BOOLEAN NOT NULL DEFAULT true,
     device_name TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
