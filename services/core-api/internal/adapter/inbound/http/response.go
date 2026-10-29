@@ -16,7 +16,14 @@ type requestValidator struct {
 }
 
 func newRequestValidator() echo.Validator {
-	return &requestValidator{validator: validator.New()}
+	v := validator.New()
+	if err := v.RegisterValidation("e164", func(field validator.FieldLevel) bool {
+		phone, ok := field.Field().Interface().(string)
+		return ok && app.IsE164Phone(phone)
+	}); err != nil {
+		panic(err)
+	}
+	return &requestValidator{validator: v}
 }
 
 func (v *requestValidator) Validate(value any) error {

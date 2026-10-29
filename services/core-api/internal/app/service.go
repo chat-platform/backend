@@ -187,7 +187,9 @@ func (s *Service) CreateMediaDownload(ctx context.Context, mediaID string) (Medi
 }
 
 func (s *Service) RequestOTP(_ context.Context, phone string) error {
-	phone = strings.TrimSpace(phone)
+	if !IsE164Phone(phone) {
+		return ErrInvalidRequest
+	}
 	return nil // Development OTP is fixed; no external delivery is performed.
 }
 
@@ -199,7 +201,9 @@ type AuthResult struct {
 }
 
 func (s *Service) VerifyOTP(ctx context.Context, phone, code, platform, deviceName, deviceID string) (AuthResult, error) {
-	phone = strings.TrimSpace(phone)
+	if !IsE164Phone(phone) {
+		return AuthResult{}, ErrInvalidRequest
+	}
 	if s.cfg.OTPCode == "" || len(code) != len(s.cfg.OTPCode) || subtle.ConstantTimeCompare([]byte(code), []byte(s.cfg.OTPCode)) != 1 {
 		return AuthResult{}, ErrUnauthorized
 	}
@@ -277,8 +281,7 @@ func (s *Service) Profile(ctx context.Context, userID string) (User, error) {
 	return s.repo.GetProfile(ctx, userID)
 }
 func (s *Service) LookupUserByPhone(ctx context.Context, phone string) (User, error) {
-	phone = strings.TrimSpace(phone)
-	if len(phone) < 6 || len(phone) > 32 {
+	if !IsE164Phone(phone) {
 		return User{}, ErrInvalidRequest
 	}
 	return s.repo.LookupUserByPhone(ctx, phone)
@@ -315,7 +318,9 @@ func (s *Service) ClearPushToken(ctx context.Context, deviceID string) error {
 	return nil
 }
 func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string, error) {
-	phone = strings.TrimSpace(phone)
+	if !IsE164Phone(phone) {
+		return "", ErrInvalidRequest
+	}
 	return s.repo.GetOrCreateDirectChat(ctx, userID, phone)
 }
 
