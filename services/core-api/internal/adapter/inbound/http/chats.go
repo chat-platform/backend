@@ -8,7 +8,7 @@ import (
 
 func (s *Server) directChat(c echo.Context) error {
 	var body struct {
-		Phone string `json:"phone" validate:"required,min=6,max=32"`
+		Phone string `json:"phone" validate:"e164"`
 	}
 	if err := decode(c, &body); err != nil {
 		return s.writeInvalidRequest(c, err)

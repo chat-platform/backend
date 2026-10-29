@@ -32,9 +32,9 @@ func (s *Server) groupChats(c echo.Context) error {
 }
 
 func (s *Server) lookupUser(c echo.Context) error {
-	phone := strings.TrimSpace(c.QueryParam("phone"))
-	if len(phone) < 6 || len(phone) > 32 {
-		return s.writeInvalidRequest(c, errors.New("phone must be between 6 and 32 characters"))
+	phone := c.QueryParam("phone")
+	if !app.IsE164Phone(phone) {
+		return s.writeInvalidRequest(c, errors.New("phone must be in E.164 format"))
 	}
 	userID := claimsFrom(c.Request()).UserID
 	allowed, err := s.service.AllowPhoneLookup(c.Request().Context(), userID)

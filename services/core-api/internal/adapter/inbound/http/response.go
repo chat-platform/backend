@@ -16,7 +16,14 @@ type requestValidator struct {
 }
 
 func newRequestValidator() echo.Validator {
-	return &requestValidator{validator: validator.New()}
+	v := validator.New()
+	if err := v.RegisterValidation("e164", func(field validator.FieldLevel) bool {
+		phone, ok := field.Field().Interface().(string)
+		return ok && app.IsE164Phone(phone)
+	}); err != nil {
+		panic(err)
+	}
+	return &requestValidator{validator: v}
 }
 
 func (v *requestValidator) Validate(value any) error {
@@ -56,7 +63,8 @@ func decode(c echo.Context, target any) error {
 }
 
 func (s *Server) writeInvalidRequest(c echo.Context, err error) error {
-	return s.writeExpectedError(c, "invalid request", err, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	s.logRequestInfo(c, "invalid request", err, http.StatusBadRequest)
+	return writeError(c, http.StatusBadRequest, "invalid_request", "request body is invalid")
 }
 
 func (s *Server) writeExpectedError(c echo.Context, message string, cause error, status int, code, response string) error {
@@ -65,10 +73,12 @@ func (s *Server) writeExpectedError(c echo.Context, message string, cause error,
 }
 
 func (s *Server) writeServiceError(c echo.Context, err error) error {
-	statusCode, code, message, debug := http.StatusInternalServerError, "internal_error", "request could not be completed", false
+	statusCode, code, message, debug, info := http.StatusInternalServerError, "internal_error", "request could not be completed", false, false
 	switch {
+	case errors.Is(err, app.ErrDirectChatSelf):
+		statusCode, code, message, info = http.StatusBadRequest, "invalid_request", "request is invalid", true
 	case errors.Is(err, app.ErrInvalidRequest):
-		statusCode, code, message, debug = http.StatusBadRequest, "invalid_request", "request is invalid", true
+		statusCode, code, message, info = http.StatusBadRequest, "invalid_request", "request is invalid", true
 	case errors.Is(err, app.ErrUnauthorized):
 		statusCode, code, message, debug = http.StatusUnauthorized, "unauthorized", "authentication failed", true
 	case errors.Is(err, app.ErrForbidden):
@@ -80,8 +90,20 @@ func (s *Server) writeServiceError(c echo.Context, err error) error {
 	case errors.Is(err, app.ErrUnavailable):
 		statusCode, code, message = http.StatusServiceUnavailable, "unavailable", "a required service is unavailable"
 	}
-	s.logRequestError(c, "request failed", err, statusCode, debug)
+	if info {
+		s.logRequestInfo(c, "request failed", err, statusCode)
+	} else {
+		s.logRequestError(c, "request failed", err, statusCode, debug)
+	}
 	return writeError(c, statusCode, code, message)
+}
+
+func (s *Server) logRequestInfo(c echo.Context, message string, err error, status int) {
+	if s.logger == nil {
+		return
+	}
+	attrs := []any{"operation", c.Path(), "method", c.Request().Method, "status", status, "error", err}
+	s.logger.Info(c.Request().Context(), message, attrs...)
 }
 
 func (s *Server) logRequestError(c echo.Context, message string, err error, status int, debug bool) {

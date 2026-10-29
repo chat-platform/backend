@@ -161,7 +161,7 @@ func (r *Repository) GetOrCreateDirectChat(ctx context.Context, userID, phone st
 		return "", err
 	}
 	if peerID == userID {
-		return "", app.ErrInvalidRequest
+		return "", app.ErrDirectChatSelf
 	}
 	first, second := userID, peerID
 	if second < first {
