@@ -211,7 +211,7 @@ func (c *DeliveryConsumer) handle(ctx context.Context, message redis.XMessage) e
 		return err
 	}
 	outcome = wsmetrics.DeliveryAccepted
-	c.logger.Info(ctx, "message delivered to websocket", "ws_node", c.nodeID, "conn_id", delivery.connID, "device_id", delivery.deviceID, "outbox_id", delivery.outboxID, "outbox_type", delivery.outboxType, "stream_entry_id", message.ID)
+	c.logger.Info(ctx, "event delivered to websocket", "ws_node", c.nodeID, "conn_id", delivery.connID, "device_id", delivery.deviceID, "outbox_id", delivery.outboxID, "outbox_type", delivery.outboxType, "stream_entry_id", message.ID)
 	return c.ack(ctx, message)
 }
 func (c *DeliveryConsumer) ackMalformed(ctx context.Context, m redis.XMessage, err error) error {
