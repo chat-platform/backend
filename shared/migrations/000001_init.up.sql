@@ -1,6 +1,10 @@
 -- Baseline schema for a new database. Keep this file aligned with the current
 -- application schema; existing databases must not apply it again.
 
+CREATE TYPE device_platform AS ENUM ('ANDROID', 'IOS', 'WEB');
+CREATE TYPE chat_membership_role AS ENUM ('admin', 'member');
+CREATE TYPE outbox_route AS ENUM ('WS', 'NOTIF');
+
 CREATE TABLE users (
     user_id UUID PRIMARY KEY,
     phone TEXT NOT NULL UNIQUE,
@@ -8,14 +12,25 @@ CREATE TABLE users (
     display_name TEXT,
     profile_pic_media_id UUID,
     about TEXT,
+    last_seen_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE user_blocks (
+    blocker_id UUID NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    blocked_id UUID NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (blocker_id, blocked_id),
+    CHECK (blocker_id <> blocked_id)
+);
+
+CREATE INDEX user_blocks_blocked_id_idx ON user_blocks (blocked_id);
+
 CREATE TABLE device (
     device_id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users (user_id),
-    platform TEXT NOT NULL CHECK (platform IN ('ANDROID', 'IOS', 'WEB')),-- Consider ENUM later for more compact storage.
+    platform device_platform NOT NULL,
     is_primary BOOLEAN NOT NULL DEFAULT true,
     device_name TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -51,7 +66,7 @@ CREATE TABLE chat (
 CREATE TABLE chat_membership (
     chat_id UUID NOT NULL REFERENCES chat (chat_id),
     user_id UUID NOT NULL REFERENCES users (user_id),
-    role TEXT NOT NULL DEFAULT 'member',-- Consider ENUM later for more compact storage.
+    role chat_membership_role NOT NULL DEFAULT 'member',
     joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     member_tag TEXT,
     PRIMARY KEY (chat_id, user_id)
@@ -65,10 +80,11 @@ CREATE TABLE direct_outbox (
     client_msg_id UUID NOT NULL,
     recipient_id UUID NOT NULL REFERENCES users (user_id),
     device_id UUID NOT NULL REFERENCES device (device_id),
+    chat_id UUID REFERENCES chat (chat_id),
     event_type TEXT NOT NULL,
     payload TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    routed_to TEXT CHECK (routed_to IN ('WS', 'NOTIF')),-- Consider ENUM later for more compact storage.
+    routed_to outbox_route,
     dispatched_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
     claim_expiry TIMESTAMPTZ,
@@ -84,6 +100,7 @@ CREATE INDEX direct_outbox_expiry_cleanup_idx ON direct_outbox (created_at);
 CREATE UNIQUE INDEX direct_outbox_message_idempotency_idx
     ON direct_outbox (sender_id, client_msg_id, device_id)
     WHERE event_type = 'NEW_MESSAGE';
+CREATE INDEX direct_outbox_chat_id_idx ON direct_outbox (chat_id) WHERE chat_id IS NOT NULL;
 
 CREATE TABLE group_event (
     event_id BIGSERIAL PRIMARY KEY,
@@ -104,7 +121,7 @@ CREATE TABLE group_outbox (
     recipient_id UUID NOT NULL REFERENCES users (user_id),
     device_id UUID NOT NULL REFERENCES device (device_id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    routed_to TEXT CHECK (routed_to IN ('WS', 'NOTIF')),
+    routed_to outbox_route,
     dispatched_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
     claim_expiry TIMESTAMPTZ,
@@ -114,3 +131,23 @@ CREATE TABLE group_outbox (
 
 CREATE INDEX group_outbox_device_id_idx ON group_outbox (device_id, id);
 CREATE INDEX group_outbox_undispatched_idx ON group_outbox (id) WHERE dispatched_at IS NULL;
+
+CREATE INDEX direct_outbox_ws_retry_pending_snapshot_idx
+    ON direct_outbox (dispatched_at, id)
+    WHERE routed_to = 'WS' AND delivered_at IS NULL AND attempt_count < 10;
+CREATE INDEX direct_outbox_ws_retry_exhausted_snapshot_idx
+    ON direct_outbox (id)
+    WHERE routed_to = 'WS' AND delivered_at IS NULL AND attempt_count >= 10;
+CREATE INDEX direct_outbox_ws_overdue_message_snapshot_idx
+    ON direct_outbox (created_at)
+    WHERE event_type = 'NEW_MESSAGE' AND routed_to = 'WS' AND delivered_at IS NULL;
+
+CREATE INDEX group_outbox_ws_retry_pending_snapshot_idx
+    ON group_outbox (dispatched_at, id)
+    WHERE routed_to = 'WS' AND delivered_at IS NULL AND attempt_count < 10;
+CREATE INDEX group_outbox_ws_retry_exhausted_snapshot_idx
+    ON group_outbox (id)
+    WHERE routed_to = 'WS' AND delivered_at IS NULL AND attempt_count >= 10;
+CREATE INDEX group_outbox_ws_overdue_snapshot_idx
+    ON group_outbox (created_at, event_id)
+    WHERE routed_to = 'WS' AND delivered_at IS NULL;

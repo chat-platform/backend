@@ -1,6 +1,0 @@
-DROP INDEX IF EXISTS group_outbox_ws_overdue_snapshot_idx;
-DROP INDEX IF EXISTS group_outbox_ws_retry_exhausted_snapshot_idx;
-DROP INDEX IF EXISTS group_outbox_ws_retry_pending_snapshot_idx;
-DROP INDEX IF EXISTS direct_outbox_ws_overdue_message_snapshot_idx;
-DROP INDEX IF EXISTS direct_outbox_ws_retry_exhausted_snapshot_idx;
-DROP INDEX IF EXISTS direct_outbox_ws_retry_pending_snapshot_idx;

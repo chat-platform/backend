@@ -82,14 +82,13 @@ contain only `type=sync` and an opaque `chatId`; clients fetch message data from
 the sync API. The Firebase project must have APNs configured for iOS, and web
 clients must be configured for Firebase Cloud Messaging.
 
-The baseline migration at `shared/migrations/000001_init.up.sql` creates the
-initial schema. Incremental migrations, including
-`shared/migrations/000002_presence.up.sql`,
-`shared/migrations/000003_receipt_chat_id.up.sql`, and
-`shared/migrations/000004_relay_snapshot_indexes.up.sql`, are applied in
-filename order when Compose initializes a new Postgres data volume. Existing
-databases must apply new incremental migrations separately; never reapply the
-baseline migration to an existing database.
+The consolidated baseline migration at `shared/migrations/000001_init.up.sql`
+creates the current schema when Compose initializes a new Postgres data
+volume. It includes the schema previously introduced by the presence,
+receipt-chat-ID, and relay-snapshot-index migrations. Existing database
+volumes are not changed because Postgres initialization scripts run only when
+the data directory is empty; do not reapply the baseline to an existing
+database.
 
 The baseline is not an incremental migration and must not be applied to an
 existing database. Existing databases created with an earlier migration set
