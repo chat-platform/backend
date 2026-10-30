@@ -58,6 +58,7 @@ services:
       - ./config/minio-cors.json:/config/cors.json:ro
 
   message-service:
+    image: ${DOCKERHUB_USERNAME:-local}/messenger-message-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: services/Dockerfile
@@ -110,6 +111,7 @@ services:
         condition: service_started
 
   core-api:
+    image: ${DOCKERHUB_USERNAME:-local}/messenger-core-api:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: services/Dockerfile
@@ -141,6 +143,7 @@ services:
         condition: service_completed_successfully
 
   ws-gateway:
+    image: ${DOCKERHUB_USERNAME:-local}/messenger-ws-gateway:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: services/Dockerfile
@@ -165,6 +168,7 @@ services:
         condition: service_healthy
 
   relay:
+    image: ${DOCKERHUB_USERNAME:-local}/messenger-relay:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: services/Dockerfile
@@ -186,6 +190,7 @@ services:
         condition: service_healthy
 
   notification-service:
+    image: ${DOCKERHUB_USERNAME:-local}/messenger-notification-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: services/Dockerfile

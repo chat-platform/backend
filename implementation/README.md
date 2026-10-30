@@ -51,6 +51,10 @@ Redis (WS connection registry, presence indexes, Pub/Sub, Streams, and cache).
 Docker Compose for local Postgres, Redis, Core API, Message Service, WS Gateway,
 Relay, and Notification Service.
 
+Kubernetes configuration for Kind and generic production clusters is maintained
+in [`deployments/k8s`](../deployments/k8s/README.md). Docker Compose remains the
+local development setup.
+
 ## Components
 
 - [x] Message Service (`services/message-service`, Phase 1)

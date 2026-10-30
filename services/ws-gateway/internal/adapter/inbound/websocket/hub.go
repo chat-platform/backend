@@ -85,6 +85,22 @@ func (h *Hub) ActiveConnectionCount() int {
 	return len(h.entries)
 }
 
+// CloseAll asks every active client to reconnect before this gateway exits.
+func (h *Hub) CloseAll(code int, message string) {
+	h.mu.Lock()
+	entries := make([]*socketEntry, 0, len(h.entries))
+	for id, entry := range h.entries {
+		entries = append(entries, entry)
+		delete(h.entries, id)
+		h.removePresenceSubscriptionsLocked(id)
+	}
+	h.mu.Unlock()
+
+	for _, entry := range entries {
+		_ = entry.socket.CloseWithCode(code, message)
+	}
+}
+
 func (h *Hub) Register(id string, socket socketWriter) {
 	h.RegisterAuthenticated(id, "", "", domain.Connection{}, socket)
 	entry := h.entry(id)

@@ -1,0 +1,11 @@
+apiVersion: 1
+providers:
+  - name: Backend dashboards
+    orgId: 1
+    folder: Backend
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

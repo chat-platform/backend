@@ -1,0 +1,82 @@
+name: Deploy backend to EC2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ec2-backend-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: EC2-Deployment
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+      EC2_HOST: ${{ vars.EC2_HOST }}
+      DEPLOY_DIRECTORY: ${{ vars.BACKEND_DEPLOY_DIRECTORY }}
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || 'abdulrahimom' }}
+
+    steps:
+      - name: Check out selected ref
+        uses: actions/checkout@v4
+
+      - name: Validate deployment settings
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          for name in EC2_HOST DEPLOY_DIRECTORY DOCKERHUB_USERNAME SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required GitHub Environment setting: $name" >&2
+              exit 1
+            fi
+          done
+          case "$DEPLOY_DIRECTORY" in
+            /*) ;;
+            *) echo "BACKEND_DEPLOY_DIRECTORY must be an absolute path" >&2; exit 1 ;;
+          esac
+
+      - name: Package Compose runtime files
+        run: |
+          set -euo pipefail
+          mkdir -p deploy-bundle
+          tar -czf deploy-bundle/backend-runtime.tar.gz \
+            docker-compose.yml config scripts/postgres-init.sh \
+            shared/migrations shared/seeds
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Transfer deployment bundle
+        run: |
+          set -euo pipefail
+          ssh "$EC2_HOST" "mkdir -p '$DEPLOY_DIRECTORY/.incoming'"
+          scp deploy-bundle/backend-runtime.tar.gz \
+            "$EC2_HOST:$DEPLOY_DIRECTORY/.incoming/"
+
+      - name: Pull images and restart Compose services
+        run: |
+          set -euo pipefail
+          ssh "$EC2_HOST" "DEPLOY_DIRECTORY='$DEPLOY_DIRECTORY' IMAGE_TAG='$IMAGE_TAG' DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_DIRECTORY"
+          tar -xzf .incoming/backend-runtime.tar.gz
+          IMAGE_TAG="$IMAGE_TAG" DOCKERHUB_USERNAME="$DOCKERHUB_USERNAME" docker compose -p messenger pull
+          IMAGE_TAG="$IMAGE_TAG" DOCKERHUB_USERNAME="$DOCKERHUB_USERNAME" docker compose -p messenger up -d --no-build --remove-orphans
+          docker compose -p messenger ps
+          rm -rf .incoming
+          REMOTE
