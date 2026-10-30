@@ -29,34 +29,6 @@ services:
       timeout: 5s
       retries: 20
 
-  minio:
-    image: minio/minio:latest
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: ${MEDIA_S3_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MEDIA_S3_SECRET_KEY:-minioadmin}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_started
-    entrypoint: ["/bin/sh", "-c"]
-    command: >-
-      until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" >/dev/null 2>&1 && mc ready local; do sleep 1; done &&
-      mc mb --ignore-existing local/$${MEDIA_S3_BUCKET} &&
-      mc cors set local/$${MEDIA_S3_BUCKET} /config/cors.json
-    environment:
-      MINIO_ROOT_USER: ${MEDIA_S3_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MEDIA_S3_SECRET_KEY:-minioadmin}
-      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-chat-media}
-    volumes:
-      - ./config/minio-cors.json:/config/cors.json:ro
-
   message-service:
     image: ${DOCKERHUB_USERNAME:-local}/messenger-message-service:${IMAGE_TAG:-local}
     build:
@@ -127,11 +99,11 @@ services:
       JWT_SECRET: local-development-secret-change-before-deployment-000000
       SESSION_TTL: 24h
       MEDIA_URL_TTL: ${MEDIA_URL_TTL:-5m}
-      MEDIA_S3_ENDPOINT: ${MEDIA_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
-      MEDIA_S3_REGION: ${MEDIA_S3_REGION:-us-east-1}
-      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-chat-media}
-      MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:-minioadmin}
-      MEDIA_S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY:-minioadmin}
+      MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT:?Set MEDIA_S3_ENDPOINT}
+      MEDIA_S3_REGION: ${MEDIA_S3_REGION:?Set MEDIA_S3_REGION}
+      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?Set MEDIA_S3_BUCKET}
+      MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:?Set MEDIA_S3_ACCESS_KEY}
+      MEDIA_S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY:?Set MEDIA_S3_SECRET_KEY}
     ports:
       - "8081:8081"
     depends_on:
@@ -139,8 +111,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
 
   ws-gateway:
     image: ${DOCKERHUB_USERNAME:-local}/messenger-ws-gateway:${IMAGE_TAG:-local}
@@ -213,6 +183,5 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:
   prometheus_data:
   grafana_data:
