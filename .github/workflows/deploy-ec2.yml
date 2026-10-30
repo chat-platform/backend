@@ -28,9 +28,10 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
         run: |
           set -euo pipefail
-          for name in EC2_HOST DEPLOY_DIRECTORY DOCKERHUB_USERNAME SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+          for name in EC2_HOST DEPLOY_DIRECTORY DOCKERHUB_USERNAME SSH_PRIVATE_KEY SSH_KNOWN_HOSTS FIREBASE_SERVICE_ACCOUNT_JSON; do
             if [ -z "${!name}" ]; then
               echo "Missing required GitHub Environment setting: $name" >&2
               exit 1
@@ -40,6 +41,7 @@ jobs:
             /*) ;;
             *) echo "BACKEND_DEPLOY_DIRECTORY must be an absolute path" >&2; exit 1 ;;
           esac
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" | python3 -c 'import json, sys; json.load(sys.stdin)'
 
       - name: Package Compose runtime files
         run: |
@@ -68,6 +70,14 @@ jobs:
           scp deploy-bundle/backend-runtime.tar.gz \
             "$EC2_HOST:$DEPLOY_DIRECTORY/.incoming/"
 
+      - name: Install Firebase credentials on EC2
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" | ssh "$EC2_HOST" \
+            "set -eu; mkdir -p '$DEPLOY_DIRECTORY/.secrets'; chmod 700 '$DEPLOY_DIRECTORY/.secrets'; cat > '$DEPLOY_DIRECTORY/.secrets/firebase-service-account.json'; chmod 600 '$DEPLOY_DIRECTORY/.secrets/firebase-service-account.json'"
+
       - name: Pull images and restart Compose services
         run: |
           set -euo pipefail
@@ -75,8 +85,10 @@ jobs:
           set -euo pipefail
           cd "$DEPLOY_DIRECTORY"
           tar -xzf .incoming/backend-runtime.tar.gz
-          IMAGE_TAG="$IMAGE_TAG" DOCKERHUB_USERNAME="$DOCKERHUB_USERNAME" docker compose -p messenger pull
-          IMAGE_TAG="$IMAGE_TAG" DOCKERHUB_USERNAME="$DOCKERHUB_USERNAME" docker compose -p messenger up -d --no-build --remove-orphans
+          export GOOGLE_APPLICATION_CREDENTIALS="$DEPLOY_DIRECTORY/.secrets/firebase-service-account.json"
+          export IMAGE_TAG DOCKERHUB_USERNAME
+          docker compose -p messenger pull
+          docker compose -p messenger up -d --no-build --remove-orphans
           docker compose -p messenger ps
           rm -rf .incoming
           REMOTE
