@@ -5,8 +5,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-messenger}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-messenger}
       POSTGRES_DB: ${POSTGRES_DB:-messenger}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./shared/migrations:/docker-entrypoint-initdb.d/migrations:ro
@@ -21,8 +19,6 @@ services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--notify-keyspace-events", "Ex"]
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
@@ -79,7 +75,7 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3001:3000"
     volumes:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./config/grafana/dashboards:/etc/grafana/dashboards:ro
