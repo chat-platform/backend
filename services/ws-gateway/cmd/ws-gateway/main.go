@@ -124,7 +124,7 @@ func main() {
 		}
 	}()
 	mux := http.NewServeMux()
-	websocketServer := wsadapter.NewServer(operations, logger.With("component", "websocket"), hub)
+	websocketServer := wsadapter.NewServer(operations, logger.With("component", "websocket"), hub, cfg.AllowedOrigins...)
 	mux.Handle(cfg.Path, websocketServer)
 	revocations := deliveryadapter.NewRevocationConsumer(redisClient, cfg.NodeID, func(err error) {
 		logger.Warn(ctx, "session revocation subscription will retry", "error", err)

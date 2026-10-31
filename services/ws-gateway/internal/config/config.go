@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/chat-platform/backend/shared/pkg/logging"
@@ -18,6 +19,7 @@ type Config struct {
 	MetricsAddr        string
 	NodeID             string
 	Path               string
+	AllowedOrigins     []string
 	JWTSecret          string
 }
 
@@ -30,8 +32,20 @@ func FromEnv(logger logging.Logger) Config {
 		MetricsAddr:        getenv(logger, "METRICS_ADDR", "127.0.0.1:9094"),
 		NodeID:             getenv(logger, "NODE_ID", "ws-1"),
 		Path:               getenv(logger, "WS_PATH", "/ws"),
+		AllowedOrigins:     listEnv(logger, "CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
 		JWTSecret:          os.Getenv("JWT_SECRET"),
 	}
+}
+
+func listEnv(logger logging.Logger, key, fallback string) []string {
+	parts := strings.Split(getenv(logger, key, fallback), ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if origin := strings.TrimSpace(part); origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+	return origins
 }
 
 func getenv(logger logging.Logger, key, fallback string) string {
