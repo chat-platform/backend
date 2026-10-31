@@ -19,6 +19,7 @@ import (
 	"github.com/chat-platform/backend/services/core-api/internal/app"
 	"github.com/chat-platform/backend/services/core-api/internal/config"
 	coremetrics "github.com/chat-platform/backend/services/core-api/internal/metrics"
+	"github.com/chat-platform/backend/shared/pkg/envfile"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	sharedmetrics "github.com/chat-platform/backend/shared/pkg/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,6 +28,10 @@ import (
 )
 
 func main() {
+	if err := envfile.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "load environment file:", err)
+		os.Exit(1)
+	}
 	logger, err := logging.New(os.Stdout, logging.Config{
 		Level: os.Getenv("LOG_LEVEL"), Format: os.Getenv("LOG_FORMAT"),
 		AddSource: os.Getenv("LOG_ADD_SOURCE") == "true",
@@ -73,7 +78,7 @@ func main() {
 	if err != nil {
 		fatal(ctx, logger, "register Core API HTTP metrics", err)
 	}
-	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpadapter.NewWithMetrics(service, logger.With("component", "http_server"), httpMetrics), ReadHeaderTimeout: 5 * time.Second}
+	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpadapter.NewWithMetrics(service, logger.With("component", "http_server"), httpMetrics, cfg.CORSAllowedOrigins...), ReadHeaderTimeout: 5 * time.Second}
 	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
 		fatal(ctx, logger, "listen for gRPC", err, "address", cfg.GRPCAddr)

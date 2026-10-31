@@ -49,7 +49,16 @@ type Server struct {
 	heartbeatInterval time.Duration
 }
 
-func NewServer(operations Operations, logger logging.Logger, hub *Hub) *Server {
+func NewServer(operations Operations, logger logging.Logger, hub *Hub, allowedOrigins ...string) *Server {
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{"http://localhost:5173", "https://messenger-as4.pages.dev"}
+	}
+	originAllowlist := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			originAllowlist[origin] = struct{}{}
+		}
+	}
 	return &Server{
 		operations:        operations,
 		hub:               hub,
@@ -57,6 +66,14 @@ func NewServer(operations Operations, logger logging.Logger, hub *Hub) *Server {
 		heartbeatInterval: config.HeartbeatInterval,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: 10 * time.Second,
+			CheckOrigin: func(request *http.Request) bool {
+				origin := request.Header.Get("Origin")
+				if origin == "" {
+					return true
+				}
+				_, allowed := originAllowlist[origin]
+				return allowed
+			},
 		},
 	}
 }

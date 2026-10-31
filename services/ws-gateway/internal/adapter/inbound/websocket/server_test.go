@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -17,6 +18,30 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestUpgraderCheckOriginUsesExactAllowlist(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(&fakeOperations{}, logger, NewHub(), "http://localhost:5173", "https://messenger-as4.pages.dev")
+
+	for _, origin := range []string{"http://localhost:5173", "https://messenger-as4.pages.dev"} {
+		request := httptest.NewRequest(http.MethodGet, "/ws", nil)
+		request.Header.Set("Origin", origin)
+		if !server.upgrader.CheckOrigin(request) {
+			t.Errorf("origin %q should be allowed", origin)
+		}
+	}
+
+	for _, origin := range []string{"https://evil.example", "https://messenger-as4.pages.dev.evil.example"} {
+		request := httptest.NewRequest(http.MethodGet, "/ws", nil)
+		request.Header.Set("Origin", origin)
+		if server.upgrader.CheckOrigin(request) {
+			t.Errorf("origin %q should be rejected", origin)
+		}
+	}
+}
 
 type fakeOperations struct {
 	identity        domain.Identity

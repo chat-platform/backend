@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: db-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: messenger-migrate:local
+          command: ["sh", "-ec"]
+          args:
+            - |
+              until pg_isready -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 2; done
+              existing="$(psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT (SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r','p','v','m','S','f')) + (SELECT count(*) FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype IN ('e','d'))")"
+              if [ "$existing" != "0" ]; then
+                echo "refusing baseline migration: public schema already contains tables"
+                exit 1
+              fi
+              psql --single-transaction -v ON_ERROR_STOP=1 -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /migrations/000001_init.up.sql
+          env:
+            - name: PGHOST
+              value: postgres
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: username}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: username}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: password}
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: database}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: password}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}

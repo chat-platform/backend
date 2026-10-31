@@ -7,6 +7,7 @@ import (
 	coremetrics "github.com/chat-platform/backend/services/core-api/internal/metrics"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
 type Server struct {
@@ -19,7 +20,7 @@ func New(service *app.Service, logger logging.Logger) *Server {
 	return NewWithMetrics(service, logger, nil)
 }
 
-func NewWithMetrics(service *app.Service, logger logging.Logger, metrics *coremetrics.HTTPMetrics) *Server {
+func NewWithMetrics(service *app.Service, logger logging.Logger, metrics *coremetrics.HTTPMetrics, allowedOrigins ...string) *Server {
 	const (
 		GET    = http.MethodGet
 		HEAD   = http.MethodHead
@@ -33,6 +34,14 @@ func NewWithMetrics(service *app.Service, logger logging.Logger, metrics *coreme
 	e.HideBanner = true
 	e.HidePort = true
 	e.Validator = newRequestValidator()
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{"http://localhost:5173"}
+	}
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: allowedOrigins,
+		AllowMethods: []string{GET, HEAD, POST, PUT, PATCH, DELETE, http.MethodOptions},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+	}))
 	s := &Server{
 		service: service,
 		echo:    e,

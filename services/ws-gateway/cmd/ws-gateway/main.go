@@ -22,6 +22,7 @@ import (
 	wsmetrics "github.com/chat-platform/backend/services/ws-gateway/internal/metrics"
 	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
 	sessionv1 "github.com/chat-platform/backend/shared/gen/session/v1"
+	"github.com/chat-platform/backend/shared/pkg/envfile"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	sharedmetrics "github.com/chat-platform/backend/shared/pkg/metrics"
 	"github.com/redis/go-redis/v9"
@@ -30,6 +31,10 @@ import (
 )
 
 func main() {
+	if err := envfile.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "load environment file:", err)
+		os.Exit(1)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -119,7 +124,7 @@ func main() {
 		}
 	}()
 	mux := http.NewServeMux()
-	websocketServer := wsadapter.NewServer(operations, logger.With("component", "websocket"), hub)
+	websocketServer := wsadapter.NewServer(operations, logger.With("component", "websocket"), hub, cfg.AllowedOrigins...)
 	mux.Handle(cfg.Path, websocketServer)
 	revocations := deliveryadapter.NewRevocationConsumer(redisClient, cfg.NodeID, func(err error) {
 		logger.Warn(ctx, "session revocation subscription will retry", "error", err)
@@ -138,6 +143,7 @@ func main() {
 	go func() {
 		<-ctx.Done()
 		logger.Info(context.Background(), "ws-gateway shutting down", "node_id", cfg.NodeID)
+		hub.CloseAll(1001, "server shutting down; reconnect")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {

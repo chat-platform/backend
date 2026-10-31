@@ -1,0 +1,190 @@
+name: Deploy backend to EC2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ec2-backend-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      IMAGE_TAG: latest
+      EC2_HOST: ${{ vars.EC2_HOST }}
+      DEPLOY_DIRECTORY: ${{ vars.BACKEND_DEPLOY_DIRECTORY }}
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || 'abdulrahimom' }}
+
+    steps:
+      - name: Check out selected ref
+        uses: actions/checkout@v4
+
+      - name: Validate deployment settings
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          for name in EC2_HOST DEPLOY_DIRECTORY DOCKERHUB_USERNAME SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required GitHub Environment setting: $name" >&2
+              exit 1
+            fi
+          done
+          case "$DEPLOY_DIRECTORY" in
+            /*) ;;
+            *) echo "BACKEND_DEPLOY_DIRECTORY must be an absolute path" >&2; exit 1 ;;
+          esac
+
+      - name: Prepare optional runtime overrides
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          MEDIA_S3_ENDPOINT: ${{ vars.MEDIA_S3_ENDPOINT }}
+          MEDIA_S3_REGION: ${{ vars.MEDIA_S3_REGION }}
+          MEDIA_S3_BUCKET: ${{ vars.MEDIA_S3_BUCKET }}
+          MEDIA_S3_ACCESS_KEY: ${{ secrets.MEDIA_S3_ACCESS_KEY }}
+          MEDIA_S3_SECRET_KEY: ${{ secrets.MEDIA_S3_SECRET_KEY }}
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+          LOG_FORMAT: ${{ vars.LOG_FORMAT }}
+          LOG_ADD_SOURCE: ${{ vars.LOG_ADD_SOURCE }}
+          POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+          POSTGRES_DSN: ${{ secrets.POSTGRES_DSN }}
+          REDIS_ADDR: ${{ vars.REDIS_ADDR }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          DEV_OTP_CODE: ${{ secrets.DEV_OTP_CODE }}
+          SESSION_TTL: ${{ vars.SESSION_TTL }}
+          MEDIA_URL_TTL: ${{ vars.MEDIA_URL_TTL }}
+          CORE_API_LISTEN_ADDR: ${{ vars.CORE_API_LISTEN_ADDR }}
+          CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
+          CORE_API_GRPC_ADDR: ${{ vars.CORE_API_GRPC_ADDR }}
+          CORE_API_METRICS_ADDR: ${{ vars.CORE_API_METRICS_ADDR }}
+          CORE_API_HOST_PORT: ${{ vars.CORE_API_HOST_PORT }}
+          MESSAGE_SERVICE_GRPC_ADDR: ${{ vars.MESSAGE_SERVICE_GRPC_ADDR }}
+          MESSAGE_SERVICE_METRICS_ADDR: ${{ vars.MESSAGE_SERVICE_METRICS_ADDR }}
+          WS_GATEWAY_LISTEN_ADDR: ${{ vars.WS_GATEWAY_LISTEN_ADDR }}
+          WS_GATEWAY_METRICS_ADDR: ${{ vars.WS_GATEWAY_METRICS_ADDR }}
+          WS_GATEWAY_HOST_PORT: ${{ vars.WS_GATEWAY_HOST_PORT }}
+          WS_CORE_API_GRPC_ADDR: ${{ vars.WS_CORE_API_GRPC_ADDR }}
+          MESSAGE_SERVICE_ADDR: ${{ vars.MESSAGE_SERVICE_ADDR }}
+          NODE_ID: ${{ vars.NODE_ID }}
+          WS_PATH: ${{ vars.WS_PATH }}
+          RELAY_METRICS_ADDR: ${{ vars.RELAY_METRICS_ADDR }}
+          RELAY_POLL_INTERVAL: ${{ vars.RELAY_POLL_INTERVAL }}
+          RELAY_BATCH_SIZE: ${{ vars.RELAY_BATCH_SIZE }}
+          RELAY_WORKERS: ${{ vars.RELAY_WORKERS }}
+          RELAY_CLAIM_LEASE: ${{ vars.RELAY_CLAIM_LEASE }}
+          RELAY_RETRY_INTERVAL: ${{ vars.RELAY_RETRY_INTERVAL }}
+          RELAY_RETRY_BATCH_SIZE: ${{ vars.RELAY_RETRY_BATCH_SIZE }}
+          RELAY_SNAPSHOT_COUNT_CAP: ${{ vars.RELAY_SNAPSHOT_COUNT_CAP }}
+          NOTIFICATION_METRICS_ADDR: ${{ vars.NOTIFICATION_METRICS_ADDR }}
+          NOTIFICATION_COALESCE_WINDOW: ${{ vars.NOTIFICATION_COALESCE_WINDOW }}
+          GRAFANA_ADMIN_USER: ${{ vars.GRAFANA_ADMIN_USER }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          names = (
+              "MEDIA_S3_ENDPOINT", "MEDIA_S3_REGION", "MEDIA_S3_BUCKET",
+              "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY", "GOOGLE_CLOUD_PROJECT",
+              "LOG_LEVEL", "LOG_FORMAT", "LOG_ADD_SOURCE", "POSTGRES_USER",
+              "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_DSN", "REDIS_ADDR",
+              "JWT_SECRET", "DEV_OTP_CODE", "SESSION_TTL", "MEDIA_URL_TTL",
+              "CORE_API_LISTEN_ADDR", "CORE_API_GRPC_ADDR", "CORE_API_METRICS_ADDR",
+              "CORS_ALLOWED_ORIGINS",
+              "CORE_API_HOST_PORT", "MESSAGE_SERVICE_GRPC_ADDR", "MESSAGE_SERVICE_METRICS_ADDR",
+              "WS_GATEWAY_LISTEN_ADDR", "WS_GATEWAY_METRICS_ADDR", "WS_GATEWAY_HOST_PORT",
+              "WS_CORE_API_GRPC_ADDR", "MESSAGE_SERVICE_ADDR", "NODE_ID", "WS_PATH",
+              "RELAY_METRICS_ADDR", "RELAY_POLL_INTERVAL", "RELAY_BATCH_SIZE", "RELAY_WORKERS",
+              "RELAY_CLAIM_LEASE", "RELAY_RETRY_INTERVAL", "RELAY_RETRY_BATCH_SIZE",
+              "RELAY_SNAPSHOT_COUNT_CAP", "NOTIFICATION_METRICS_ADDR",
+              "NOTIFICATION_COALESCE_WINDOW", "GRAFANA_ADMIN_USER", "GRAFANA_ADMIN_PASSWORD",
+              "PROMETHEUS_URL",
+          )
+          with open("github-overrides.env", "w") as env_file:
+              for name in names:
+                  value = os.environ.get(name, "")
+                  if value:
+                      if "\n" in value or "\r" in value:
+                          raise SystemExit(f"{name} cannot contain a newline")
+                      env_file.write(f"{name}='{value.replace(chr(39), chr(92) + chr(39))}'\n")
+          os.chmod("github-overrides.env", 0o600)
+          PY
+          if [ -n "$FIREBASE_SERVICE_ACCOUNT_JSON" ]; then
+            printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" | python3 -c 'import json, sys; json.load(sys.stdin)'
+          fi
+
+      - name: Package Compose runtime files
+        run: |
+          set -euo pipefail
+          mkdir -p deploy-bundle
+          tar -czf deploy-bundle/backend-runtime.tar.gz \
+            docker-compose.yml config scripts/postgres-init.sh \
+            shared/migrations shared/seeds
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Transfer deployment bundle
+        run: |
+          set -euo pipefail
+          ssh "$EC2_HOST" "mkdir -p '$DEPLOY_DIRECTORY/.incoming'; chmod 700 '$DEPLOY_DIRECTORY/.incoming'"
+          scp deploy-bundle/backend-runtime.tar.gz \
+            "$EC2_HOST:$DEPLOY_DIRECTORY/.incoming/"
+          scp github-overrides.env "$EC2_HOST:$DEPLOY_DIRECTORY/.incoming/github-overrides.env"
+          ssh "$EC2_HOST" "chmod 600 '$DEPLOY_DIRECTORY/.incoming/github-overrides.env'"
+
+      - name: Install Firebase credentials on EC2
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "Firebase JSON secret is unset; deployment will use the EC2 credential file."
+            exit 0
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" | ssh "$EC2_HOST" \
+            "set -eu; mkdir -p '$DEPLOY_DIRECTORY/.secrets'; chmod 700 '$DEPLOY_DIRECTORY/.secrets'; cat > '$DEPLOY_DIRECTORY/.secrets/firebase-service-account.json'; chmod 600 '$DEPLOY_DIRECTORY/.secrets/firebase-service-account.json'"
+
+      - name: Pull images and restart Compose services
+        run: |
+          set -euo pipefail
+          ssh "$EC2_HOST" "DEPLOY_DIRECTORY='$DEPLOY_DIRECTORY' IMAGE_TAG='$IMAGE_TAG' DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' FIREBASE_JSON_SET='${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON != '' }}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_DIRECTORY"
+          trap 'rm -rf .incoming' EXIT
+          tar -xzf .incoming/backend-runtime.tar.gz
+          export IMAGE_TAG DOCKERHUB_USERNAME
+          if [ "$FIREBASE_JSON_SET" = "true" ]; then
+            printf "GOOGLE_APPLICATION_CREDENTIALS='%s'\n" "$DEPLOY_DIRECTORY/.secrets/firebase-service-account.json" >> .incoming/github-overrides.env
+          fi
+          compose_env=(--env-file .incoming/github-overrides.env)
+          if [ -f .env ]; then
+            compose_env=(--env-file .env "${compose_env[@]}")
+          fi
+          deploy_services=(postgres redis prometheus core-api message-service ws-gateway relay notification-service)
+          docker compose "${compose_env[@]}" -p messenger config --format json | python3 -c 'import json, os, sys; c=json.load(sys.stdin); env=c["services"]["core-api"].get("environment", {}); required=("MEDIA_S3_BUCKET", "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY"); missing=[key for key in required if not env.get(key)]; missing and sys.exit("Missing required Core API settings: " + ", ".join(missing) + ". Set them in GitHub Environment or EC2 .env."); secret=next((v["source"] for v in c["services"]["notification-service"].get("volumes", []) if v.get("target")=="/run/secrets/firebase-service-account.json"), None); sys.exit(0 if secret and os.path.isfile(secret) else "Firebase service-account file is missing; set GOOGLE_APPLICATION_CREDENTIALS in .env or install it under .secrets/.")'
+          docker compose "${compose_env[@]}" -p messenger pull "${deploy_services[@]}"
+          docker compose "${compose_env[@]}" -p messenger up -d --no-build --remove-orphans "${deploy_services[@]}"
+          docker compose "${compose_env[@]}" -p messenger ps "${deploy_services[@]}"
+          docker image prune -f
+          REMOTE

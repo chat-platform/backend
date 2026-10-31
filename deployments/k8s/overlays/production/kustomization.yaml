@@ -1,0 +1,39 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: messenger
+resources:
+  - ../../base
+configMapGenerator:
+  - name: backend-config
+    behavior: merge
+    literals:
+      - MEDIA_S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
+      - MEDIA_S3_REGION=us-east-1
+      - MEDIA_S3_BUCKET=replace-with-your-bucket
+patches:
+  - path: ingress-host.yaml
+    target:
+      group: networking.k8s.io
+      version: v1
+      kind: Ingress
+      name: messenger
+  - path: ingress-tls.yaml
+images:
+  - name: messenger-core-api
+    newName: registry.example.com/messenger/core-api
+    newTag: latest
+  - name: messenger-message-service
+    newName: registry.example.com/messenger/message-service
+    newTag: latest
+  - name: messenger-ws-gateway
+    newName: registry.example.com/messenger/ws-gateway
+    newTag: latest
+  - name: messenger-relay
+    newName: registry.example.com/messenger/relay
+    newTag: latest
+  - name: messenger-notification-service
+    newName: registry.example.com/messenger/notification-service
+    newTag: latest
+  - name: messenger-migrate
+    newName: registry.example.com/messenger/migrate
+    newTag: latest
