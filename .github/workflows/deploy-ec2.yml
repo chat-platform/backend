@@ -179,8 +179,9 @@ jobs:
           if [ -f .env ]; then
             compose_env=(--env-file .env "${compose_env[@]}")
           fi
+          deploy_services=(postgres redis prometheus core-api message-service ws-gateway relay notification-service)
           docker compose "${compose_env[@]}" -p messenger config --format json | python3 -c 'import json, os, sys; c=json.load(sys.stdin); env=c["services"]["core-api"].get("environment", {}); required=("MEDIA_S3_BUCKET", "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY"); missing=[key for key in required if not env.get(key)]; missing and sys.exit("Missing required Core API settings: " + ", ".join(missing) + ". Set them in GitHub Environment or EC2 .env."); secret=next((v["source"] for v in c["services"]["notification-service"].get("volumes", []) if v.get("target")=="/run/secrets/firebase-service-account.json"), None); sys.exit(0 if secret and os.path.isfile(secret) else "Firebase service-account file is missing; set GOOGLE_APPLICATION_CREDENTIALS in .env or install it under .secrets/.")'
-          docker compose "${compose_env[@]}" -p messenger pull
-          docker compose "${compose_env[@]}" -p messenger up -d --no-build --remove-orphans
-          docker compose "${compose_env[@]}" -p messenger ps
+          docker compose "${compose_env[@]}" -p messenger pull "${deploy_services[@]}"
+          docker compose "${compose_env[@]}" -p messenger up -d --no-build --remove-orphans "${deploy_services[@]}"
+          docker compose "${compose_env[@]}" -p messenger ps "${deploy_services[@]}"
           REMOTE
