@@ -184,4 +184,5 @@ jobs:
           docker compose "${compose_env[@]}" -p messenger pull "${deploy_services[@]}"
           docker compose "${compose_env[@]}" -p messenger up -d --no-build --remove-orphans "${deploy_services[@]}"
           docker compose "${compose_env[@]}" -p messenger ps "${deploy_services[@]}"
+          docker image prune -f
           REMOTE
