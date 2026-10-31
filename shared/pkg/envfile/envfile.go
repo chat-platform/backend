@@ -14,20 +14,49 @@ import (
 // Load searches the working directory and its parents for .env. A missing file
 // is allowed; the application can then use its normal defaults.
 func Load() error {
+	path, err := find()
+	if err != nil || path == "" {
+		return err
+	}
+	return LoadFile(path)
+}
+
+// LoadRequired loads the nearest .env file in the working directory or one of
+// its parents. It returns an error when no file is found or the file is invalid.
+func LoadRequired() error {
+	path, err := find()
+	if err != nil {
+		return err
+	}
+	if path == "" {
+		return errors.New(".env file not found in the working directory or its parents")
+	}
+	return LoadFile(path)
+}
+
+// LoadLocal loads a local .env only when explicitly enabled by the CLI flag.
+func LoadLocal(enabled bool) error {
+	if !enabled {
+		return nil
+	}
+	return LoadRequired()
+}
+
+func find() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("find .env: %w", err)
+		return "", fmt.Errorf("find .env: %w", err)
 	}
 	for {
 		path := filepath.Join(dir, ".env")
 		if _, err := os.Stat(path); err == nil {
-			return LoadFile(path)
+			return path, nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("inspect %s: %w", path, err)
+			return "", fmt.Errorf("inspect %s: %w", path, err)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil
+			return "", nil
 		}
 		dir = parent
 	}
