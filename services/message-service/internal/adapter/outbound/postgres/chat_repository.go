@@ -295,7 +295,7 @@ func (r *ChatRepository) MarkDelivered(ctx context.Context, receipt domain.Recei
 	var eventType string
 	var alreadyDelivered bool
 	var routedTo string
-	query := fmt.Sprintf(`SELECT %s, outbox.delivered_at IS NOT NULL, COALESCE(outbox.routed_to, '')
+	query := fmt.Sprintf(`SELECT %s, outbox.delivered_at IS NOT NULL, COALESCE(outbox.routed_to::text, '')
 		FROM %s AS outbox %s WHERE outbox.id=$1 AND outbox.device_id=$2
 		FOR UPDATE OF outbox`, receiptTypeExpr(receipt.OutboxType), table, eventJoin)
 	err = tx.QueryRow(ctx, query, receipt.OutboxID, receipt.DeviceID).Scan(&eventType, &alreadyDelivered, &routedTo)

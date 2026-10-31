@@ -45,12 +45,13 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, `CREATE TABLE users (user_id UUID PRIMARY KEY);
+	if _, err := pool.Exec(ctx, `CREATE TYPE outbox_route AS ENUM ('WS', 'NOTIF');
+	CREATE TABLE users (user_id UUID PRIMARY KEY);
 	CREATE TABLE chat (chat_id UUID PRIMARY KEY, type TEXT NOT NULL, deleted_at TIMESTAMPTZ);
 	CREATE TABLE device (device_id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(user_id), revoked_at TIMESTAMPTZ);
-	CREATE TABLE direct_outbox (id BIGINT PRIMARY KEY, chat_id UUID REFERENCES chat(chat_id), sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL, recipient_id UUID NOT NULL REFERENCES users(user_id), device_id UUID NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), routed_to TEXT, delivered_at TIMESTAMPTZ);
+	CREATE TABLE direct_outbox (id BIGINT PRIMARY KEY, chat_id UUID REFERENCES chat(chat_id), sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL, recipient_id UUID NOT NULL REFERENCES users(user_id), device_id UUID NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), routed_to outbox_route, delivered_at TIMESTAMPTZ);
 	CREATE TABLE group_event (event_id BIGINT PRIMARY KEY, chat_id UUID NOT NULL REFERENCES chat(chat_id), sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL);
-	CREATE TABLE group_outbox (id BIGINT PRIMARY KEY, event_id BIGINT NOT NULL, recipient_id UUID NOT NULL, device_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), routed_to TEXT, delivered_at TIMESTAMPTZ);
+	CREATE TABLE group_outbox (id BIGINT PRIMARY KEY, event_id BIGINT NOT NULL, recipient_id UUID NOT NULL, device_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), routed_to outbox_route, delivered_at TIMESTAMPTZ);
 	CREATE TABLE chat_membership (chat_id UUID NOT NULL, user_id UUID NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +96,16 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `SELECT delivered_at IS NOT NULL FROM direct_outbox WHERE id=7`).Scan(&delivered); err != nil || !delivered {
 		t.Fatalf("delivered=(%v,%v), want true", delivered, err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload,routed_to) VALUES (9,$1,$2,$3,$4,'RECEIPT','{}',NULL)`, sender, clientMsg, reader, device); err != nil {
+		t.Fatal(err)
+	}
+	nullRouteAck, err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: device, ReceiptSenderID: reader, OutboxType: "direct", OutboxID: 9})
+	if err != nil {
+		t.Fatalf("mark event with NULL route delivered: %v", err)
+	}
+	if !nullRouteAck.FirstTransition || nullRouteAck.RoutedTo != "" {
+		t.Fatalf("NULL route acknowledgement=%+v", nullRouteAck)
 	}
 	if _, err := repo.MarkDelivered(ctx, domain.Receipt{DeviceID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ReceiptSenderID: reader, ChatID: "44444444-4444-4444-8444-444444444444", MessageSenderID: sender, ClientMsgID: clientMsg, OutboxType: "group", OutboxID: 7}); err != nil {
 		t.Fatalf("missing device-scoped group source should still forward: %v", err)
