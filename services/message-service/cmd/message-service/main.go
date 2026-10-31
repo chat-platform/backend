@@ -17,6 +17,7 @@ import (
 	"github.com/chat-platform/backend/services/message-service/internal/app"
 	"github.com/chat-platform/backend/services/message-service/internal/config"
 	servicemetrics "github.com/chat-platform/backend/services/message-service/internal/metrics"
+	"github.com/chat-platform/backend/shared/pkg/envfile"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	sharedmetrics "github.com/chat-platform/backend/shared/pkg/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,6 +26,10 @@ import (
 )
 
 func main() {
+	if err := envfile.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "load environment file:", err)
+		os.Exit(1)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

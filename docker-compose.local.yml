@@ -30,6 +30,8 @@ services:
 
   core-api:
     environment:
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-messenger}:${POSTGRES_PASSWORD:-messenger}@postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable
+      REDIS_ADDR: redis:6379
       MEDIA_S3_ENDPOINT: ${MEDIA_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       MEDIA_S3_REGION: ${MEDIA_S3_REGION:-us-east-1}
       MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-chat-media}
@@ -38,6 +40,26 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
+
+  message-service:
+    environment:
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-messenger}:${POSTGRES_PASSWORD:-messenger}@postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable
+      REDIS_ADDR: redis:6379
+
+  relay:
+    environment:
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-messenger}:${POSTGRES_PASSWORD:-messenger}@postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable
+      REDIS_ADDR: redis:6379
+
+  notification-service:
+    environment:
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-messenger}:${POSTGRES_PASSWORD:-messenger}@postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable
+      REDIS_ADDR: redis:6379
+
+  ws-gateway:
+    environment:
+      MESSAGE_SERVICE_ADDR: message-service:50051
+      CORE_API_GRPC_ADDR: core-api:50052
 
 volumes:
   minio_data:

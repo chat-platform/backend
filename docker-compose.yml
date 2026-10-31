@@ -2,9 +2,9 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: messenger
-      POSTGRES_PASSWORD: messenger
-      POSTGRES_DB: messenger
+      POSTGRES_USER: ${POSTGRES_USER:-messenger}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-messenger}
+      POSTGRES_DB: ${POSTGRES_DB:-messenger}
     ports:
       - "5432:5432"
     volumes:
@@ -13,7 +13,7 @@ services:
       - ./shared/seeds:/docker-entrypoint-initdb.d/seeds:ro
       - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U messenger -d messenger"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
       timeout: 5s
       retries: 20
@@ -37,9 +37,13 @@ services:
       args:
         SERVICE: message-service
     environment:
-      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
-      REDIS_ADDR: redis:6379
-      METRICS_ADDR: :9092
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_ADD_SOURCE: ${LOG_ADD_SOURCE:-false}
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://${POSTGRES_USER:-messenger}:${POSTGRES_PASSWORD:-messenger}@postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      GRPC_ADDR: ${MESSAGE_SERVICE_GRPC_ADDR:-:50051}
+      METRICS_ADDR: ${MESSAGE_SERVICE_METRICS_ADDR:-:9092}
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,7 +75,9 @@ services:
   grafana:
     image: grafana/grafana:13.2.4
     environment:
-      PROMETHEUS_URL: http://prometheus:9090
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
@@ -90,22 +96,25 @@ services:
       args:
         SERVICE: core-api
     environment:
-      LISTEN_ADDR: :8081
-      GRPC_ADDR: :50052
-      METRICS_ADDR: :9091
-      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
-      REDIS_ADDR: redis:6379
-      DEV_OTP_CODE: "000000"
-      JWT_SECRET: local-development-secret-change-before-deployment-000000
-      SESSION_TTL: 24h
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_ADD_SOURCE: ${LOG_ADD_SOURCE:-false}
+      LISTEN_ADDR: ${CORE_API_LISTEN_ADDR:-:8081}
+      GRPC_ADDR: ${CORE_API_GRPC_ADDR:-:50052}
+      METRICS_ADDR: ${CORE_API_METRICS_ADDR:-:9091}
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://${POSTGRES_USER:-messenger}:${POSTGRES_PASSWORD:-messenger}@postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      DEV_OTP_CODE: ${DEV_OTP_CODE:-000000}
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment-000000}
+      SESSION_TTL: ${SESSION_TTL:-24h}
       MEDIA_URL_TTL: ${MEDIA_URL_TTL:-5m}
-      MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT:?Set MEDIA_S3_ENDPOINT}
-      MEDIA_S3_REGION: ${MEDIA_S3_REGION:?Set MEDIA_S3_REGION}
-      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?Set MEDIA_S3_BUCKET}
-      MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:?Set MEDIA_S3_ACCESS_KEY}
-      MEDIA_S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY:?Set MEDIA_S3_SECRET_KEY}
+      MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT:-}
+      MEDIA_S3_REGION: ${MEDIA_S3_REGION:-}
+      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-}
+      MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:-}
+      MEDIA_S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY:-}
     ports:
-      - "8081:8081"
+      - "${CORE_API_HOST_PORT:-8081}:8081"
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,15 +129,19 @@ services:
       args:
         SERVICE: ws-gateway
     environment:
-      LISTEN_ADDR: :8080
-      REDIS_ADDR: redis:6379
-      MESSAGE_SERVICE_ADDR: message-service:50051
-      CORE_API_GRPC_ADDR: core-api:50052
-      NODE_ID: ws-1
-      METRICS_ADDR: :9094
-      JWT_SECRET: local-development-secret-change-before-deployment-000000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_ADD_SOURCE: ${LOG_ADD_SOURCE:-false}
+      LISTEN_ADDR: ${WS_GATEWAY_LISTEN_ADDR:-:8080}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      MESSAGE_SERVICE_ADDR: ${MESSAGE_SERVICE_ADDR:-message-service:50051}
+      CORE_API_GRPC_ADDR: ${WS_CORE_API_GRPC_ADDR:-core-api:50052}
+      NODE_ID: ${NODE_ID:-ws-1}
+      WS_PATH: ${WS_PATH:-/ws}
+      METRICS_ADDR: ${WS_GATEWAY_METRICS_ADDR:-:9094}
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment-000000}
     ports:
-      - "8080:8080"
+      - "${WS_GATEWAY_HOST_PORT:-8080}:8080"
     depends_on:
       message-service:
         condition: service_started
@@ -145,13 +158,18 @@ services:
       args:
         SERVICE: relay
     environment:
-      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
-      REDIS_ADDR: redis:6379
-      RELAY_POLL_INTERVAL: 250ms
-      METRICS_ADDR: :9093
-      RELAY_BATCH_SIZE: 100
-      RELAY_WORKERS: 2
-      RELAY_CLAIM_LEASE: 30s
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_ADD_SOURCE: ${LOG_ADD_SOURCE:-false}
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://${POSTGRES_USER:-messenger}:${POSTGRES_PASSWORD:-messenger}@postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      RELAY_POLL_INTERVAL: ${RELAY_POLL_INTERVAL:-250ms}
+      METRICS_ADDR: ${RELAY_METRICS_ADDR:-:9093}
+      RELAY_BATCH_SIZE: ${RELAY_BATCH_SIZE:-100}
+      RELAY_WORKERS: ${RELAY_WORKERS:-2}
+      RELAY_CLAIM_LEASE: ${RELAY_CLAIM_LEASE:-30s}
+      RELAY_RETRY_INTERVAL: ${RELAY_RETRY_INTERVAL:-10s}
+      RELAY_RETRY_BATCH_SIZE: ${RELAY_RETRY_BATCH_SIZE:-100}
       RELAY_SNAPSHOT_COUNT_CAP: ${RELAY_SNAPSHOT_COUNT_CAP:-1000}
     depends_on:
       postgres:
@@ -167,14 +185,17 @@ services:
       args:
         SERVICE: notification-service
     environment:
-      POSTGRES_DSN: postgres://messenger:messenger@postgres:5432/messenger?sslmode=disable
-      REDIS_ADDR: redis:6379
-      NOTIFICATION_COALESCE_WINDOW: 5s
-      METRICS_ADDR: :9095
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_ADD_SOURCE: ${LOG_ADD_SOURCE:-false}
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://${POSTGRES_USER:-messenger}:${POSTGRES_PASSWORD:-messenger}@postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      NOTIFICATION_COALESCE_WINDOW: ${NOTIFICATION_COALESCE_WINDOW:-5s}
+      METRICS_ADDR: ${NOTIFICATION_METRICS_ADDR:-:9095}
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
     volumes:
-      - ${GOOGLE_APPLICATION_CREDENTIALS:?Set GOOGLE_APPLICATION_CREDENTIALS to the Firebase service-account JSON file path}:/run/secrets/firebase-service-account.json:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-./.secrets/firebase-service-account.json}:/run/secrets/firebase-service-account.json:ro
     depends_on:
       postgres:
         condition: service_healthy

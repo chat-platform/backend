@@ -22,6 +22,7 @@ import (
 	wsmetrics "github.com/chat-platform/backend/services/ws-gateway/internal/metrics"
 	messagev1 "github.com/chat-platform/backend/shared/gen/message/v1"
 	sessionv1 "github.com/chat-platform/backend/shared/gen/session/v1"
+	"github.com/chat-platform/backend/shared/pkg/envfile"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	sharedmetrics "github.com/chat-platform/backend/shared/pkg/metrics"
 	"github.com/redis/go-redis/v9"
@@ -30,6 +31,10 @@ import (
 )
 
 func main() {
+	if err := envfile.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "load environment file:", err)
+		os.Exit(1)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

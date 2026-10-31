@@ -5,19 +5,12 @@ KIND_CLUSTER ?= kind
 DOCKERHUB_USERNAME ?= abdulrahimom
 DOCKERHUB_PLATFORM ?= linux/amd64
 IMAGE_TAG ?= $(shell git rev-parse HEAD)
-LOCAL_MEDIA_S3_ENDPOINT ?= http://localhost:9000
-LOCAL_MEDIA_S3_REGION ?= us-east-1
-LOCAL_MEDIA_S3_BUCKET ?= chat-media
-LOCAL_MEDIA_S3_ACCESS_KEY ?= minioadmin
-LOCAL_MEDIA_S3_SECRET_KEY ?= minioadmin
-LOCAL_GOOGLE_APPLICATION_CREDENTIALS ?= $(CURDIR)/.local/firebase-service-account.json
-LOCAL_COMPOSE = MEDIA_S3_ENDPOINT=$(LOCAL_MEDIA_S3_ENDPOINT) MEDIA_S3_REGION=$(LOCAL_MEDIA_S3_REGION) MEDIA_S3_BUCKET=$(LOCAL_MEDIA_S3_BUCKET) MEDIA_S3_ACCESS_KEY=$(LOCAL_MEDIA_S3_ACCESS_KEY) MEDIA_S3_SECRET_KEY=$(LOCAL_MEDIA_S3_SECRET_KEY) GOOGLE_APPLICATION_CREDENTIALS=$(LOCAL_GOOGLE_APPLICATION_CREDENTIALS) docker compose -f docker-compose.yml -f docker-compose.local.yml
+LOCAL_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.local.yml
 
 proto:
 	$(BUF) generate
 
 up:
-	@test -f "$(LOCAL_GOOGLE_APPLICATION_CREDENTIALS)" || { echo "Firebase service account not found: $(LOCAL_GOOGLE_APPLICATION_CREDENTIALS)" >&2; exit 1; }
 	$(LOCAL_COMPOSE) up --build -d
 
 down:
@@ -35,7 +28,7 @@ tidy:
 running:
 	CompileDaemon \
 		-build="go build -o /tmp/message-service ./services/message-service/cmd/message-service" \
-		-command="env LOG_LEVEL=debug /tmp/message-service" \
+		-command="/tmp/message-service" \
 		-directory="." \
 		-exclude-dir=.git
 

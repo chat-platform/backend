@@ -6,10 +6,6 @@ LOCAL_DIR="$ROOT_DIR/.local"
 BIN_DIR="$LOCAL_DIR/bin"
 RUN_DIR="$LOCAL_DIR/run"
 LOG_DIR="$LOCAL_DIR/logs"
-POSTGRES_DSN="${POSTGRES_DSN:-postgres://messenger:messenger@localhost:5432/messenger?sslmode=disable}"
-REDIS_ADDR="${REDIS_ADDR:-localhost:6379}"
-JWT_SECRET="${JWT_SECRET:-local-development-secret-change-before-deployment-000000}"
-LOG_LEVEL="${LOG_LEVEL:-debug}"
 
 services=(core-api message-service ws-gateway relay notification-service)
 
@@ -59,23 +55,15 @@ start_service() {
   rm -f "$pidfile"
   case "$service" in
     core-api)
-      nohup env LOG_LEVEL="$LOG_LEVEL" LOG_FORMAT=json POSTGRES_DSN="$POSTGRES_DSN" REDIS_ADDR="$REDIS_ADDR" \
-        JWT_SECRET="$JWT_SECRET" DEV_OTP_CODE="${DEV_OTP_CODE:-000000}" \
-        "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
     message-service)
-      nohup env LOG_LEVEL="$LOG_LEVEL" LOG_FORMAT=json POSTGRES_DSN="$POSTGRES_DSN" REDIS_ADDR="$REDIS_ADDR" \
-        "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
     ws-gateway)
-      nohup env LOG_LEVEL="$LOG_LEVEL" LOG_FORMAT=json REDIS_ADDR="$REDIS_ADDR" \
-        MESSAGE_SERVICE_ADDR="${MESSAGE_SERVICE_ADDR:-localhost:50051}" \
-        CORE_API_GRPC_ADDR="${CORE_API_GRPC_ADDR:-localhost:50052}" JWT_SECRET="$JWT_SECRET" \
-        "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
     relay)
-      nohup env LOG_LEVEL="$LOG_LEVEL" LOG_FORMAT=json POSTGRES_DSN="$POSTGRES_DSN" REDIS_ADDR="$REDIS_ADDR" \
-        "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
     notification-service)
-      nohup env LOG_LEVEL="$LOG_LEVEL" LOG_FORMAT=json POSTGRES_DSN="$POSTGRES_DSN" REDIS_ADDR="$REDIS_ADDR" \
-        "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
     *) echo "Unknown service: $service" >&2; return 1 ;;
   esac
   pid=$!
@@ -91,13 +79,14 @@ start_service() {
 }
 
 start_all() {
+  cd "$ROOT_DIR"
   ensure_dirs
   if ! command -v go >/dev/null 2>&1; then
     echo "ERROR: Go is required to build the services." >&2
     exit 1
   fi
   build_services
-  echo "Starting services with PostgreSQL at $POSTGRES_DSN and Redis at $REDIS_ADDR"
+  echo "Starting services using process environment, .env, and application defaults."
   echo "Ensure both local dependencies are running and the database is migrated."
   for service in "${services[@]}"; do
     start_service "$service" || exit 1
