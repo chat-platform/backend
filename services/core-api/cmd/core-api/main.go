@@ -78,7 +78,7 @@ func main() {
 	if err != nil {
 		fatal(ctx, logger, "register Core API HTTP metrics", err)
 	}
-	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpadapter.NewWithMetrics(service, logger.With("component", "http_server"), httpMetrics), ReadHeaderTimeout: 5 * time.Second}
+	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: httpadapter.NewWithMetrics(service, logger.With("component", "http_server"), httpMetrics, cfg.CORSAllowedOrigins...), ReadHeaderTimeout: 5 * time.Second}
 	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
 		fatal(ctx, logger, "listen for gRPC", err, "address", cfg.GRPCAddr)

@@ -14,6 +14,7 @@ import (
 	"github.com/chat-platform/backend/services/core-api/internal/app"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/chat-platform/backend/shared/pkg/sessiontoken"
+	"github.com/labstack/echo/v4"
 )
 
 type sessionRepoStub struct {
@@ -199,6 +200,32 @@ func TestLogoutDoesNotRequireRedisAuthentication(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNoContent || !repo.revoked || cache.statusCalls != 0 || !cache.revokeCalled {
 		t.Fatalf("status=%d repo=%+v cache=%+v", response.StatusCode, repo, cache)
+	}
+}
+
+func TestCORSPreflightRunsBeforeAuthentication(t *testing.T) {
+	service := app.New(&sessionRepoStub{}, &sessionCacheStub{}, app.Config{Secret: []byte("a sufficiently long test signing secret 123456")})
+	server := NewWithMetrics(service, testLogger(), nil, "http://localhost:5173")
+
+	preflight := httptest.NewRequest(http.MethodOptions, "/v1/chats/direct", nil)
+	preflight.Header.Set(echo.HeaderOrigin, "http://localhost:5173")
+	preflight.Header.Set(echo.HeaderAccessControlRequestMethod, http.MethodPost)
+	preflight.Header.Set(echo.HeaderAccessControlRequestHeaders, "authorization,content-type")
+	preflightResponse := httptest.NewRecorder()
+	server.ServeHTTP(preflightResponse, preflight)
+	if preflightResponse.Code != http.StatusNoContent {
+		t.Fatalf("preflight status=%d, want %d", preflightResponse.Code, http.StatusNoContent)
+	}
+	if got := preflightResponse.Header().Get(echo.HeaderAccessControlAllowOrigin); got != "http://localhost:5173" {
+		t.Fatalf("allow-origin=%q", got)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/chats/direct", nil)
+	request.Header.Set(echo.HeaderOrigin, "http://localhost:5173")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated request status=%d, want %d", response.Code, http.StatusUnauthorized)
 	}
 }
 

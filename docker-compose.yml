@@ -96,6 +96,7 @@ services:
       LOG_FORMAT: ${LOG_FORMAT:-json}
       LOG_ADD_SOURCE: ${LOG_ADD_SOURCE:-false}
       LISTEN_ADDR: ${CORE_API_LISTEN_ADDR:-:8081}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       GRPC_ADDR: ${CORE_API_GRPC_ADDR:-:50052}
       METRICS_ADDR: ${CORE_API_METRICS_ADDR:-:9091}
       POSTGRES_DSN: ${POSTGRES_DSN:-postgres://${POSTGRES_USER:-messenger}:${POSTGRES_PASSWORD:-messenger}@postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable}

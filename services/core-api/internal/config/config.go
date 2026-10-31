@@ -20,15 +20,16 @@ type MediaStorage struct {
 }
 
 type Config struct {
-	ListenAddr  string
-	GRPCAddr    string
-	MetricsAddr string
-	PostgresDSN string
-	RedisAddr   string
-	DevOTPCode  string
-	JWTSecret   string
-	SessionTTL  time.Duration
-	Media       MediaStorage
+	ListenAddr         string
+	CORSAllowedOrigins []string
+	GRPCAddr           string
+	MetricsAddr        string
+	PostgresDSN        string
+	RedisAddr          string
+	DevOTPCode         string
+	JWTSecret          string
+	SessionTTL         time.Duration
+	Media              MediaStorage
 }
 
 func FromEnv() (Config, error) {
@@ -67,16 +68,28 @@ func FromEnv() (Config, error) {
 	}
 
 	return Config{
-		ListenAddr:  stringEnv("LISTEN_ADDR", ":8081"),
-		GRPCAddr:    stringEnv("GRPC_ADDR", ":50052"),
-		MetricsAddr: stringEnv("METRICS_ADDR", "127.0.0.1:9091"),
-		PostgresDSN: stringEnv("POSTGRES_DSN", defaultPostgresDSN),
-		RedisAddr:   stringEnv("REDIS_ADDR", "localhost:6379"),
-		DevOTPCode:  stringEnv("DEV_OTP_CODE", "000000"),
-		JWTSecret:   jwtSecret,
-		SessionTTL:  sessionTTL,
-		Media:       media,
+		ListenAddr:         stringEnv("LISTEN_ADDR", ":8081"),
+		CORSAllowedOrigins: listEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
+		GRPCAddr:           stringEnv("GRPC_ADDR", ":50052"),
+		MetricsAddr:        stringEnv("METRICS_ADDR", "127.0.0.1:9091"),
+		PostgresDSN:        stringEnv("POSTGRES_DSN", defaultPostgresDSN),
+		RedisAddr:          stringEnv("REDIS_ADDR", "localhost:6379"),
+		DevOTPCode:         stringEnv("DEV_OTP_CODE", "000000"),
+		JWTSecret:          jwtSecret,
+		SessionTTL:         sessionTTL,
+		Media:              media,
 	}, nil
+}
+
+func listEnv(key, fallback string) []string {
+	parts := strings.Split(stringEnv(key, fallback), ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
