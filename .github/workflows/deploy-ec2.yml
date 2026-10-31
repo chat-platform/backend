@@ -29,9 +29,14 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          MEDIA_S3_ENDPOINT: ${{ vars.MEDIA_S3_ENDPOINT }}
+          MEDIA_S3_REGION: ${{ vars.MEDIA_S3_REGION }}
+          MEDIA_S3_BUCKET: ${{ vars.MEDIA_S3_BUCKET }}
+          MEDIA_S3_ACCESS_KEY: ${{ secrets.MEDIA_S3_ACCESS_KEY }}
+          MEDIA_S3_SECRET_KEY: ${{ secrets.MEDIA_S3_SECRET_KEY }}
         run: |
           set -euo pipefail
-          for name in EC2_HOST DEPLOY_DIRECTORY DOCKERHUB_USERNAME SSH_PRIVATE_KEY SSH_KNOWN_HOSTS FIREBASE_SERVICE_ACCOUNT_JSON; do
+          for name in EC2_HOST DEPLOY_DIRECTORY DOCKERHUB_USERNAME SSH_PRIVATE_KEY SSH_KNOWN_HOSTS FIREBASE_SERVICE_ACCOUNT_JSON MEDIA_S3_ENDPOINT MEDIA_S3_REGION MEDIA_S3_BUCKET MEDIA_S3_ACCESS_KEY MEDIA_S3_SECRET_KEY; do
             if [ -z "${!name}" ]; then
               echo "Missing required GitHub Environment setting: $name" >&2
               exit 1
@@ -42,6 +47,27 @@ jobs:
             *) echo "BACKEND_DEPLOY_DIRECTORY must be an absolute path" >&2; exit 1 ;;
           esac
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" | python3 -c 'import json, sys; json.load(sys.stdin)'
+
+      - name: Prepare S3 Compose overrides
+        env:
+          MEDIA_S3_ENDPOINT: ${{ vars.MEDIA_S3_ENDPOINT }}
+          MEDIA_S3_REGION: ${{ vars.MEDIA_S3_REGION }}
+          MEDIA_S3_BUCKET: ${{ vars.MEDIA_S3_BUCKET }}
+          MEDIA_S3_ACCESS_KEY: ${{ secrets.MEDIA_S3_ACCESS_KEY }}
+          MEDIA_S3_SECRET_KEY: ${{ secrets.MEDIA_S3_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          names = (
+              "MEDIA_S3_ENDPOINT", "MEDIA_S3_REGION", "MEDIA_S3_BUCKET",
+              "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY",
+          )
+          with open("github-s3.env", "w") as env_file:
+              for name in names:
+                  env_file.write(f"{name}={json.dumps(os.environ[name])}\n")
+          os.chmod("github-s3.env", 0o600)
+          PY
 
       - name: Package Compose runtime files
         run: |
@@ -69,6 +95,7 @@ jobs:
           ssh "$EC2_HOST" "mkdir -p '$DEPLOY_DIRECTORY/.incoming'"
           scp deploy-bundle/backend-runtime.tar.gz \
             "$EC2_HOST:$DEPLOY_DIRECTORY/.incoming/"
+          scp github-s3.env "$EC2_HOST:$DEPLOY_DIRECTORY/.incoming/github-s3.env"
 
       - name: Install Firebase credentials on EC2
         env:
@@ -87,8 +114,8 @@ jobs:
           tar -xzf .incoming/backend-runtime.tar.gz
           export GOOGLE_APPLICATION_CREDENTIALS="$DEPLOY_DIRECTORY/.secrets/firebase-service-account.json"
           export IMAGE_TAG DOCKERHUB_USERNAME
-          docker compose -p messenger pull
-          docker compose -p messenger up -d --no-build --remove-orphans
-          docker compose -p messenger ps
+          docker compose --env-file .env --env-file .incoming/github-s3.env -p messenger pull
+          docker compose --env-file .env --env-file .incoming/github-s3.env -p messenger up -d --no-build --remove-orphans
+          docker compose --env-file .env --env-file .incoming/github-s3.env -p messenger ps
           rm -rf .incoming
           REMOTE
