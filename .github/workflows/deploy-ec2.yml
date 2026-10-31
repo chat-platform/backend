@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: dev
     env:
-      IMAGE_TAG: ${{ github.sha }}
+      IMAGE_TAG: latest
       EC2_HOST: ${{ vars.EC2_HOST }}
       DEPLOY_DIRECTORY: ${{ vars.BACKEND_DEPLOY_DIRECTORY }}
       DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || 'abdulrahimom' }}
