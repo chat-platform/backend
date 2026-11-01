@@ -1,0 +1,29 @@
+server:
+  listen_address: ":8080"
+  cors_allowed_origins:
+    - "http://localhost:4173"
+
+docker:
+  host: "unix:///var/run/docker.sock"
+
+sources:
+  - name: core-api
+    type: compose
+    compose_project: backend
+    compose_service: core-api
+  - name: message-service
+    type: compose
+    compose_project: backend
+    compose_service: message-service
+  - name: ws-gateway
+    type: compose
+    compose_project: backend
+    compose_service: ws-gateway
+  - name: relay
+    type: compose
+    compose_project: backend
+    compose_service: relay
+  - name: notification-service
+    type: compose
+    compose_project: backend
+    compose_service: notification-service

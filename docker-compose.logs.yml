@@ -1,0 +1,4 @@
+services:
+  logstreamer:
+    group_add:
+      - "${DOCKER_GID:?Set DOCKER_GID to the Docker socket group ID when enabling the logs profile}"

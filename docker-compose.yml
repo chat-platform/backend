@@ -1,3 +1,5 @@
+name: backend
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -199,6 +201,19 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  logstreamer:
+    profiles: ["logs"]
+    build:
+      context: ../LogStreamer
+    image: ${DOCKERHUB_USERNAME:-local}/logstreamer:${IMAGE_TAG:-local}
+    ports:
+      - "127.0.0.1:8082:8080"
+    environment:
+      LOGSTREAMER_CONFIG: /etc/logstreamer/config.yaml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/logstreamer-compose.yaml:/etc/logstreamer/config.yaml:ro
 
 volumes:
   postgres_data:
