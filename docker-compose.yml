@@ -211,6 +211,7 @@ services:
       - "127.0.0.1:8082:8080"
     environment:
       LOGSTREAMER_CONFIG: /etc/logstreamer/config.yaml
+      LOGSTREAMER_CORS_ALLOWED_ORIGINS: ${LOGSTREAMER_CORS_ALLOWED_ORIGINS:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./config/logstreamer-compose.yaml:/etc/logstreamer/config.yaml:ro
