@@ -55,15 +55,15 @@ start_service() {
   rm -f "$pidfile"
   case "$service" in
     core-api)
-      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" --load-local-env >>"$logfile" 2>&1 </dev/null & ;;
     message-service)
-      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" --load-local-env >>"$logfile" 2>&1 </dev/null & ;;
     ws-gateway)
-      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" --load-local-env >>"$logfile" 2>&1 </dev/null & ;;
     relay)
-      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" --load-local-env >>"$logfile" 2>&1 </dev/null & ;;
     notification-service)
-      nohup "$BIN_DIR/$service" >>"$logfile" 2>&1 </dev/null & ;;
+      nohup "$BIN_DIR/$service" --load-local-env >>"$logfile" 2>&1 </dev/null & ;;
     *) echo "Unknown service: $service" >&2; return 1 ;;
   esac
   pid=$!

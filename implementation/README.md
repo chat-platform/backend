@@ -77,6 +77,14 @@ make proto       # generate gRPC stubs into shared/gen
 make tidy        # sync Go workspace / modules
 ```
 
+The Go services do not load `.env` by default. To run an individual service
+with the repository `.env`, pass `--load-local-env` (for example,
+`go run ./services/core-api/cmd/core-api --load-local-env`). This flag requires
+a valid `.env` in the working directory or a parent directory. Nonempty process
+environment values take precedence over `.env`; application defaults apply to
+values not set by either source. `make run-all` enables the flag for all five
+services. Docker Compose reads `.env` independently and does not need this flag.
+
 The Notification Service fails at startup if Firebase Application Default
 Credentials are unavailable. Compose mounts the file named by
 `GOOGLE_APPLICATION_CREDENTIALS` read-only at the container's ADC path. Do not

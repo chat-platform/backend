@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -31,7 +32,9 @@ import (
 )
 
 func main() {
-	if err := envfile.Load(); err != nil {
+	loadLocalEnv := flag.Bool("load-local-env", false, "load .env for local development")
+	flag.Parse()
+	if err := envfile.LoadLocal(*loadLocalEnv); err != nil {
 		fmt.Fprintln(os.Stderr, "load environment file:", err)
 		os.Exit(1)
 	}
