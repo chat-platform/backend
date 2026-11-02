@@ -77,6 +77,24 @@ make proto       # generate gRPC stubs into shared/gen
 make tidy        # sync Go workspace / modules
 ```
 
+To collect the backend containers' JSON logs with LogStreamer, set `DOCKER_GID`
+to the group ID that can access the Docker socket, then start the optional logs
+profile. On Linux, this is commonly `$(stat -c '%g' /var/run/docker.sock)`;
+on macOS with Docker Desktop, use the group ID reported for its socket at
+`$HOME/.docker/run/docker.sock`.
+
+```bash
+export DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)" # Linux
+# macOS with Docker Desktop: export DOCKER_GID="$(stat -f '%g' "$HOME/.docker/run/docker.sock")"
+docker compose -f docker-compose.yml -f docker-compose.logs.yml --profile logs up --build -d
+```
+
+LogStreamer is available at `http://127.0.0.1:8082`. To view its feed in
+LogLens, serve the LogLens directory on port `4173` and set `apiBaseUrl` in
+`config.js` to `http://127.0.0.1:8082`. The optional service mounts the Docker
+socket to read container logs; stop the Compose project with
+`docker compose -f docker-compose.yml -f docker-compose.logs.yml --profile logs down`.
+
 The Go services do not load `.env` by default. To run an individual service
 with the repository `.env`, pass `--load-local-env` (for example,
 `go run ./services/core-api/cmd/core-api --load-local-env`). This flag requires
