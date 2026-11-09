@@ -21,6 +21,9 @@ func (messageSenderFunc) MarkRead(context.Context, string, string, string, strin
 func (messageSenderFunc) MarkPlayed(context.Context, string, string, string, string, string) error {
 	return nil
 }
+func (messageSenderFunc) DeleteForEveryone(context.Context, string, string, string, string) error {
+	return nil
+}
 
 type registryStub struct{}
 

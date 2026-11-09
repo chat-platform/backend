@@ -16,6 +16,9 @@ const (
 	TypeMessageSend         = "message.send"
 	TypeMessageAck          = "message.ack"
 	TypeMessageRecv         = "message.recv"
+	TypeMessageRevoked      = "message.revoked"
+	TypeMessageDelete       = "message.delete_for_everyone"
+	TypeMessageDeleteAck    = "message.delete_for_everyone.ack"
 	TypeReceiptStatus       = "receipt.status"
 	TypeSyncReady           = "sync.ready"
 	TypeReceiptDelivered    = "receipt.delivered"
@@ -60,6 +63,21 @@ type MessageRecvPayload struct {
 	ClientMsgID string     `json:"clientMsgId"`
 	Content     string     `json:"content"`
 	TS          int64      `json:"ts"`
+}
+
+type MessageRevokedPayload struct {
+	ChatID      string     `json:"chatId"`
+	SenderID    string     `json:"senderId"`
+	ClientMsgID string     `json:"clientMsgId"`
+	TS          int64      `json:"ts"`
+	MessageTS   int64      `json:"messageTs"`
+	OutboxType  OutboxType `json:"outboxType,omitempty"`
+	OutboxID    int64      `json:"outboxId,omitempty"`
+}
+
+type MessageDeletePayload struct {
+	ChatID      string `json:"chatId"`
+	ClientMsgID string `json:"clientMsgId"`
 }
 
 type DeliveryReceiptPayload struct {

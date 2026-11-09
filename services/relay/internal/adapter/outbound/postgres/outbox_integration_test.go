@@ -419,6 +419,10 @@ func TestClaimBatchAndMarkDispatched(t *testing.T) {
 	repo, pool := testRepository(t)
 	ctx := context.Background()
 	ids := []int64{insertEvent(t, pool, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one"), insertEvent(t, pool, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "two")}
+	deletedID := insertEvent(t, pool, "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "deleted")
+	if _, err := pool.Exec(ctx, `DELETE FROM direct_outbox WHERE id=$1`, deletedID); err != nil {
+		t.Fatal(err)
+	}
 	events, err := repo.ClaimBatch(ctx, "direct", 10, time.Minute)
 	if err != nil || len(events) != 2 {
 		t.Fatalf("ClaimBatch()=(%d,%v), want (2,nil)", len(events), err)

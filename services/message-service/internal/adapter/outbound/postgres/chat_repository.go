@@ -36,6 +36,14 @@ type messagePayload struct {
 	TS          int64  `json:"ts"`
 }
 
+type messageRevokedPayload struct {
+	ChatID      string `json:"chatId"`
+	SenderID    string `json:"senderId"`
+	ClientMsgID string `json:"clientMsgId"`
+	TS          int64  `json:"ts"`
+	MessageTS   int64  `json:"messageTs"`
+}
+
 func (r *ChatRepository) AuthorizedChatType(ctx context.Context, chatID, senderID string) (string, error) {
 	var chatType string
 	err := r.pool.QueryRow(ctx, `
@@ -171,11 +179,19 @@ func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message d
 	err = tx.QueryRow(ctx, `
 		INSERT INTO group_event (chat_id, sender_id, client_msg_id, event_type, payload, created_at)
 		VALUES ($1, $2, $3, 'NEW_MESSAGE', $4, to_timestamp($5::double precision / 1000))
-		ON CONFLICT (sender_id, client_msg_id) DO NOTHING
+		ON CONFLICT (sender_id, client_msg_id, event_type) DO NOTHING
 		RETURNING event_id`, message.ChatID, message.SenderID, message.ClientMsgID, string(payload), timestampMS).Scan(&eventID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var originalTimestamp int64
-		if err := tx.QueryRow(ctx, `SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint FROM group_event WHERE sender_id = $1 AND client_msg_id = $2`, message.SenderID, message.ClientMsgID).Scan(&originalTimestamp); err != nil {
+		if err := tx.QueryRow(ctx, `
+			SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint
+			FROM group_event
+			WHERE sender_id = $1
+			  AND client_msg_id = $2
+			  AND event_type = 'NEW_MESSAGE'`,
+			message.SenderID,
+			message.ClientMsgID,
+		).Scan(&originalTimestamp); err != nil {
 			return domain.MessageAck{}, fmt.Errorf("load existing group acknowledgement: %w", err)
 		}
 		return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: originalTimestamp}, nil
@@ -234,6 +250,224 @@ func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message d
 		return domain.MessageAck{}, fmt.Errorf("commit group message transaction: %w", err)
 	}
 	return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, nil
+}
+
+// DeleteForEveryone atomically deletes original outbox rows and queues a
+// durable revoke event for each currently active device in the chat.
+func (r *ChatRepository) DeleteForEveryone(ctx context.Context, message domain.DeleteMessage, chatType string) error {
+	if chatType != "DIRECT" && chatType != "GROUP" {
+		return domain.ErrChatAccessDenied
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin revoke transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	// Serialize duplicate requests for this message so a concurrent revoke sees
+	// the first transaction's event and returns idempotently.
+	_, err = tx.Exec(ctx, `
+		SELECT pg_advisory_xact_lock(
+			hashtextextended($1 || ':' || $2 || ':' || $3, 0)
+		)`,
+		message.ChatID,
+		message.SenderID,
+		message.ClientMsgID,
+	)
+	if err != nil {
+		return fmt.Errorf("lock message revoke: %w", err)
+	}
+	var alreadyRevoked bool
+	if chatType == "DIRECT" {
+		err = tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM direct_outbox
+				WHERE chat_id = $1
+				  AND sender_id = $2
+				  AND event_type = 'MESSAGE_REVOKED'
+				  AND payload::jsonb->>'clientMsgId' = $3
+			)`,
+			message.ChatID,
+			message.SenderID,
+			message.ClientMsgID,
+		).Scan(&alreadyRevoked)
+	} else {
+		err = tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM group_event
+				WHERE chat_id = $1
+				  AND sender_id = $2
+				  AND event_type = 'MESSAGE_REVOKED'
+				  AND payload::jsonb->>'clientMsgId' = $3
+			)`,
+			message.ChatID,
+			message.SenderID,
+			message.ClientMsgID,
+		).Scan(&alreadyRevoked)
+	}
+	if err != nil {
+		return fmt.Errorf("check existing revoke: %w", err)
+	}
+	if alreadyRevoked {
+		return tx.Commit(ctx)
+	}
+	var originalCreatedAt time.Time
+	if chatType == "DIRECT" {
+		err = tx.QueryRow(ctx, `
+			SELECT created_at
+			FROM direct_outbox
+			WHERE COALESCE(chat_id::text, payload::jsonb->>'chatId') = $1
+			  AND sender_id = $2
+			  AND client_msg_id = $3
+			  AND event_type = 'NEW_MESSAGE'
+			ORDER BY id
+			LIMIT 1
+			FOR UPDATE`,
+			message.ChatID,
+			message.SenderID,
+			message.ClientMsgID,
+		).Scan(&originalCreatedAt)
+	} else {
+		err = tx.QueryRow(ctx, `
+			SELECT created_at
+			FROM group_event
+			WHERE chat_id = $1
+			  AND sender_id = $2
+			  AND client_msg_id = $3
+			  AND event_type = 'NEW_MESSAGE'
+			FOR UPDATE`,
+			message.ChatID,
+			message.SenderID,
+			message.ClientMsgID,
+		).Scan(&originalCreatedAt)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrInvalidMessage
+	}
+	if err != nil {
+		return fmt.Errorf("verify original message for revoke: %w", err)
+	}
+	nowMS := time.Now().UnixMilli()
+	payload, err := json.Marshal(messageRevokedPayload{
+		ChatID:      message.ChatID,
+		SenderID:    message.SenderID,
+		ClientMsgID: message.ClientMsgID,
+		TS:          nowMS,
+		MessageTS:   originalCreatedAt.UnixMilli(),
+	})
+	if err != nil {
+		return fmt.Errorf("encode revoke payload: %w", err)
+	}
+	if chatType == "DIRECT" {
+		if _, err = tx.Exec(ctx, `
+			DELETE FROM direct_outbox
+			WHERE COALESCE(chat_id::text, payload::jsonb->>'chatId') = $1
+			  AND sender_id = $2
+			  AND client_msg_id = $3
+			  AND event_type = 'NEW_MESSAGE'`,
+			message.ChatID,
+			message.SenderID,
+			message.ClientMsgID,
+		); err != nil {
+			return fmt.Errorf("delete direct original message rows: %w", err)
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO direct_outbox (
+				chat_id, sender_id, client_msg_id, recipient_id,
+				device_id, event_type, payload
+			)
+			SELECT
+				$1, $2, $3, d.user_id,
+				d.device_id, 'MESSAGE_REVOKED', $4
+			FROM device d
+			WHERE d.revoked_at IS NULL
+			  AND d.device_id <> $5
+			  AND (
+				  d.user_id = $2
+				  OR EXISTS (
+					  SELECT 1
+					  FROM chat_membership cm
+					  WHERE cm.chat_id = $1 AND cm.user_id = d.user_id
+				  )
+			  )
+			  AND EXISTS (
+				  SELECT 1
+				  FROM session s
+				  WHERE s.device_id = d.device_id
+				    AND s.revoked_at IS NULL
+				    AND s.expires_at > statement_timestamp()
+			  )`,
+			message.ChatID,
+			message.SenderID,
+			message.ClientMsgID,
+			string(payload),
+			message.DeviceID,
+		)
+	} else {
+		if _, err = tx.Exec(ctx, `
+			DELETE FROM group_outbox o
+			USING group_event e
+			WHERE e.event_id = o.event_id
+			  AND e.chat_id = $1
+			  AND e.sender_id = $2
+			  AND e.client_msg_id = $3
+			  AND e.event_type = 'NEW_MESSAGE'`,
+			message.ChatID,
+			message.SenderID,
+			message.ClientMsgID,
+		); err != nil {
+			return fmt.Errorf("delete group original message rows: %w", err)
+		}
+		var eventID int64
+		revokeID := uuid.NewString()
+		err = tx.QueryRow(ctx, `
+			INSERT INTO group_event (
+				chat_id, sender_id, client_msg_id, event_type, payload
+			)
+			VALUES ($1, $2, $3, 'MESSAGE_REVOKED', $4)
+			RETURNING event_id`,
+			message.ChatID,
+			message.SenderID,
+			revokeID,
+			string(payload),
+		).Scan(&eventID)
+		if err == nil {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO group_outbox (event_id, recipient_id, device_id)
+				SELECT $1, d.user_id, d.device_id
+				FROM device d
+				WHERE d.revoked_at IS NULL
+				  AND d.device_id <> $3
+				  AND (
+					  d.user_id = $4
+					  OR EXISTS (
+						  SELECT 1
+						  FROM chat_membership cm
+						  WHERE cm.chat_id = $2 AND cm.user_id = d.user_id
+					  )
+				  )
+				  AND EXISTS (
+					  SELECT 1
+					  FROM session s
+					  WHERE s.device_id = d.device_id
+					    AND s.revoked_at IS NULL
+					    AND s.expires_at > statement_timestamp()
+				  )`,
+				eventID,
+				message.ChatID,
+				message.DeviceID,
+				message.SenderID,
+			)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("enqueue revoke event: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit revoke transaction: %w", err)
+	}
+	return nil
 }
 
 func encodeMessagePayload(message domain.SendMessage, senderPhone string) (int64, []byte, error) {

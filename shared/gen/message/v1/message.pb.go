@@ -503,6 +503,110 @@ func (*MarkPlayedResponse) Descriptor() ([]byte, []int) {
 	return file_message_v1_message_proto_rawDescGZIP(), []int{7}
 }
 
+type DeleteForEveryoneRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SenderId      string                 `protobuf:"bytes,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	ChatId        string                 `protobuf:"bytes,3,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	ClientMsgId   string                 `protobuf:"bytes,4,opt,name=client_msg_id,json=clientMsgId,proto3" json:"client_msg_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteForEveryoneRequest) Reset() {
+	*x = DeleteForEveryoneRequest{}
+	mi := &file_message_v1_message_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteForEveryoneRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteForEveryoneRequest) ProtoMessage() {}
+
+func (x *DeleteForEveryoneRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_message_v1_message_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteForEveryoneRequest.ProtoReflect.Descriptor instead.
+func (*DeleteForEveryoneRequest) Descriptor() ([]byte, []int) {
+	return file_message_v1_message_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DeleteForEveryoneRequest) GetSenderId() string {
+	if x != nil {
+		return x.SenderId
+	}
+	return ""
+}
+
+func (x *DeleteForEveryoneRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *DeleteForEveryoneRequest) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *DeleteForEveryoneRequest) GetClientMsgId() string {
+	if x != nil {
+		return x.ClientMsgId
+	}
+	return ""
+}
+
+type DeleteForEveryoneResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteForEveryoneResponse) Reset() {
+	*x = DeleteForEveryoneResponse{}
+	mi := &file_message_v1_message_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteForEveryoneResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteForEveryoneResponse) ProtoMessage() {}
+
+func (x *DeleteForEveryoneResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_message_v1_message_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteForEveryoneResponse.ProtoReflect.Descriptor instead.
+func (*DeleteForEveryoneResponse) Descriptor() ([]byte, []int) {
+	return file_message_v1_message_proto_rawDescGZIP(), []int{9}
+}
+
 var File_message_v1_message_proto protoreflect.FileDescriptor
 
 const file_message_v1_message_proto_rawDesc = "" +
@@ -560,13 +664,23 @@ const file_message_v1_message_proto_rawDesc = "" +
 	"\x10\x012\x06.*\\S.*R\vclientMsgId\x12;\n" +
 	"\x11receipt_sender_id\x18\x05 \x01(\tB\x0f\xbaH\fr\n" +
 	"\x10\x012\x06.*\\S.*R\x0freceiptSenderId\"\x14\n" +
-	"\x12MarkPlayedResponse2\xc5\x02\n" +
+	"\x12MarkPlayedResponse\"\xa7\x02\n" +
+	"\x18DeleteForEveryoneRequest\x12,\n" +
+	"\tsender_id\x18\x01 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\bsenderId\x12,\n" +
+	"\tdevice_id\x18\x02 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\bdeviceId\x12(\n" +
+	"\achat_id\x18\x03 \x01(\tB\x0f\xbaH\fr\n" +
+	"\x10\x012\x06.*\\S.*R\x06chatId\x12\x84\x01\n" +
+	"\rclient_msg_id\x18\x04 \x01(\tB`\xbaH]r[2V^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$\xb0\x01\x01R\vclientMsgId\"\x1b\n" +
+	"\x19DeleteForEveryoneResponse2\xa7\x03\n" +
 	"\x0eMessageService\x12I\n" +
 	"\vSendMessage\x12\x1e.message.v1.SendMessageRequest\x1a\x1a.message.v1.SendMessageAck\x12T\n" +
 	"\rMarkDelivered\x12 .message.v1.MarkDeliveredRequest\x1a!.message.v1.MarkDeliveredResponse\x12E\n" +
 	"\bMarkRead\x12\x1b.message.v1.MarkReadRequest\x1a\x1c.message.v1.MarkReadResponse\x12K\n" +
 	"\n" +
-	"MarkPlayed\x12\x1d.message.v1.MarkPlayedRequest\x1a\x1e.message.v1.MarkPlayedResponseBBZ@github.com/chat-platform/backend/shared/gen/message/v1;messagev1b\x06proto3"
+	"MarkPlayed\x12\x1d.message.v1.MarkPlayedRequest\x1a\x1e.message.v1.MarkPlayedResponse\x12`\n" +
+	"\x11DeleteForEveryone\x12$.message.v1.DeleteForEveryoneRequest\x1a%.message.v1.DeleteForEveryoneResponseBBZ@github.com/chat-platform/backend/shared/gen/message/v1;messagev1b\x06proto3"
 
 var (
 	file_message_v1_message_proto_rawDescOnce sync.Once
@@ -580,28 +694,32 @@ func file_message_v1_message_proto_rawDescGZIP() []byte {
 	return file_message_v1_message_proto_rawDescData
 }
 
-var file_message_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_message_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_message_v1_message_proto_goTypes = []any{
-	(*SendMessageRequest)(nil),    // 0: message.v1.SendMessageRequest
-	(*SendMessageAck)(nil),        // 1: message.v1.SendMessageAck
-	(*MarkDeliveredRequest)(nil),  // 2: message.v1.MarkDeliveredRequest
-	(*MarkDeliveredResponse)(nil), // 3: message.v1.MarkDeliveredResponse
-	(*MarkReadRequest)(nil),       // 4: message.v1.MarkReadRequest
-	(*MarkReadResponse)(nil),      // 5: message.v1.MarkReadResponse
-	(*MarkPlayedRequest)(nil),     // 6: message.v1.MarkPlayedRequest
-	(*MarkPlayedResponse)(nil),    // 7: message.v1.MarkPlayedResponse
+	(*SendMessageRequest)(nil),        // 0: message.v1.SendMessageRequest
+	(*SendMessageAck)(nil),            // 1: message.v1.SendMessageAck
+	(*MarkDeliveredRequest)(nil),      // 2: message.v1.MarkDeliveredRequest
+	(*MarkDeliveredResponse)(nil),     // 3: message.v1.MarkDeliveredResponse
+	(*MarkReadRequest)(nil),           // 4: message.v1.MarkReadRequest
+	(*MarkReadResponse)(nil),          // 5: message.v1.MarkReadResponse
+	(*MarkPlayedRequest)(nil),         // 6: message.v1.MarkPlayedRequest
+	(*MarkPlayedResponse)(nil),        // 7: message.v1.MarkPlayedResponse
+	(*DeleteForEveryoneRequest)(nil),  // 8: message.v1.DeleteForEveryoneRequest
+	(*DeleteForEveryoneResponse)(nil), // 9: message.v1.DeleteForEveryoneResponse
 }
 var file_message_v1_message_proto_depIdxs = []int32{
 	0, // 0: message.v1.MessageService.SendMessage:input_type -> message.v1.SendMessageRequest
 	2, // 1: message.v1.MessageService.MarkDelivered:input_type -> message.v1.MarkDeliveredRequest
 	4, // 2: message.v1.MessageService.MarkRead:input_type -> message.v1.MarkReadRequest
 	6, // 3: message.v1.MessageService.MarkPlayed:input_type -> message.v1.MarkPlayedRequest
-	1, // 4: message.v1.MessageService.SendMessage:output_type -> message.v1.SendMessageAck
-	3, // 5: message.v1.MessageService.MarkDelivered:output_type -> message.v1.MarkDeliveredResponse
-	5, // 6: message.v1.MessageService.MarkRead:output_type -> message.v1.MarkReadResponse
-	7, // 7: message.v1.MessageService.MarkPlayed:output_type -> message.v1.MarkPlayedResponse
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
+	8, // 4: message.v1.MessageService.DeleteForEveryone:input_type -> message.v1.DeleteForEveryoneRequest
+	1, // 5: message.v1.MessageService.SendMessage:output_type -> message.v1.SendMessageAck
+	3, // 6: message.v1.MessageService.MarkDelivered:output_type -> message.v1.MarkDeliveredResponse
+	5, // 7: message.v1.MessageService.MarkRead:output_type -> message.v1.MarkReadResponse
+	7, // 8: message.v1.MessageService.MarkPlayed:output_type -> message.v1.MarkPlayedResponse
+	9, // 9: message.v1.MessageService.DeleteForEveryone:output_type -> message.v1.DeleteForEveryoneResponse
+	5, // [5:10] is the sub-list for method output_type
+	0, // [0:5] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -618,7 +736,7 @@ func file_message_v1_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_message_v1_message_proto_rawDesc), len(file_message_v1_message_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

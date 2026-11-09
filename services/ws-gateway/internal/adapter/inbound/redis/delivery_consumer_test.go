@@ -52,6 +52,24 @@ func TestDecodeDeliveryPreservesOutboxAndMessageIdentity(t *testing.T) {
 	}
 }
 
+func TestDecodeMessageRevoked(t *testing.T) {
+	message := redis.XMessage{ID: "1-0", Values: map[string]any{"outbox_id": "43", "outbox_type": "group", "event_type": "MESSAGE_REVOKED", "device_id": "device", "conn_id": "conn", "payload": `{"chatId":"chat","senderId":"sender","clientMsgId":"client","ts":123,"messageTs":100}`}}
+	delivery, err := decodeDelivery(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivery.envelope.Type != wsframe.TypeMessageRevoked || delivery.envelope.TS != 123 {
+		t.Fatalf("revocation envelope=%+v", delivery.envelope)
+	}
+	var payload wsframe.MessageRevokedPayload
+	if err := json.Unmarshal(delivery.envelope.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ChatID != "chat" || payload.SenderID != "sender" || payload.ClientMsgID != "client" || payload.MessageTS != 100 || payload.OutboxType != wsframe.OutboxTypeGroup || payload.OutboxID != 43 {
+		t.Fatalf("revocation payload=%+v", payload)
+	}
+}
+
 func TestDecodeGroupDeliveryCarriesIndependentOutboxIdentity(t *testing.T) {
 	message := redis.XMessage{ID: "1-0", Values: map[string]any{"outbox_id": "42", "outbox_type": "group", "event_type": "NEW_MESSAGE", "device_id": "device", "conn_id": "conn", "payload": `{"chatId":"group-chat","senderId":"sender","clientMsgId":"client-id","content":"hello","ts":123}`}}
 	delivery, err := decodeDelivery(message)

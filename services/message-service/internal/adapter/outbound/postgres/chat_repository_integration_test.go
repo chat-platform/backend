@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -49,8 +50,9 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 	CREATE TABLE users (user_id UUID PRIMARY KEY);
 	CREATE TABLE chat (chat_id UUID PRIMARY KEY, type TEXT NOT NULL, deleted_at TIMESTAMPTZ);
 	CREATE TABLE device (device_id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(user_id), revoked_at TIMESTAMPTZ);
+	CREATE TABLE session (session_id UUID PRIMARY KEY, device_id UUID NOT NULL, expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ);
 	CREATE TABLE direct_outbox (id BIGINT PRIMARY KEY, chat_id UUID REFERENCES chat(chat_id), sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL, recipient_id UUID NOT NULL REFERENCES users(user_id), device_id UUID NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), routed_to outbox_route, delivered_at TIMESTAMPTZ);
-	CREATE TABLE group_event (event_id BIGINT PRIMARY KEY, chat_id UUID NOT NULL REFERENCES chat(chat_id), sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL);
+	CREATE TABLE group_event (event_id BIGINT PRIMARY KEY, chat_id UUID NOT NULL REFERENCES chat(chat_id), sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(sender_id,client_msg_id,event_type));
 	CREATE TABLE group_outbox (id BIGINT PRIMARY KEY, event_id BIGINT NOT NULL, recipient_id UUID NOT NULL, device_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), routed_to outbox_route, delivered_at TIMESTAMPTZ);
 	CREATE TABLE chat_membership (chat_id UUID NOT NULL, user_id UUID NOT NULL)`); err != nil {
 		t.Fatal(err)
@@ -190,6 +192,119 @@ func TestMarkDeliveredIsDeviceScopedAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestDeleteForEveryoneCancelsRowsAndFansOutToActiveDevices(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set TEST_POSTGRES_DSN to run Message Service Postgres integration tests")
+	}
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(admin.Close)
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		t.Fatal(err)
+	}
+	schema := "revoke_test_" + hex.EncodeToString(random[:])
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE") })
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	_, err = pool.Exec(ctx, `CREATE TYPE outbox_route AS ENUM ('WS','NOTIF');
+	CREATE TABLE users(user_id UUID PRIMARY KEY);
+	CREATE TABLE chat(chat_id UUID PRIMARY KEY,type TEXT NOT NULL,deleted_at TIMESTAMPTZ);
+	CREATE TABLE chat_membership(chat_id UUID NOT NULL,user_id UUID NOT NULL);
+	CREATE TABLE device(device_id UUID PRIMARY KEY,user_id UUID NOT NULL,revoked_at TIMESTAMPTZ);
+	CREATE TABLE session(session_id UUID PRIMARY KEY,device_id UUID NOT NULL,expires_at TIMESTAMPTZ NOT NULL,revoked_at TIMESTAMPTZ);
+	CREATE TABLE direct_outbox(id BIGSERIAL PRIMARY KEY,chat_id UUID,sender_id UUID NOT NULL,client_msg_id UUID NOT NULL,recipient_id UUID NOT NULL,device_id UUID NOT NULL,event_type TEXT NOT NULL,payload TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),routed_to outbox_route,dispatched_at TIMESTAMPTZ,delivered_at TIMESTAMPTZ,claim_expiry TIMESTAMPTZ,attempt_count INTEGER NOT NULL DEFAULT 0);
+	CREATE TABLE group_event(event_id BIGSERIAL PRIMARY KEY,chat_id UUID NOT NULL,sender_id UUID NOT NULL,client_msg_id UUID NOT NULL,event_type TEXT NOT NULL,payload TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),UNIQUE(sender_id,client_msg_id,event_type));
+	CREATE TABLE group_outbox(id BIGSERIAL PRIMARY KEY,event_id BIGINT NOT NULL,recipient_id UUID NOT NULL,device_id UUID NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),routed_to outbox_route,dispatched_at TIMESTAMPTZ,delivered_at TIMESTAMPTZ,claim_expiry TIMESTAMPTZ,attempt_count INTEGER NOT NULL DEFAULT 0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sender = "11111111-1111-4111-8111-111111111111"
+	const peer = "22222222-2222-4222-8222-222222222222"
+	const outsider = "33333333-3333-4333-8333-333333333333"
+	const origin = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	const senderDevice = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	const peerDevice = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	const loggedOut = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	const outsiderDevice = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	const directChat = "44444444-4444-4444-8444-444444444444"
+	const groupChat = "55555555-5555-4555-8555-555555555555"
+	const client = "0199d628-39d0-7000-8000-000000000001"
+	const groupClient = "0199d628-39d0-7000-8000-000000000002"
+	_, err = pool.Exec(ctx, `INSERT INTO users VALUES($1),($2),($3);
+	INSERT INTO chat VALUES($4,'DIRECT',NULL),($5,'GROUP',NULL);
+	INSERT INTO chat_membership VALUES($4,$1),($4,$2),($5,$1),($5,$2);
+	INSERT INTO device VALUES($6,$1,NULL),($7,$1,NULL),($8,$2,NULL),($9,$2,NULL),($10,$3,NULL);
+	INSERT INTO session VALUES('66666666-6666-4666-8666-666666666666',$6,now()+interval '1 day',NULL),('77777777-7777-4777-8777-777777777777',$7,now()+interval '1 day',NULL),('88888888-8888-4888-8888-888888888888',$8,now()+interval '1 day',NULL),('99999999-9999-4999-8999-999999999999',$9,now()+interval '1 day',now()),('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',$10,now()+interval '1 day',NULL);
+	INSERT INTO direct_outbox(chat_id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload,delivered_at) VALUES(NULL,$1,$11,$2,$8,'NEW_MESSAGE',json_build_object('chatId',$4)::text,NULL),(NULL,$1,$11,$1,$7,'NEW_MESSAGE',json_build_object('chatId',$4)::text,now());
+	INSERT INTO group_event(chat_id,sender_id,client_msg_id,event_type,payload) VALUES($5,$1,$12,'NEW_MESSAGE','{}');
+	INSERT INTO group_outbox(event_id,recipient_id,device_id,delivered_at) SELECT event_id,$2,$8,NULL FROM group_event WHERE chat_id=$5 AND event_type='NEW_MESSAGE';
+	INSERT INTO group_outbox(event_id,recipient_id,device_id,delivered_at) SELECT event_id,$2,$8,now() FROM group_event WHERE chat_id=$5 AND event_type='NEW_MESSAGE'`, sender, peer, outsider, directChat, groupChat, origin, senderDevice, peerDevice, loggedOut, outsiderDevice, client, groupClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewChatRepository(pool, logger)
+	command := domain.DeleteMessage{SenderID: sender, DeviceID: origin, ChatID: directChat, ClientMsgID: client}
+	if err := repo.DeleteForEveryone(ctx, command, "DIRECT"); err != nil {
+		t.Fatal(err)
+	}
+	var pendingOriginals int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE sender_id=$1 AND client_msg_id=$2 AND event_type='NEW_MESSAGE'`, sender, client).Scan(&pendingOriginals); err != nil || pendingOriginals != 0 {
+		t.Fatalf("original direct rows=%d error=%v, want all original rows hard-deleted", pendingOriginals, err)
+	}
+	var directRevokes int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE event_type='MESSAGE_REVOKED'`).Scan(&directRevokes); err != nil || directRevokes != 2 {
+		t.Fatalf("direct revoke fanout=%d error=%v, want sender's other device and active peer", directRevokes, err)
+	}
+	if err := repo.DeleteForEveryone(ctx, command, "DIRECT"); err != nil {
+		t.Fatalf("idempotent direct revoke: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE event_type='MESSAGE_REVOKED'`).Scan(&directRevokes); err != nil || directRevokes != 2 {
+		t.Fatalf("duplicate direct revoke rows=%d error=%v", directRevokes, err)
+	}
+	groupCommand := domain.DeleteMessage{SenderID: sender, DeviceID: origin, ChatID: groupChat, ClientMsgID: groupClient}
+	if err := repo.DeleteForEveryone(ctx, groupCommand, "GROUP"); err != nil {
+		t.Fatal(err)
+	}
+	var groupRevokes int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_outbox o JOIN group_event e ON e.event_id=o.event_id WHERE e.event_type='MESSAGE_REVOKED'`).Scan(&groupRevokes); err != nil || groupRevokes != 2 {
+		t.Fatalf("group revoke fanout=%d error=%v, want sender's other device and active peer", groupRevokes, err)
+	}
+	var pendingGroupRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_outbox o JOIN group_event e ON e.event_id=o.event_id WHERE e.chat_id=$1 AND e.sender_id=$2 AND e.client_msg_id=$3 AND e.event_type='NEW_MESSAGE'`, groupChat, sender, groupClient).Scan(&pendingGroupRows); err != nil || pendingGroupRows != 0 {
+		t.Fatalf("original group rows=%d error=%v, want all original rows hard-deleted", pendingGroupRows, err)
+	}
+	oldClient := "0199d628-39d0-7000-8000-000000000003"
+	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(chat_id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload,created_at) VALUES(NULL,$2,$3,$4,$5,'NEW_MESSAGE',json_build_object('chatId',$1)::text,now()-interval '2 hours')`, directChat, sender, oldClient, peer, peerDevice); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: sender, DeviceID: origin, ChatID: directChat, ClientMsgID: oldClient}, "DIRECT"); err != nil {
+		t.Fatalf("old message revoke should not be time-limited by the server: %v", err)
+	}
+	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: outsider, DeviceID: outsiderDevice, ChatID: directChat, ClientMsgID: client}, "DIRECT"); !errors.Is(err, domain.ErrInvalidMessage) {
+		t.Fatalf("non-author revoke error=%v, want ErrInvalidMessage", err)
+	}
+}
+
 func TestEnqueueGroupMessageDiscardsWithoutRecipientsAndKeepsRegisteredDeviceFanout(t *testing.T) {
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -229,7 +344,8 @@ func TestEnqueueGroupMessageDiscardsWithoutRecipientsAndKeepsRegisteredDeviceFan
 			event_id BIGSERIAL PRIMARY KEY, chat_id UUID NOT NULL REFERENCES chat(chat_id),
 			sender_id UUID NOT NULL REFERENCES users(user_id), client_msg_id UUID NOT NULL,
 			event_type TEXT NOT NULL, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-			UNIQUE (sender_id, client_msg_id));
+			UNIQUE (sender_id, client_msg_id, event_type));
+		CREATE TABLE session (session_id UUID PRIMARY KEY, device_id UUID NOT NULL, expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ);
 		CREATE TABLE group_outbox (
 			id BIGSERIAL PRIMARY KEY, event_id BIGINT NOT NULL REFERENCES group_event(event_id),
 			recipient_id UUID NOT NULL REFERENCES users(user_id), device_id UUID NOT NULL REFERENCES device(device_id),

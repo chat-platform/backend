@@ -43,13 +43,10 @@ func (r *CachedChatRepository) AuthorizedChatType(ctx context.Context, chatID, u
 			"chat_id", chatID, "user_id", userID)
 	} else if found {
 		switch value {
-		case "DIRECT":
+		case "DIRECT", "GROUP":
 			return value, nil
-		case "GROUP", "deny":
-			if err := r.cache.InvalidateChatAuthorization(ctx, chatID, userID); err != nil {
-				r.logger.Warn(ctx, "could not clear mutable group authorization cache", "error", err,
-					"chat_id", chatID, "user_id", userID)
-			}
+		case "deny":
+			return "", nil
 		default:
 			r.logger.Warn(ctx, "chat authorization cache contains an invalid decision", "chat_id", chatID,
 				"user_id", userID, "decision", value)
@@ -60,7 +57,7 @@ func (r *CachedChatRepository) AuthorizedChatType(ctx context.Context, chatID, u
 	if err != nil {
 		return "", err
 	}
-	if chatType == "DIRECT" {
+	if chatType == "DIRECT" || chatType == "GROUP" {
 		if err := r.cache.Set(ctx, key, chatType, allowAuthorizationTTL); err != nil {
 			r.logger.Warn(ctx, "could not write chat authorization cache", "error", err,
 				"chat_id", chatID, "user_id", userID, "decision", chatType)
@@ -106,6 +103,10 @@ func (r *CachedChatRepository) EnqueueDirectMessageEvent(ctx context.Context, me
 
 func (r *CachedChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message domain.SendMessage) (domain.MessageAck, error) {
 	return r.store.EnqueueGroupMessageEvent(ctx, message)
+}
+
+func (r *CachedChatRepository) DeleteForEveryone(ctx context.Context, message domain.DeleteMessage, chatType string) error {
+	return r.store.DeleteForEveryone(ctx, message, chatType)
 }
 
 func (r *CachedChatRepository) MarkDelivered(ctx context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {

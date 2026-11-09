@@ -164,6 +164,9 @@ its active sockets.
 | `receipt.played` | C → S | `{ chatId, messageSenderId, clientMsgId }` | Requires an envelope `id`. Sent when the recipient first plays audio or video. The client retries until it receives `receipt.played.ack`; duplicate statuses are deduplicated by the sender's client. |
 | `receipt.played.ack` | S → C | `{}` | Uses the request `id`; sent only after the receipt has been written to the outbox. The client may retry if it does not receive this acknowledgment. |
 | `receipt.status` | S → C | `{ outboxType, outboxId, receiptType, chatId, messageSenderId, clientMsgId, receiptSenderId, timestamp }` | Forwarded to the message sender's devices. `timestamp` is server-generated UTC RFC3339; `receiptSenderId` is derived from the authenticated device. |
+| `message.delete_for_everyone` | C → S | `{ chatId, clientMsgId }` | Sender-only; client offers the action within one hour. Server verifies authorship and message existence, removes undelivered originals, then queues `MESSAGE_REVOKED` for active chat devices. |
+| `message.delete_for_everyone.ack` | S → C | `{}` | Uses the request `id`; sent after the revoke transaction commits. |
+| `message.revoked` | S → C | `{ outboxType, outboxId, chatId, senderId, clientMsgId, ts, messageTs }` | Client replaces the matching message with “<sender> deleted this message” at the original message's position and acknowledges the outbox event. |
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |
 | `presence.subscribe` | C → S | `{ targetUserId }` | Authenticated; subscribes idempotently and returns a fresh `presence.snapshot`. Subscription is registered before the snapshot read. |
 | `presence.unsubscribe` | C → S | `{ targetUserId }` | Removes this connection's subscription. |

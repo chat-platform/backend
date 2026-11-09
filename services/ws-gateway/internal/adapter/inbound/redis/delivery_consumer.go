@@ -186,6 +186,21 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 			return decodedDelivery{}, err
 		}
 		envelope = wsframe.Envelope{Type: wsframe.TypeReceiptStatus, TS: ts.UnixMilli(), Payload: body}
+	case "MESSAGE_REVOKED":
+		var payload wsframe.MessageRevokedPayload
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return decodedDelivery{}, err
+		}
+		if payload.ChatID == "" || payload.SenderID == "" || payload.ClientMsgID == "" {
+			return decodedDelivery{}, fmt.Errorf("revoke payload is missing message identity")
+		}
+		payload.OutboxID = outboxID
+		payload.OutboxType = wsframe.OutboxType(typ)
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return decodedDelivery{}, err
+		}
+		envelope = wsframe.Envelope{Type: wsframe.TypeMessageRevoked, TS: payload.TS, Payload: body}
 	default:
 		return decodedDelivery{}, fmt.Errorf("unsupported outbox event type %q", eventType)
 	}
