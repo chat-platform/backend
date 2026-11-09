@@ -26,9 +26,25 @@ type DeleteMessage struct {
 	ClientMsgID string
 }
 
+type ReactToMessage struct {
+	ReactorID         string
+	DeviceID          string
+	ChatID            string
+	TargetSenderID    string
+	TargetClientMsgID string
+	ClientReactionID  string
+	TimestampMS       int64
+	Reaction          *string
+}
+
 type MessageAck struct {
 	ClientMsgID string
 	TimestampMS int64
+}
+
+type ReactionAck struct {
+	ClientReactionID string
+	TimestampMS      int64
 }
 
 type Receipt struct {

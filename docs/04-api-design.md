@@ -167,6 +167,9 @@ its active sockets.
 | `message.delete_for_everyone` | C → S | `{ chatId, clientMsgId }` | Sender-only; client offers the action within one hour. Server verifies authorship and message existence, removes undelivered originals, then queues `MESSAGE_REVOKED` for active chat devices. |
 | `message.delete_for_everyone.ack` | S → C | `{}` | Uses the request `id`; sent after the revoke transaction commits. |
 | `message.revoked` | S → C | `{ outboxType, outboxId, chatId, senderId, clientMsgId, ts, messageTs }` | Client replaces the matching message with “<sender> deleted this message” at the original message's position and acknowledges the outbox event. |
+| `reaction` | C → S | `{ chatId, targetSenderId, targetClientMsgId, timestampMs, reaction }` | Envelope `id` is `clientReactionId`: a client-generated UUID reused for retries. `reaction` is one emoji or `null` to remove the reactor's reaction. |
+| `reaction.ack` | S → C | `{ clientReactionId, timestampMs }` | The reaction change was accepted by the Message Service; `clientReactionId` matches the request envelope `id`. |
+| `reaction.recv` | S → C | `{ outboxType, outboxId, chatId, senderId, targetSenderId, targetClientMsgId, clientReactionId, timestampMs, reaction }` | Client applies to the existing target message; if absent locally, it silently drops the update and acknowledges the outbox event. |
 | `typing` | both | `{ chatId, state }` | Ephemeral; client-side timeout fallback. |
 | `presence.subscribe` | C → S | `{ targetUserId }` | Authenticated; subscribes idempotently and returns a fresh `presence.snapshot`. Subscription is registered before the snapshot read. |
 | `presence.unsubscribe` | C → S | `{ targetUserId }` | Removes this connection's subscription. |
@@ -192,6 +195,12 @@ Reliability:
 - WS is treated as lossy; anything important is recoverable via `/sync`.
 - Client sends carry `clientMsgId`; server deduplicates on it.
 - Server persists the message, then acks the sender, then fans out.
+
+Reaction clients keep one latest state per `(target message, reacting user)` and
+compare `(timestampMs, clientReactionId)` lexically. The event timestamp comes
+from the originating device; `clientReactionId` provides a deterministic tie
+break. Removal events retain their ordering key locally as a tombstone. Reaction
+events use normal direct/group outbox sync and inherit its retention window.
 
 Presence subscription and refresh:
 

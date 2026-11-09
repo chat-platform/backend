@@ -19,6 +19,8 @@ type chatRepositoryStub struct {
 	groupEnqueued  bool
 	enqueued       []domain.RecipientDevice
 	deliveredType  string
+	reaction       domain.ReactToMessage
+	reactionError  error
 }
 
 func (r *chatRepositoryStub) AuthorizedChatType(context.Context, string, string) (string, error) {
@@ -39,6 +41,10 @@ func (r *chatRepositoryStub) EnqueueGroupMessageEvent(_ context.Context, _ domai
 }
 func (r *chatRepositoryStub) DeleteForEveryone(context.Context, domain.DeleteMessage, string) error {
 	return nil
+}
+func (r *chatRepositoryStub) EnqueueReaction(_ context.Context, reaction domain.ReactToMessage) error {
+	r.reaction = reaction
+	return r.reactionError
 }
 func (r *chatRepositoryStub) MarkDelivered(_ context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {
 	r.deliveredType = receipt.OutboxType
@@ -129,5 +135,64 @@ func TestDirectSendRetryCanDeliverWhenRecipientDeviceAppears(t *testing.T) {
 	}
 	if !repo.directEnqueued || len(repo.enqueued) != 1 || repo.enqueued[0].DeviceID != "new-device" {
 		t.Fatalf("retry did not enqueue for newly available recipient: %+v", repo.enqueued)
+	}
+}
+
+func TestReactToMessageEnqueuesReactionAndRemoval(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &chatRepositoryStub{}
+	operations := NewChatOperations(repo, logger)
+	request := domain.ReactToMessage{
+		ReactorID: "reactor", DeviceID: "device", ChatID: "chat", TargetSenderID: "author",
+		TargetClientMsgID: "target", ClientReactionID: "operation", TimestampMS: 123,
+	}
+	emoji := "👍"
+	request.Reaction = &emoji
+	ack, err := operations.ReactToMessage(context.Background(), request)
+	if err != nil || ack.ClientReactionID != "operation" || ack.TimestampMS != 123 || repo.reaction.Reaction == nil || *repo.reaction.Reaction != emoji {
+		t.Fatalf("reaction ack=%+v stored=%+v err=%v", ack, repo.reaction, err)
+	}
+
+	request.ClientReactionID = "remove-operation"
+	request.Reaction = nil
+	if _, err := operations.ReactToMessage(context.Background(), request); err != nil || repo.reaction.Reaction != nil {
+		t.Fatalf("removal reaction=%+v err=%v", repo.reaction, err)
+	}
+}
+
+func TestReactToMessageRejectsMissingOrderingAndIdentityFields(t *testing.T) {
+	logger, err := logging.New(io.Discard, logging.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := NewChatOperations(&chatRepositoryStub{}, logger)
+	cases := []domain.ReactToMessage{
+		{},
+		{ReactorID: "reactor", DeviceID: "device", ChatID: "chat", TargetSenderID: "author", TargetClientMsgID: "target", ClientReactionID: "operation"},
+	}
+	for _, request := range cases {
+		if _, err := operations.ReactToMessage(context.Background(), request); !errors.Is(err, domain.ErrInvalidMessage) {
+			t.Fatalf("invalid request %+v returned %v", request, err)
+		}
+	}
+	empty := "  "
+	valid := domain.ReactToMessage{ReactorID: "reactor", DeviceID: "device", ChatID: "chat", TargetSenderID: "author", TargetClientMsgID: "target", ClientReactionID: "operation", TimestampMS: 123, Reaction: &empty}
+	if _, err := operations.ReactToMessage(context.Background(), valid); !errors.Is(err, domain.ErrInvalidMessage) {
+		t.Fatalf("blank reaction returned %v", err)
+	}
+	for _, invalidReaction := range []string{"hello", "👍😂", " 👍"} {
+		valid.Reaction = &invalidReaction
+		if _, err := operations.ReactToMessage(context.Background(), valid); !errors.Is(err, domain.ErrInvalidMessage) {
+			t.Fatalf("invalid reaction %q returned %v", invalidReaction, err)
+		}
+	}
+	for _, validReaction := range []string{"👍", "👩🏽‍💻", "🇮🇳", "1️⃣"} {
+		valid.Reaction = &validReaction
+		if _, err := operations.ReactToMessage(context.Background(), valid); err != nil {
+			t.Fatalf("valid reaction %q returned %v", validReaction, err)
+		}
 	}
 }

@@ -3,7 +3,10 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	"github.com/chat-platform/backend/services/message-service/internal/port"
@@ -77,6 +80,69 @@ func (s *ChatOperations) DeleteForEveryone(ctx context.Context, message domain.D
 		return domain.ErrChatAccessDenied
 	}
 	return s.chatRepository.DeleteForEveryone(ctx, message, chatType)
+}
+
+func (s *ChatOperations) ReactToMessage(ctx context.Context, reaction domain.ReactToMessage) (domain.ReactionAck, error) {
+	if reaction.ReactorID == "" || reaction.DeviceID == "" || reaction.ChatID == "" ||
+		reaction.TargetSenderID == "" || reaction.TargetClientMsgID == "" ||
+		reaction.ClientReactionID == "" || reaction.TimestampMS <= 0 {
+		return domain.ReactionAck{}, domain.ErrInvalidMessage
+	}
+	if reaction.Reaction != nil && !isSingleEmoji(*reaction.Reaction) {
+		return domain.ReactionAck{}, domain.ErrInvalidMessage
+	}
+	if err := s.chatRepository.EnqueueReaction(ctx, reaction); err != nil {
+		return domain.ReactionAck{}, err
+	}
+	return domain.ReactionAck{ClientReactionID: reaction.ClientReactionID, TimestampMS: reaction.TimestampMS}, nil
+}
+
+func isSingleEmoji(value string) bool {
+	if !utf8.ValidString(value) || strings.TrimSpace(value) != value || len(value) == 0 || len(value) > 32 {
+		return false
+	}
+	runes := []rune(value)
+	if len(runes) == 2 && unicode.Is(unicode.Regional_Indicator, runes[0]) && unicode.Is(unicode.Regional_Indicator, runes[1]) {
+		return true
+	}
+	if len(runes) >= 2 && (runes[0] == '#' || runes[0] == '*' || (runes[0] >= '0' && runes[0] <= '9')) {
+		i := 1
+		if i < len(runes) && runes[i] == '\uFE0F' {
+			i++
+		}
+		return i == len(runes)-1 && runes[i] == '\u20E3'
+	}
+
+	hasBase := false
+	needBase := true
+	for i := 0; i < len(runes); {
+		r := runes[i]
+		if needBase {
+			if !unicode.Is(unicode.So, r) {
+				return false
+			}
+			hasBase = true
+			needBase = false
+			i++
+			continue
+		}
+		switch {
+		case r == '\uFE0F':
+			i++
+		case r >= 0x1F3FB && r <= 0x1F3FF:
+			i++
+		case r >= 0xE0020 && r <= 0xE007E:
+			i++
+		case r == 0xE007F:
+			i++
+		case r == '\u200D':
+			needBase = true
+			i++
+		default:
+			return false
+		}
+	}
+	return hasBase && !needBase
 }
 
 func (s *ChatOperations) MarkRead(ctx context.Context, receipt domain.Receipt) error {
