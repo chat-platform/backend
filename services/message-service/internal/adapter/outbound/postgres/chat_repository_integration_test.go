@@ -264,7 +264,7 @@ func TestDeleteForEveryoneCancelsRowsAndFansOutToActiveDevices(t *testing.T) {
 	}
 	repo := NewChatRepository(pool, logger)
 	command := domain.DeleteMessage{SenderID: sender, DeviceID: origin, ChatID: directChat, ClientMsgID: client}
-	if err := repo.DeleteForEveryone(ctx, command); err != nil {
+	if err := repo.DeleteForEveryone(ctx, command, "DIRECT"); err != nil {
 		t.Fatal(err)
 	}
 	var pendingOriginals int
@@ -275,14 +275,14 @@ func TestDeleteForEveryoneCancelsRowsAndFansOutToActiveDevices(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE event_type='MESSAGE_REVOKED'`).Scan(&directRevokes); err != nil || directRevokes != 2 {
 		t.Fatalf("direct revoke fanout=%d error=%v, want sender's other device and active peer", directRevokes, err)
 	}
-	if err := repo.DeleteForEveryone(ctx, command); err != nil {
+	if err := repo.DeleteForEveryone(ctx, command, "DIRECT"); err != nil {
 		t.Fatalf("idempotent direct revoke: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE event_type='MESSAGE_REVOKED'`).Scan(&directRevokes); err != nil || directRevokes != 2 {
 		t.Fatalf("duplicate direct revoke rows=%d error=%v", directRevokes, err)
 	}
 	groupCommand := domain.DeleteMessage{SenderID: sender, DeviceID: origin, ChatID: groupChat, ClientMsgID: groupClient}
-	if err := repo.DeleteForEveryone(ctx, groupCommand); err != nil {
+	if err := repo.DeleteForEveryone(ctx, groupCommand, "GROUP"); err != nil {
 		t.Fatal(err)
 	}
 	var groupRevokes int
@@ -297,11 +297,11 @@ func TestDeleteForEveryoneCancelsRowsAndFansOutToActiveDevices(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(chat_id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload,created_at) VALUES(NULL,$2,$3,$4,$5,'NEW_MESSAGE',json_build_object('chatId',$1)::text,now()-interval '2 hours')`, directChat, sender, oldClient, peer, peerDevice); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: sender, DeviceID: origin, ChatID: directChat, ClientMsgID: oldClient}); err != nil {
+	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: sender, DeviceID: origin, ChatID: directChat, ClientMsgID: oldClient}, "DIRECT"); err != nil {
 		t.Fatalf("old message revoke should not be time-limited by the server: %v", err)
 	}
-	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: outsider, DeviceID: outsiderDevice, ChatID: directChat, ClientMsgID: client}); !errors.Is(err, domain.ErrChatAccessDenied) {
-		t.Fatalf("non-member revoke error=%v, want ErrChatAccessDenied", err)
+	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: outsider, DeviceID: outsiderDevice, ChatID: directChat, ClientMsgID: client}, "DIRECT"); !errors.Is(err, domain.ErrInvalidMessage) {
+		t.Fatalf("non-author revoke error=%v, want ErrInvalidMessage", err)
 	}
 }
 

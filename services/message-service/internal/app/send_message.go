@@ -76,7 +76,7 @@ func (s *ChatOperations) DeleteForEveryone(ctx context.Context, message domain.D
 	if chatType != "DIRECT" && chatType != "GROUP" {
 		return domain.ErrChatAccessDenied
 	}
-	return s.chatRepository.DeleteForEveryone(ctx, message)
+	return s.chatRepository.DeleteForEveryone(ctx, message, chatType)
 }
 
 func (s *ChatOperations) MarkRead(ctx context.Context, receipt domain.Receipt) error {

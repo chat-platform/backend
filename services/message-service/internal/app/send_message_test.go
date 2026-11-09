@@ -37,7 +37,7 @@ func (r *chatRepositoryStub) EnqueueGroupMessageEvent(_ context.Context, _ domai
 	r.groupEnqueued = true
 	return domain.MessageAck{ClientMsgID: "client", TimestampMS: 1}, nil
 }
-func (r *chatRepositoryStub) DeleteForEveryone(context.Context, domain.DeleteMessage) error {
+func (r *chatRepositoryStub) DeleteForEveryone(context.Context, domain.DeleteMessage, string) error {
 	return nil
 }
 func (r *chatRepositoryStub) MarkDelivered(_ context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {
@@ -131,4 +131,3 @@ func TestDirectSendRetryCanDeliverWhenRecipientDeviceAppears(t *testing.T) {
 		t.Fatalf("retry did not enqueue for newly available recipient: %+v", repo.enqueued)
 	}
 }
-

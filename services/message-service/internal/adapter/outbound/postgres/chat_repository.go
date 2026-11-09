@@ -254,30 +254,15 @@ func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message d
 
 // DeleteForEveryone atomically deletes original outbox rows and queues a
 // durable revoke event for each currently active device in the chat.
-func (r *ChatRepository) DeleteForEveryone(ctx context.Context, message domain.DeleteMessage) error {
+func (r *ChatRepository) DeleteForEveryone(ctx context.Context, message domain.DeleteMessage, chatType string) error {
+	if chatType != "DIRECT" && chatType != "GROUP" {
+		return domain.ErrChatAccessDenied
+	}
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin revoke transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	var chatType string
-	err = tx.QueryRow(ctx, `
-		SELECT c.type
-		FROM chat c
-		JOIN chat_membership cm
-		  ON cm.chat_id = c.chat_id
-		 AND cm.user_id = $2
-		WHERE c.chat_id = $1
-		  AND c.deleted_at IS NULL`,
-		message.ChatID,
-		message.SenderID,
-	).Scan(&chatType)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ErrChatAccessDenied
-	}
-	if err != nil {
-		return fmt.Errorf("load revoke chat: %w", err)
-	}
 	// Serialize duplicate requests for this message so a concurrent revoke sees
 	// the first transaction's event and returns idempotently.
 	_, err = tx.Exec(ctx, `
