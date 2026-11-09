@@ -300,8 +300,8 @@ func TestDeleteForEveryoneCancelsRowsAndFansOutToActiveDevices(t *testing.T) {
 	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: sender, DeviceID: origin, ChatID: directChat, ClientMsgID: oldClient}); err != nil {
 		t.Fatalf("old message revoke should not be time-limited by the server: %v", err)
 	}
-	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: outsider, DeviceID: outsiderDevice, ChatID: directChat, ClientMsgID: client}); !errors.Is(err, domain.ErrInvalidMessage) {
-		t.Fatalf("non-author revoke error=%v, want ErrInvalidMessage", err)
+	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: outsider, DeviceID: outsiderDevice, ChatID: directChat, ClientMsgID: client}); !errors.Is(err, domain.ErrChatAccessDenied) {
+		t.Fatalf("non-member revoke error=%v, want ErrChatAccessDenied", err)
 	}
 }
 

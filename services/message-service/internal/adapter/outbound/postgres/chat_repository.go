@@ -262,10 +262,15 @@ func (r *ChatRepository) DeleteForEveryone(ctx context.Context, message domain.D
 	defer tx.Rollback(ctx)
 	var chatType string
 	err = tx.QueryRow(ctx, `
-		SELECT type
-		FROM chat
-		WHERE chat_id = $1 AND deleted_at IS NULL`,
+		SELECT c.type
+		FROM chat c
+		JOIN chat_membership cm
+		  ON cm.chat_id = c.chat_id
+		 AND cm.user_id = $2
+		WHERE c.chat_id = $1
+		  AND c.deleted_at IS NULL`,
 		message.ChatID,
+		message.SenderID,
 	).Scan(&chatType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ErrChatAccessDenied

@@ -131,3 +131,4 @@ func TestDirectSendRetryCanDeliverWhenRecipientDeviceAppears(t *testing.T) {
 		t.Fatalf("retry did not enqueue for newly available recipient: %+v", repo.enqueued)
 	}
 }
+

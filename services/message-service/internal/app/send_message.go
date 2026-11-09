@@ -69,6 +69,13 @@ func (s *ChatOperations) DeleteForEveryone(ctx context.Context, message domain.D
 	if message.SenderID == "" || message.DeviceID == "" || message.ChatID == "" || message.ClientMsgID == "" {
 		return domain.ErrInvalidMessage
 	}
+	chatType, err := s.chatRepository.AuthorizedChatType(ctx, message.ChatID, message.SenderID)
+	if err != nil {
+		return err
+	}
+	if chatType != "DIRECT" && chatType != "GROUP" {
+		return domain.ErrChatAccessDenied
+	}
 	return s.chatRepository.DeleteForEveryone(ctx, message)
 }
 
