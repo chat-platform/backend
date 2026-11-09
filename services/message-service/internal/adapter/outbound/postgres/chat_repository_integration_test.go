@@ -251,9 +251,10 @@ func TestDeleteForEveryoneCancelsRowsAndFansOutToActiveDevices(t *testing.T) {
 	INSERT INTO chat_membership VALUES($4,$1),($4,$2),($5,$1),($5,$2);
 	INSERT INTO device VALUES($6,$1,NULL),($7,$1,NULL),($8,$2,NULL),($9,$2,NULL),($10,$3,NULL);
 	INSERT INTO session VALUES('66666666-6666-4666-8666-666666666666',$6,now()+interval '1 day',NULL),('77777777-7777-4777-8777-777777777777',$7,now()+interval '1 day',NULL),('88888888-8888-4888-8888-888888888888',$8,now()+interval '1 day',NULL),('99999999-9999-4999-8999-999999999999',$9,now()+interval '1 day',now()),('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',$10,now()+interval '1 day',NULL);
-	INSERT INTO direct_outbox(chat_id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload,delivered_at) VALUES($4,$1,$11,$2,$8,'NEW_MESSAGE','{}',NULL),($4,$1,$11,$1,$7,'NEW_MESSAGE','{}',now());
+	INSERT INTO direct_outbox(chat_id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload,delivered_at) VALUES(NULL,$1,$11,$2,$8,'NEW_MESSAGE',json_build_object('chatId',$4)::text,NULL),(NULL,$1,$11,$1,$7,'NEW_MESSAGE',json_build_object('chatId',$4)::text,now());
 	INSERT INTO group_event(chat_id,sender_id,client_msg_id,event_type,payload) VALUES($5,$1,$12,'NEW_MESSAGE','{}');
-	INSERT INTO group_outbox(event_id,recipient_id,device_id) SELECT event_id,$2,$8 FROM group_event WHERE chat_id=$5 AND event_type='NEW_MESSAGE'`, sender, peer, outsider, directChat, groupChat, origin, senderDevice, peerDevice, loggedOut, outsiderDevice, client, groupClient)
+	INSERT INTO group_outbox(event_id,recipient_id,device_id,delivered_at) SELECT event_id,$2,$8,NULL FROM group_event WHERE chat_id=$5 AND event_type='NEW_MESSAGE';
+	INSERT INTO group_outbox(event_id,recipient_id,device_id,delivered_at) SELECT event_id,$2,$8,now() FROM group_event WHERE chat_id=$5 AND event_type='NEW_MESSAGE'`, sender, peer, outsider, directChat, groupChat, origin, senderDevice, peerDevice, loggedOut, outsiderDevice, client, groupClient)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,12 +268,8 @@ func TestDeleteForEveryoneCancelsRowsAndFansOutToActiveDevices(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pendingOriginals int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE sender_id=$1 AND client_msg_id=$2 AND event_type='NEW_MESSAGE' AND delivered_at IS NULL`, sender, client).Scan(&pendingOriginals); err != nil || pendingOriginals != 0 {
-		t.Fatalf("undelivered original rows=%d error=%v, want hard deletion", pendingOriginals, err)
-	}
-	var deliveredRows int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE device_id=$1 AND sender_id=$2 AND client_msg_id=$3 AND event_type='NEW_MESSAGE' AND delivered_at IS NOT NULL`, senderDevice, sender, client).Scan(&deliveredRows); err != nil || deliveredRows != 1 {
-		t.Fatalf("delivered original rows=%d error=%v, want retained delivered row", deliveredRows, err)
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE sender_id=$1 AND client_msg_id=$2 AND event_type='NEW_MESSAGE'`, sender, client).Scan(&pendingOriginals); err != nil || pendingOriginals != 0 {
+		t.Fatalf("original direct rows=%d error=%v, want all original rows hard-deleted", pendingOriginals, err)
 	}
 	var directRevokes int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM direct_outbox WHERE event_type='MESSAGE_REVOKED'`).Scan(&directRevokes); err != nil || directRevokes != 2 {
@@ -293,11 +290,11 @@ func TestDeleteForEveryoneCancelsRowsAndFansOutToActiveDevices(t *testing.T) {
 		t.Fatalf("group revoke fanout=%d error=%v, want sender's other device and active peer", groupRevokes, err)
 	}
 	var pendingGroupRows int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_outbox o JOIN group_event e ON e.event_id=o.event_id WHERE e.chat_id=$1 AND e.sender_id=$2 AND e.client_msg_id=$3 AND e.event_type='NEW_MESSAGE' AND o.delivered_at IS NULL`, groupChat, sender, groupClient).Scan(&pendingGroupRows); err != nil || pendingGroupRows != 0 {
-		t.Fatalf("undelivered group original rows=%d error=%v, want hard deletion", pendingGroupRows, err)
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_outbox o JOIN group_event e ON e.event_id=o.event_id WHERE e.chat_id=$1 AND e.sender_id=$2 AND e.client_msg_id=$3 AND e.event_type='NEW_MESSAGE'`, groupChat, sender, groupClient).Scan(&pendingGroupRows); err != nil || pendingGroupRows != 0 {
+		t.Fatalf("original group rows=%d error=%v, want all original rows hard-deleted", pendingGroupRows, err)
 	}
 	oldClient := "0199d628-39d0-7000-8000-000000000003"
-	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(chat_id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload,created_at) VALUES($1,$2,$3,$4,$5,'NEW_MESSAGE','{}',now()-interval '2 hours')`, directChat, sender, oldClient, peer, peerDevice); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO direct_outbox(chat_id,sender_id,client_msg_id,recipient_id,device_id,event_type,payload,created_at) VALUES(NULL,$2,$3,$4,$5,'NEW_MESSAGE',json_build_object('chatId',$1)::text,now()-interval '2 hours')`, directChat, sender, oldClient, peer, peerDevice); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: sender, DeviceID: origin, ChatID: directChat, ClientMsgID: oldClient}); err != nil {

@@ -252,7 +252,7 @@ func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message d
 	return domain.MessageAck{ClientMsgID: message.ClientMsgID, TimestampMS: timestampMS}, nil
 }
 
-// DeleteForEveryone atomically cancels undelivered original rows and queues a
+// DeleteForEveryone atomically deletes original outbox rows and queues a
 // durable revoke event for each currently active device in the chat.
 func (r *ChatRepository) DeleteForEveryone(ctx context.Context, message domain.DeleteMessage) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -272,6 +272,19 @@ func (r *ChatRepository) DeleteForEveryone(ctx context.Context, message domain.D
 	}
 	if err != nil {
 		return fmt.Errorf("load revoke chat: %w", err)
+	}
+	// Serialize duplicate requests for this message so a concurrent revoke sees
+	// the first transaction's event and returns idempotently.
+	_, err = tx.Exec(ctx, `
+		SELECT pg_advisory_xact_lock(
+			hashtextextended($1 || ':' || $2 || ':' || $3, 0)
+		)`,
+		message.ChatID,
+		message.SenderID,
+		message.ClientMsgID,
+	)
+	if err != nil {
+		return fmt.Errorf("lock message revoke: %w", err)
 	}
 	var alreadyRevoked bool
 	if chatType == "DIRECT" {
@@ -362,13 +375,12 @@ func (r *ChatRepository) DeleteForEveryone(ctx context.Context, message domain.D
 			WHERE COALESCE(chat_id::text, payload::jsonb->>'chatId') = $1
 			  AND sender_id = $2
 			  AND client_msg_id = $3
-			  AND event_type = 'NEW_MESSAGE'
-			  AND delivered_at IS NULL`,
+			  AND event_type = 'NEW_MESSAGE'`,
 			message.ChatID,
 			message.SenderID,
 			message.ClientMsgID,
 		); err != nil {
-			return fmt.Errorf("delete pending direct message rows: %w", err)
+			return fmt.Errorf("delete direct original message rows: %w", err)
 		}
 		_, err = tx.Exec(ctx, `
 			INSERT INTO direct_outbox (
@@ -410,13 +422,12 @@ func (r *ChatRepository) DeleteForEveryone(ctx context.Context, message domain.D
 			  AND e.chat_id = $1
 			  AND e.sender_id = $2
 			  AND e.client_msg_id = $3
-			  AND e.event_type = 'NEW_MESSAGE'
-			  AND o.delivered_at IS NULL`,
+			  AND e.event_type = 'NEW_MESSAGE'`,
 			message.ChatID,
 			message.SenderID,
 			message.ClientMsgID,
 		); err != nil {
-			return fmt.Errorf("delete pending group message rows: %w", err)
+			return fmt.Errorf("delete group original message rows: %w", err)
 		}
 		var eventID int64
 		revokeID := uuid.NewString()
