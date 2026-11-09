@@ -108,6 +108,10 @@ func (r *CachedChatRepository) EnqueueGroupMessageEvent(ctx context.Context, mes
 	return r.store.EnqueueGroupMessageEvent(ctx, message)
 }
 
+func (r *CachedChatRepository) DeleteForEveryone(ctx context.Context, message domain.DeleteMessage) error {
+	return r.store.DeleteForEveryone(ctx, message)
+}
+
 func (r *CachedChatRepository) MarkDelivered(ctx context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {
 	return r.store.MarkDelivered(ctx, receipt)
 }

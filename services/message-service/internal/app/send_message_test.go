@@ -37,6 +37,9 @@ func (r *chatRepositoryStub) EnqueueGroupMessageEvent(_ context.Context, _ domai
 	r.groupEnqueued = true
 	return domain.MessageAck{ClientMsgID: "client", TimestampMS: 1}, nil
 }
+func (r *chatRepositoryStub) DeleteForEveryone(context.Context, domain.DeleteMessage) error {
+	return nil
+}
 func (r *chatRepositoryStub) MarkDelivered(_ context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {
 	r.deliveredType = receipt.OutboxType
 	return domain.DeliveryAck{}, nil

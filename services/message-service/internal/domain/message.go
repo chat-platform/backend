@@ -19,6 +19,13 @@ type SendMessage struct {
 	Content     string
 }
 
+type DeleteMessage struct {
+	SenderID    string
+	DeviceID    string
+	ChatID      string
+	ClientMsgID string
+}
+
 type MessageAck struct {
 	ClientMsgID string
 	TimestampMS int64

@@ -50,3 +50,11 @@ func (s *messageServiceClient) MarkPlayed(ctx context.Context, deviceID, receipt
 	}
 	return nil
 }
+
+func (s *messageServiceClient) DeleteForEveryone(ctx context.Context, senderID, deviceID, chatID, clientMsgID string) error {
+	_, err := s.client.DeleteForEveryone(ctx, &messagev1.DeleteForEveryoneRequest{SenderId: senderID, DeviceId: deviceID, ChatId: chatID, ClientMsgId: clientMsgID})
+	if err != nil {
+		return fmt.Errorf("message service DeleteForEveryone RPC: %w", err)
+	}
+	return nil
+}

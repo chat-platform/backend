@@ -21,6 +21,7 @@ type ChatOperations interface {
 	MarkDelivered(context.Context, domain.Receipt) (domain.DeliveryAck, error)
 	MarkRead(context.Context, domain.Receipt) error
 	MarkPlayed(context.Context, domain.Receipt) error
+	DeleteForEveryone(context.Context, domain.DeleteMessage) error
 }
 
 type Server struct {
@@ -147,4 +148,24 @@ func (s *Server) MarkPlayed(ctx context.Context, request *messagev1.MarkPlayedRe
 		return nil, status.Error(codes.Internal, "could not record played receipt")
 	}
 	return &messagev1.MarkPlayedResponse{}, nil
+}
+
+func (s *Server) DeleteForEveryone(ctx context.Context, request *messagev1.DeleteForEveryoneRequest) (*messagev1.DeleteForEveryoneResponse, error) {
+	if request == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	if err := s.validator.Validate(request); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := s.operations.DeleteForEveryone(ctx, domain.DeleteMessage{SenderID: request.GetSenderId(), DeviceID: request.GetDeviceId(), ChatID: request.GetChatId(), ClientMsgID: request.GetClientMsgId()}); err != nil {
+		if errors.Is(err, domain.ErrInvalidMessage) {
+			return nil, status.Error(codes.NotFound, "message not found")
+		}
+		if errors.Is(err, domain.ErrChatAccessDenied) {
+			return nil, status.Error(codes.PermissionDenied, "sender is not authorized for this chat")
+		}
+		s.logger.Error(ctx, "could not revoke message", "error", err, "chat_id", request.GetChatId(), "sender_id", request.GetSenderId(), "client_msg_id", request.GetClientMsgId())
+		return nil, status.Error(codes.Internal, "could not revoke message")
+	}
+	return &messagev1.DeleteForEveryoneResponse{}, nil
 }

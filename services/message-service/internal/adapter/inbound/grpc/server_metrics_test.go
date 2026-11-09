@@ -33,6 +33,9 @@ func (o *metricsOperationsStub) MarkDelivered(context.Context, domain.Receipt) (
 }
 func (*metricsOperationsStub) MarkRead(context.Context, domain.Receipt) error   { return nil }
 func (*metricsOperationsStub) MarkPlayed(context.Context, domain.Receipt) error { return nil }
+func (*metricsOperationsStub) DeleteForEveryone(context.Context, domain.DeleteMessage) error {
+	return nil
+}
 
 func newMetricsServer(t *testing.T, operations *metricsOperationsStub) (*Server, *prometheus.Registry) {
 	t.Helper()

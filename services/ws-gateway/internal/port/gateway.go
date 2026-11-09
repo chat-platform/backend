@@ -12,6 +12,7 @@ type MessageService interface {
 	MarkDelivered(context.Context, string, string, string, string, string, string, int64) error
 	MarkRead(context.Context, string, string, string, string, string) error
 	MarkPlayed(context.Context, string, string, string, string, string) error
+	DeleteForEveryone(context.Context, string, string, string, string) error
 }
 
 type ConnectionRegistry interface {

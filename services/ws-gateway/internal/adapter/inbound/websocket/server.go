@@ -35,6 +35,7 @@ type Operations interface {
 	MarkDelivered(context.Context, domain.Identity, wsframe.DeliveryReceiptPayload) error
 	MarkRead(context.Context, domain.Identity, wsframe.ReadReceiptPayload) error
 	MarkPlayed(context.Context, domain.Identity, wsframe.PlayedReceiptPayload) error
+	DeleteForEveryone(context.Context, domain.Identity, wsframe.MessageDeletePayload) error
 	SubscribePresence(context.Context, string, string) error
 	UnsubscribePresence(context.Context, string, string) error
 	GetPresence(context.Context, string, string) (domain.Presence, error)
@@ -268,6 +269,22 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			if err := socket.WriteJSON(wsframe.Envelope{Type: wsframe.TypeReceiptPlayedAck, ID: envelope.ID, TS: time.Now().UnixMilli(), Payload: json.RawMessage(`{}`)}); err != nil {
 				s.logOperationFailure(ctx, "write played receipt acknowledgement", err,
 					"request_id", envelope.ID, "user_id", identity.UserID, "device_id", identity.DeviceID)
+				return
+			}
+			continue
+		}
+		if envelope.Type == wsframe.TypeMessageDelete {
+			var request wsframe.MessageDeletePayload
+			if strings.TrimSpace(envelope.ID) == "" || len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &request) != nil || strings.TrimSpace(request.ChatID) == "" || strings.TrimSpace(request.ClientMsgID) == "" {
+				s.writeError(ctx, socket, envelope.ID, "invalid_message_delete", "message.delete_for_everyone requires chatId and clientMsgId")
+				continue
+			}
+			if err := s.operations.DeleteForEveryone(ctx, identity, request); err != nil {
+				s.logOperationFailure(ctx, "revoke message", err, "request_id", envelope.ID, "user_id", identity.UserID, "device_id", identity.DeviceID, "chat_id", request.ChatID, "client_msg_id", request.ClientMsgID)
+				s.writeError(ctx, socket, envelope.ID, "message_delete_failed", "message could not be deleted for everyone")
+				continue
+			}
+			if err := socket.WriteJSON(wsframe.Envelope{Type: wsframe.TypeMessageDeleteAck, ID: envelope.ID, TS: time.Now().UnixMilli(), Payload: json.RawMessage(`{}`)}); err != nil {
 				return
 			}
 			continue

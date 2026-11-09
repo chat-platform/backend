@@ -195,6 +195,12 @@ func (r *OutboxRepository) MarkDispatched(ctx context.Context, outboxType string
 	err = r.pool.QueryRow(ctx, fmt.Sprintf(`UPDATE %s SET dispatched_at=statement_timestamp(), routed_to=$2, attempt_count=1, claim_expiry=NULL WHERE id=$1 AND dispatched_at IS NULL RETURNING GREATEST(0::double precision, EXTRACT(EPOCH FROM (dispatched_at-created_at))::double precision)`, table), id, routed).Scan(&waitSeconds)
 	if err != nil {
 		if err == pgx.ErrNoRows {
+			var exists bool
+			if checkErr := r.pool.QueryRow(ctx, fmt.Sprintf(`SELECT EXISTS(SELECT 1 FROM %s WHERE id=$1)`, table), id).Scan(&exists); checkErr == nil && !exists {
+				// The sender revoked the message after it was claimed. It may have
+				// been published already; the revoke event is its replacement.
+				return 0, nil
+			}
 			return 0, fmt.Errorf("outbox %d was not marked dispatched: row is missing or already dispatched", id)
 		}
 		return 0, fmt.Errorf("mark outbox %d dispatched: %w", id, err)
@@ -267,6 +273,10 @@ func (r *OutboxRepository) MarkRetryAttempt(ctx context.Context, outboxType stri
 	err = r.pool.QueryRow(ctx, fmt.Sprintf(`UPDATE %s SET attempt_count=attempt_count+1, dispatched_at=now(), claim_expiry=NULL WHERE id=$1 AND claim_expiry=$2 AND delivered_at IS NULL AND attempt_count < 10 RETURNING attempt_count = 10`, table), id, claimExpiry).Scan(&exhausted)
 	if err != nil {
 		if err == pgx.ErrNoRows {
+			var exists bool
+			if checkErr := r.pool.QueryRow(ctx, fmt.Sprintf(`SELECT EXISTS(SELECT 1 FROM %s WHERE id=$1)`, table), id).Scan(&exists); checkErr == nil && !exists {
+				return false, nil
+			}
 			return false, fmt.Errorf("%s retry row %d lost its claim or reached attempt limit", outboxType, id)
 		}
 		return false, fmt.Errorf("mark %s retry attempt: %w", outboxType, err)
@@ -284,6 +294,10 @@ func (r *OutboxRepository) ReleaseRetryClaim(ctx context.Context, outboxType str
 		return fmt.Errorf("release %s retry claim: %w", outboxType, err)
 	}
 	if result.RowsAffected() == 0 {
+		var exists bool
+		if checkErr := r.pool.QueryRow(ctx, fmt.Sprintf(`SELECT EXISTS(SELECT 1 FROM %s WHERE id=$1)`, table), id).Scan(&exists); checkErr == nil && !exists {
+			return nil
+		}
 		return fmt.Errorf("%s retry row %d lost its claim before release", outboxType, id)
 	}
 	return nil

@@ -252,3 +252,13 @@ func (g *Gateway) MarkPlayed(ctx context.Context, identity domain.Identity, rece
 	}
 	return nil
 }
+
+func (g *Gateway) DeleteForEveryone(ctx context.Context, identity domain.Identity, request wsframe.MessageDeletePayload) error {
+	if strings.TrimSpace(request.ChatID) == "" || strings.TrimSpace(request.ClientMsgID) == "" {
+		return domain.ErrInvalidIdentity
+	}
+	if err := g.messages.DeleteForEveryone(ctx, identity.UserID, identity.DeviceID, request.ChatID, request.ClientMsgID); err != nil {
+		return fmt.Errorf("revoke message: %w", err)
+	}
+	return nil
+}

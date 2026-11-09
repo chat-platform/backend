@@ -421,6 +421,20 @@ makes push delivery at-least-once under worker crashes.
 
 ## 4. Reconnect and Sync
 
+Message revocation is stored as a `MESSAGE_REVOKED` event in the normal
+per-device outbox and uses the existing live and reconnect sync paths.
+Undelivered original outbox rows are hard-deleted; No cancellation status column 
+is maintained, as it would duplicate a one-time state across both outbox tables. 
+While it could provide some monitoring value, the benefit is limited 
+given the expected rarity of delete-for-everyone operations. Already dispatched
+events may still arrive; clients retain a tombstone by chat, sender, 
+and client message ID so late originals stay hidden. 
+Revokes target current chat members with an unexpired, non-revoked
+session and non-revoked device. Logged-out sessions cannot receive revokes;
+local messages are cleared on logout, and backup restoration is outside scope.
+The web client offers revocation within one hour of the original message
+timestamp. The server does not enforce the time limit.
+
 ### 4.1 Cursor semantics
 
 Each device has **two cursors**, one per outbox table:
@@ -646,9 +660,6 @@ Revoke the session, delete the registry entry. Existing outbox rows for
 that device are not deleted — they age out via retention (§02 §1.9).
 Deleting them isn't necessary; the device won't reconnect with the
 revoked session, so the rows are never claimed.
-TODO: Deletion can be considered as retention is 30 days.
-
-
 ---
 
 ## 8. Block Enforcement

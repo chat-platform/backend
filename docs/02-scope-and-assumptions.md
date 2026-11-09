@@ -33,8 +33,9 @@
 - Messages should be persisted for offline recipients.
 - Messages can be edited only by the author, from the device they were originally sent from. (This has design implications with respect to ordering.)
 - Messages can be edited only within 15 minutes of sending.
-- Delete for all: Messages can be deleted by the author from any device where they are logged in, or by the group admin.
+- Delete for all: The author can delete their message within one hour. The client enforces this limit; the server verifies authorship and message existence. The revoke is queued for current chat members' non-revoked devices with an unexpired session; group admins cannot revoke another member's message.
 - Delete for me: Messages will be deleted only on the device where the user performs the deletion; the deletion will not be reflected on their other logged-in devices.
+- Logged-out sessions cannot receive revokes; local messages are cleared on logout. Restoring revoked content from future backups is outside scope.
 - For direct and group chats, messages are acknowledged but discarded without persistence or idempotency when no eligible recipient devices exist.
 
 ### Message Retention Distribution

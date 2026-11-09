@@ -13,6 +13,7 @@ service MessageService {
   rpc MarkDelivered(MarkDeliveredRequest) returns (MarkDeliveredResponse);
   rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
   rpc MarkPlayed(MarkPlayedRequest) returns (MarkPlayedResponse);
+  rpc DeleteForEveryone(DeleteForEveryoneRequest) returns (DeleteForEveryoneResponse);
 }
 
 message SendMessageRequest {
@@ -122,3 +123,15 @@ message MarkPlayedRequest {
 }
 
 message MarkPlayedResponse {}
+
+message DeleteForEveryoneRequest {
+  string sender_id = 1 [(buf.validate.field).string = { min_len: 1, pattern: ".*\\S.*" }];
+  string device_id = 2 [(buf.validate.field).string = { min_len: 1, pattern: ".*\\S.*" }];
+  string chat_id = 3 [(buf.validate.field).string = { min_len: 1, pattern: ".*\\S.*" }];
+  string client_msg_id = 4 [(buf.validate.field).string = {
+    uuid: true
+    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+  }];
+}
+
+message DeleteForEveryoneResponse {}
