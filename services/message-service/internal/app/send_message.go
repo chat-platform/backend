@@ -5,12 +5,12 @@ import (
 	"errors"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	"github.com/chat-platform/backend/services/message-service/internal/port"
 	"github.com/chat-platform/backend/shared/pkg/logging"
+	"github.com/emoj-info/go-isemoji"
 )
 
 type ChatOperations struct {
@@ -98,51 +98,10 @@ func (s *ChatOperations) ReactToMessage(ctx context.Context, reaction domain.Rea
 }
 
 func isSingleEmoji(value string) bool {
-	if !utf8.ValidString(value) || strings.TrimSpace(value) != value || len(value) == 0 || len(value) > 32 {
-		return false
-	}
-	runes := []rune(value)
-	if len(runes) == 2 && unicode.Is(unicode.Regional_Indicator, runes[0]) && unicode.Is(unicode.Regional_Indicator, runes[1]) {
-		return true
-	}
-	if len(runes) >= 2 && (runes[0] == '#' || runes[0] == '*' || (runes[0] >= '0' && runes[0] <= '9')) {
-		i := 1
-		if i < len(runes) && runes[i] == '\uFE0F' {
-			i++
-		}
-		return i == len(runes)-1 && runes[i] == '\u20E3'
-	}
-
-	hasBase := false
-	needBase := true
-	for i := 0; i < len(runes); {
-		r := runes[i]
-		if needBase {
-			if !unicode.Is(unicode.So, r) {
-				return false
-			}
-			hasBase = true
-			needBase = false
-			i++
-			continue
-		}
-		switch {
-		case r == '\uFE0F':
-			i++
-		case r >= 0x1F3FB && r <= 0x1F3FF:
-			i++
-		case r >= 0xE0020 && r <= 0xE007E:
-			i++
-		case r == 0xE007F:
-			i++
-		case r == '\u200D':
-			needBase = true
-			i++
-		default:
-			return false
-		}
-	}
-	return hasBase && !needBase
+	const maxEmojiBytes = 128 // 32 Unicode code points at four UTF-8 bytes each.
+	return len(value) > 0 && len(value) <= maxEmojiBytes &&
+		utf8.ValidString(value) && strings.TrimSpace(value) == value &&
+		isemoji.IsEmoji(value)
 }
 
 func (s *ChatOperations) MarkRead(ctx context.Context, receipt domain.Receipt) error {

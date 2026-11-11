@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
@@ -194,5 +195,44 @@ func TestReactToMessageRejectsMissingOrderingAndIdentityFields(t *testing.T) {
 		if _, err := operations.ReactToMessage(context.Background(), valid); err != nil {
 			t.Fatalf("valid reaction %q returned %v", validReaction, err)
 		}
+	}
+}
+
+func TestIsSingleEmoji(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "standard", value: "😀", want: true},
+		{name: "heart presentation", value: "❤️", want: true},
+		{name: "text default with emoji selector", value: "☺️", want: true},
+		{name: "skin tone", value: "👍🏽", want: true},
+		{name: "country flag", value: "🇮🇳", want: true},
+		{name: "number keycap", value: "1️⃣", want: true},
+		{name: "symbol keycap", value: "#️⃣", want: true},
+		{name: "family ZWJ sequence", value: "👨‍👩‍👧‍👦", want: true},
+		{name: "profession ZWJ sequence", value: "👩🏽‍💻", want: true},
+		{name: "tag flag sequence", value: "\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F", want: true},
+		{name: "plain text", value: "hello", want: false},
+		{name: "non-emoji symbol", value: "⌘", want: false},
+		{name: "multiple emoji", value: "😀😀", want: false},
+		{name: "emoji with text", value: "😀x", want: false},
+		{name: "leading whitespace", value: " 😀", want: false},
+		{name: "trailing whitespace", value: "😀\n", want: false},
+		{name: "dangling joiner", value: "😀‍", want: false},
+		{name: "invalid modifier base", value: "😀🏽", want: false},
+		{name: "duplicate modifier", value: "👍🏽🏽", want: false},
+		{name: "unterminated tag sequence", value: "\U0001F3F4\U000E0067\U000E0062", want: false},
+		{name: "invalid UTF-8", value: string([]byte{0xff}), want: false},
+		{name: "over size limit", value: strings.Repeat("x", 129), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSingleEmoji(tt.value); got != tt.want {
+				t.Errorf("isSingleEmoji(%q) = %t, want %t", tt.value, got, tt.want)
+			}
+		})
 	}
 }
