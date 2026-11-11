@@ -522,14 +522,6 @@ func (r *ChatRepository) EnqueueReaction(ctx context.Context, reaction domain.Re
 		return tx.Commit(ctx)
 	}
 
-	// Share the target-message lock with delete-for-everyone so a reaction
-	// cannot be enqueued concurrently with revocation of its target.
-	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2 || ':' || $3, 0))`,
-		reaction.ChatID, reaction.TargetSenderID, reaction.TargetClientMsgID)
-	if err != nil {
-		return fmt.Errorf("lock reaction target: %w", err)
-	}
-
 	var targetExists bool
 	if chatType == "DIRECT" {
 		err = tx.QueryRow(ctx, `SELECT EXISTS (
