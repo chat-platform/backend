@@ -36,6 +36,9 @@ func (*metricsOperationsStub) MarkPlayed(context.Context, domain.Receipt) error 
 func (*metricsOperationsStub) DeleteForEveryone(context.Context, domain.DeleteMessage) error {
 	return nil
 }
+func (*metricsOperationsStub) ReactToMessage(_ context.Context, request domain.ReactToMessage) (domain.ReactionAck, error) {
+	return domain.ReactionAck{ClientReactionID: request.ClientReactionID, TimestampMS: request.TimestampMS}, nil
+}
 
 func newMetricsServer(t *testing.T, operations *metricsOperationsStub) (*Server, *prometheus.Registry) {
 	t.Helper()

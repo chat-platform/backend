@@ -3,11 +3,14 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/chat-platform/backend/services/message-service/internal/domain"
 	"github.com/chat-platform/backend/services/message-service/internal/port"
 	"github.com/chat-platform/backend/shared/pkg/logging"
+	"github.com/emoj-info/go-isemoji"
 )
 
 type ChatOperations struct {
@@ -77,6 +80,28 @@ func (s *ChatOperations) DeleteForEveryone(ctx context.Context, message domain.D
 		return domain.ErrChatAccessDenied
 	}
 	return s.chatRepository.DeleteForEveryone(ctx, message, chatType)
+}
+
+func (s *ChatOperations) ReactToMessage(ctx context.Context, reaction domain.ReactToMessage) (domain.ReactionAck, error) {
+	if reaction.ReactorID == "" || reaction.DeviceID == "" || reaction.ChatID == "" ||
+		reaction.TargetSenderID == "" || reaction.TargetClientMsgID == "" ||
+		reaction.ClientReactionID == "" || reaction.TimestampMS <= 0 {
+		return domain.ReactionAck{}, domain.ErrInvalidMessage
+	}
+	if reaction.Reaction != nil && !isSingleEmoji(*reaction.Reaction) {
+		return domain.ReactionAck{}, domain.ErrInvalidMessage
+	}
+	if err := s.chatRepository.EnqueueReaction(ctx, reaction); err != nil {
+		return domain.ReactionAck{}, err
+	}
+	return domain.ReactionAck{ClientReactionID: reaction.ClientReactionID, TimestampMS: reaction.TimestampMS}, nil
+}
+
+func isSingleEmoji(value string) bool {
+	const maxEmojiBytes = 128 // 32 Unicode code points at four UTF-8 bytes each.
+	return len(value) > 0 && len(value) <= maxEmojiBytes &&
+		utf8.ValidString(value) && strings.TrimSpace(value) == value &&
+		isemoji.IsEmoji(value)
 }
 
 func (s *ChatOperations) MarkRead(ctx context.Context, receipt domain.Receipt) error {

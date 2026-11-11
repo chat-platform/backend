@@ -417,6 +417,27 @@ On crash, the dead worker's un-acked messages sit in the group's PEL;
 other workers reclaim them via `XAUTOCLAIM` (idle threshold ~60s). This
 makes push delivery at-least-once under worker crashes.
 
+### 3.6 Message reactions
+
+Reactions are `REACTION` events in the normal direct or group outbox. The
+payload identifies the target by `(chatId, targetSenderId, targetClientMsgId)`
+and carries the reactor (`senderId`), `clientReactionId`, originating-device
+timestamp in Unix milliseconds, and an emoji or JSON `null` for removal. The
+`clientReactionId` is stored as the event's `client_msg_id`; a partial direct-outbox
+unique index and the group-event `(sender_id, client_msg_id, event_type)` key
+make retries idempotent. No reaction-state row or server-generated version is
+maintained.
+
+The Message Service checks current membership, target existence, and that the
+target has not been revoked in the same transaction that queues the event. It
+uses the same recipient-device fan-out as messages, excluding the originating
+device. When no recipient device is eligible, it is acknowledged without
+persisting an event, matching message-send behavior. Clients apply the greatest
+`(timestampMs, clientReactionId)` per target and reactor, retaining a local
+tombstone for removals. A recipient that no
+longer has the target message silently ignores the event and acknowledges its
+outbox row. Reactions inherit the 30-day outbox retention limit.
+
 ---
 
 ## 4. Reconnect and Sync
@@ -743,7 +764,8 @@ per chat. Undecided.
 - [ ] Batch size and poll interval for Relay drain.
 - [x] Sync buffer location: memory vs Redis.
 - [x] Cursor-too-old handling.
-- [ ] Group admin events, reactions, edits/deletes propagation.
+- [ ] Group admin events, edits/deletes propagation.
+- [x] Reactions use existing outbox propagation and client timestamp ordering.
 - [x] Message expiry (30-day undelivered) — where enforced, how surfaced.
 - [ ] Push coalescing window size.
 - [ ] Presence fan-out: who gets notified on online/offline.

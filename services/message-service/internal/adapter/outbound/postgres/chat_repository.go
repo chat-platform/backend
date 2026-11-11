@@ -44,6 +44,16 @@ type messageRevokedPayload struct {
 	MessageTS   int64  `json:"messageTs"`
 }
 
+type reactionPayload struct {
+	ChatID            string  `json:"chatId"`
+	SenderID          string  `json:"senderId"`
+	TargetSenderID    string  `json:"targetSenderId"`
+	TargetClientMsgID string  `json:"targetClientMsgId"`
+	ClientReactionID  string  `json:"clientReactionId"`
+	TimestampMS       int64   `json:"timestampMs"`
+	Reaction          *string `json:"reaction"`
+}
+
 func (r *ChatRepository) AuthorizedChatType(ctx context.Context, chatID, senderID string) (string, error) {
 	var chatType string
 	err := r.pool.QueryRow(ctx, `
@@ -468,6 +478,138 @@ func (r *ChatRepository) DeleteForEveryone(ctx context.Context, message domain.D
 		return fmt.Errorf("commit revoke transaction: %w", err)
 	}
 	return nil
+}
+
+func (r *ChatRepository) EnqueueReaction(ctx context.Context, reaction domain.ReactToMessage) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return fmt.Errorf("begin reaction transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var chatType string
+	err = tx.QueryRow(ctx, `
+		SELECT c.type
+		FROM chat c
+		JOIN chat_membership cm ON cm.chat_id = c.chat_id AND cm.user_id = $2
+		WHERE c.chat_id = $1 AND c.deleted_at IS NULL
+		FOR KEY SHARE OF c, cm`, reaction.ChatID, reaction.ReactorID).Scan(&chatType)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && chatType != "DIRECT" && chatType != "GROUP") {
+		return domain.ErrChatAccessDenied
+	}
+	if err != nil {
+		return fmt.Errorf("authorize reaction chat membership: %w", err)
+	}
+
+	// The operation id is the idempotency key. A retry remains acknowledged
+	// even if the target is subsequently revoked.
+	var alreadyExists bool
+	if chatType == "DIRECT" {
+		err = tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM direct_outbox
+			WHERE sender_id = $1 AND client_msg_id = $2::uuid AND event_type = 'REACTION'
+		)`, reaction.ReactorID, reaction.ClientReactionID).Scan(&alreadyExists)
+	} else {
+		err = tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM group_event
+			WHERE sender_id = $1 AND client_msg_id = $2::uuid AND event_type = 'REACTION'
+		)`, reaction.ReactorID, reaction.ClientReactionID).Scan(&alreadyExists)
+	}
+	if err != nil {
+		return fmt.Errorf("check reaction idempotency: %w", err)
+	}
+	if alreadyExists {
+		return tx.Commit(ctx)
+	}
+
+	var targetExists bool
+	if chatType == "DIRECT" {
+		err = tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM direct_outbox
+			WHERE COALESCE(chat_id::text, payload::jsonb->>'chatId') = $1
+			  AND sender_id = $2 AND client_msg_id = $3::uuid AND event_type = 'NEW_MESSAGE'
+		) AND NOT EXISTS (
+			SELECT 1 FROM direct_outbox
+			WHERE COALESCE(chat_id::text, payload::jsonb->>'chatId') = $1
+			  AND event_type = 'MESSAGE_REVOKED'
+			  AND payload::jsonb->>'senderId' = $2
+			  AND payload::jsonb->>'clientMsgId' = $3
+		)`, reaction.ChatID, reaction.TargetSenderID, reaction.TargetClientMsgID).Scan(&targetExists)
+	} else {
+		err = tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM group_event
+			WHERE chat_id = $1 AND sender_id = $2 AND client_msg_id = $3::uuid AND event_type = 'NEW_MESSAGE'
+		) AND NOT EXISTS (
+			SELECT 1 FROM group_event
+			WHERE chat_id = $1 AND event_type = 'MESSAGE_REVOKED'
+			  AND payload::jsonb->>'senderId' = $2
+			  AND payload::jsonb->>'clientMsgId' = $3
+		)`, reaction.ChatID, reaction.TargetSenderID, reaction.TargetClientMsgID).Scan(&targetExists)
+	}
+	if err != nil {
+		return fmt.Errorf("verify reaction target: %w", err)
+	}
+	if !targetExists {
+		return domain.ErrInvalidMessage
+	}
+
+	payload, err := json.Marshal(reactionPayload{
+		ChatID: reaction.ChatID, SenderID: reaction.ReactorID,
+		TargetSenderID: reaction.TargetSenderID, TargetClientMsgID: reaction.TargetClientMsgID,
+		ClientReactionID: reaction.ClientReactionID, TimestampMS: reaction.TimestampMS,
+		Reaction: reaction.Reaction,
+	})
+	if err != nil {
+		return fmt.Errorf("encode reaction payload: %w", err)
+	}
+	if chatType == "GROUP" {
+		var recipients int
+		if err := tx.QueryRow(ctx, `
+			SELECT count(*)
+			FROM chat_membership cm
+			JOIN device d ON d.user_id = cm.user_id AND d.revoked_at IS NULL
+			WHERE cm.chat_id = $1 AND d.device_id <> $2`, reaction.ChatID, reaction.DeviceID).Scan(&recipients); err != nil {
+			return fmt.Errorf("count reaction recipient devices: %w", err)
+		}
+		if recipients == 0 {
+			// Match message-send semantics: acknowledge without persisting when
+			// there is no other device to receive the event.
+			return nil
+		}
+	}
+
+	if chatType == "DIRECT" {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO direct_outbox (chat_id, sender_id, client_msg_id, recipient_id, device_id, event_type, payload)
+			SELECT $1, $2, $3::uuid, cm.user_id, d.device_id, 'REACTION', $4
+			FROM chat_membership cm
+			JOIN device d ON d.user_id = cm.user_id AND d.revoked_at IS NULL
+			WHERE cm.chat_id = $1 AND d.device_id <> $5
+			ON CONFLICT (sender_id, client_msg_id, device_id) WHERE event_type = 'REACTION' DO NOTHING`,
+			reaction.ChatID, reaction.ReactorID, reaction.ClientReactionID, string(payload), reaction.DeviceID)
+	} else {
+		var eventID int64
+		err = tx.QueryRow(ctx, `
+			INSERT INTO group_event (chat_id, sender_id, client_msg_id, event_type, payload)
+			VALUES ($1, $2, $3::uuid, 'REACTION', $4)
+			ON CONFLICT (sender_id, client_msg_id, event_type) DO NOTHING
+			RETURNING event_id`, reaction.ChatID, reaction.ReactorID, reaction.ClientReactionID, string(payload)).Scan(&eventID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return tx.Commit(ctx)
+		}
+		if err == nil {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO group_outbox (event_id, recipient_id, device_id)
+				SELECT $1, cm.user_id, d.device_id
+				FROM chat_membership cm
+				JOIN device d ON d.user_id = cm.user_id AND d.revoked_at IS NULL
+				WHERE cm.chat_id = $2 AND d.device_id <> $3`, eventID, reaction.ChatID, reaction.DeviceID)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("enqueue reaction event: %w", err)
+	}
+	return tx.Commit(ctx)
 }
 
 func encodeMessagePayload(message domain.SendMessage, senderPhone string) (int64, []byte, error) {

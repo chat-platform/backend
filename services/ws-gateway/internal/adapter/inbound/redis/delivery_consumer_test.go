@@ -105,6 +105,37 @@ func TestDecodeReceiptDeliveryPreservesReceiptStatus(t *testing.T) {
 		t.Fatalf("receipt payload=%+v", payload)
 	}
 }
+
+func TestDecodeReactionDeliveryPreservesNullRemovalAndOutboxIdentity(t *testing.T) {
+	message := redis.XMessage{ID: "3-0", Values: map[string]any{
+		"outbox_id": "91", "outbox_type": "group", "event_type": "REACTION", "device_id": "device", "conn_id": "conn",
+		"payload": `{"chatId":"chat","senderId":"reactor","targetSenderId":"author","targetClientMsgId":"message","clientReactionId":"operation","timestampMs":123,"reaction":null}`,
+	}}
+	delivery, err := decodeDelivery(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivery.envelope.Type != wsframe.TypeReactionRecv || delivery.envelope.TS != 123 {
+		t.Fatalf("reaction envelope=%+v", delivery.envelope)
+	}
+	var payload wsframe.ReactionEventPayload
+	if err := json.Unmarshal(delivery.envelope.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ChatID != "chat" || payload.SenderID != "reactor" || payload.TargetSenderID != "author" ||
+		payload.TargetClientMsgID != "message" || payload.ClientReactionID != "operation" || payload.TimestampMS != 123 ||
+		payload.Reaction != nil || payload.OutboxType != wsframe.OutboxTypeGroup || payload.OutboxID != 91 {
+		t.Fatalf("reaction payload=%+v", payload)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(encoded, &raw); err != nil || raw["reaction"] != nil {
+		t.Fatalf("null reaction was not preserved: %s err=%v", encoded, err)
+	}
+}
 func TestDecodeDeliveryRejectsMissingFields(t *testing.T) {
 	if _, err := decodeDelivery(redis.XMessage{Values: map[string]any{}}); err == nil {
 		t.Fatal("expected malformed stream event error")

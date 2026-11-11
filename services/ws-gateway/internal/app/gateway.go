@@ -223,6 +223,19 @@ func (g *Gateway) Send(ctx context.Context, identity domain.Identity, command do
 	return ack, nil
 }
 
+func (g *Gateway) ReactToMessage(ctx context.Context, identity domain.Identity, command domain.ReactToMessage) (domain.ReactionAck, error) {
+	if command.ChatID == "" || command.TargetSenderID == "" || command.TargetClientMsgID == "" ||
+		command.ClientReactionID == "" || command.TimestampMS <= 0 ||
+		(command.Reaction != nil && strings.TrimSpace(*command.Reaction) == "") {
+		return domain.ReactionAck{}, domain.ErrInvalidMessage
+	}
+	ack, err := g.messages.ReactToMessage(ctx, identity.UserID, identity.DeviceID, command)
+	if err != nil {
+		return domain.ReactionAck{}, fmt.Errorf("react to message: %w", err)
+	}
+	return ack, nil
+}
+
 func (g *Gateway) MarkDelivered(ctx context.Context, identity domain.Identity, receipt wsframe.DeliveryReceiptPayload) error {
 	if receipt.OutboxID <= 0 || (receipt.OutboxType != wsframe.OutboxTypeDirect && receipt.OutboxType != wsframe.OutboxTypeGroup) || receipt.ChatID == "" || receipt.MessageSenderID == "" || receipt.ClientMsgID == "" {
 		return domain.ErrInvalidMessage
