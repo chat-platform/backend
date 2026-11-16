@@ -532,8 +532,8 @@ func (r *ChatRepository) EnqueueReaction(ctx context.Context, reaction domain.Re
 			SELECT 1 FROM direct_outbox
 			WHERE COALESCE(chat_id::text, payload::jsonb->>'chatId') = $1
 			  AND event_type = 'MESSAGE_REVOKED'
-			  AND payload::jsonb->>'senderId' = $2
-			  AND payload::jsonb->>'clientMsgId' = $3
+			  AND payload::jsonb->>'senderId' = $2::text
+			  AND payload::jsonb->>'clientMsgId' = $3::text
 		)`, reaction.ChatID, reaction.TargetSenderID, reaction.TargetClientMsgID).Scan(&targetExists)
 	} else {
 		err = tx.QueryRow(ctx, `SELECT EXISTS (
@@ -542,8 +542,8 @@ func (r *ChatRepository) EnqueueReaction(ctx context.Context, reaction domain.Re
 		) AND NOT EXISTS (
 			SELECT 1 FROM group_event
 			WHERE chat_id = $1 AND event_type = 'MESSAGE_REVOKED'
-			  AND payload::jsonb->>'senderId' = $2
-			  AND payload::jsonb->>'clientMsgId' = $3
+			  AND payload::jsonb->>'senderId' = $2::text
+			  AND payload::jsonb->>'clientMsgId' = $3::text
 		)`, reaction.ChatID, reaction.TargetSenderID, reaction.TargetClientMsgID).Scan(&targetExists)
 	}
 	if err != nil {
