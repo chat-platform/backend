@@ -6,6 +6,7 @@ require (
 	github.com/bufbuild/protovalidate-go v0.10.0
 	github.com/chat-platform/backend/shared/gen v0.0.0
 	github.com/chat-platform/backend/shared/pkg v0.0.0
+	github.com/emoj-info/go-isemoji v0.0.0-20250426213403-265ca6c04506
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/prometheus/client_golang v1.23.2

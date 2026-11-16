@@ -24,6 +24,7 @@ const (
 	MessageService_MarkRead_FullMethodName          = "/message.v1.MessageService/MarkRead"
 	MessageService_MarkPlayed_FullMethodName        = "/message.v1.MessageService/MarkPlayed"
 	MessageService_DeleteForEveryone_FullMethodName = "/message.v1.MessageService/DeleteForEveryone"
+	MessageService_ReactToMessage_FullMethodName    = "/message.v1.MessageService/ReactToMessage"
 )
 
 // MessageServiceClient is the client API for MessageService service.
@@ -38,6 +39,7 @@ type MessageServiceClient interface {
 	MarkRead(ctx context.Context, in *MarkReadRequest, opts ...grpc.CallOption) (*MarkReadResponse, error)
 	MarkPlayed(ctx context.Context, in *MarkPlayedRequest, opts ...grpc.CallOption) (*MarkPlayedResponse, error)
 	DeleteForEveryone(ctx context.Context, in *DeleteForEveryoneRequest, opts ...grpc.CallOption) (*DeleteForEveryoneResponse, error)
+	ReactToMessage(ctx context.Context, in *ReactToMessageRequest, opts ...grpc.CallOption) (*ReactToMessageResponse, error)
 }
 
 type messageServiceClient struct {
@@ -98,6 +100,16 @@ func (c *messageServiceClient) DeleteForEveryone(ctx context.Context, in *Delete
 	return out, nil
 }
 
+func (c *messageServiceClient) ReactToMessage(ctx context.Context, in *ReactToMessageRequest, opts ...grpc.CallOption) (*ReactToMessageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReactToMessageResponse)
+	err := c.cc.Invoke(ctx, MessageService_ReactToMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MessageServiceServer is the server API for MessageService service.
 // All implementations must embed UnimplementedMessageServiceServer
 // for forward compatibility.
@@ -110,6 +122,7 @@ type MessageServiceServer interface {
 	MarkRead(context.Context, *MarkReadRequest) (*MarkReadResponse, error)
 	MarkPlayed(context.Context, *MarkPlayedRequest) (*MarkPlayedResponse, error)
 	DeleteForEveryone(context.Context, *DeleteForEveryoneRequest) (*DeleteForEveryoneResponse, error)
+	ReactToMessage(context.Context, *ReactToMessageRequest) (*ReactToMessageResponse, error)
 	mustEmbedUnimplementedMessageServiceServer()
 }
 
@@ -134,6 +147,9 @@ func (UnimplementedMessageServiceServer) MarkPlayed(context.Context, *MarkPlayed
 }
 func (UnimplementedMessageServiceServer) DeleteForEveryone(context.Context, *DeleteForEveryoneRequest) (*DeleteForEveryoneResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteForEveryone not implemented")
+}
+func (UnimplementedMessageServiceServer) ReactToMessage(context.Context, *ReactToMessageRequest) (*ReactToMessageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReactToMessage not implemented")
 }
 func (UnimplementedMessageServiceServer) mustEmbedUnimplementedMessageServiceServer() {}
 func (UnimplementedMessageServiceServer) testEmbeddedByValue()                        {}
@@ -246,6 +262,24 @@ func _MessageService_DeleteForEveryone_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessageService_ReactToMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReactToMessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessageServiceServer).ReactToMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessageService_ReactToMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessageServiceServer).ReactToMessage(ctx, req.(*ReactToMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MessageService_ServiceDesc is the grpc.ServiceDesc for MessageService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -272,6 +306,10 @@ var MessageService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteForEveryone",
 			Handler:    _MessageService_DeleteForEveryone_Handler,
+		},
+		{
+			MethodName: "ReactToMessage",
+			Handler:    _MessageService_ReactToMessage_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -22,6 +22,7 @@ type ChatOperations interface {
 	MarkRead(context.Context, domain.Receipt) error
 	MarkPlayed(context.Context, domain.Receipt) error
 	DeleteForEveryone(context.Context, domain.DeleteMessage) error
+	ReactToMessage(context.Context, domain.ReactToMessage) (domain.ReactionAck, error)
 }
 
 type Server struct {
@@ -34,6 +35,32 @@ type Server struct {
 
 func Register(server *grpc.Server, operations ChatOperations, validator protovalidate.Validator, logger logging.Logger, metrics *servicemetrics.Metrics) {
 	messagev1.RegisterMessageServiceServer(server, &Server{operations: operations, validator: validator, logger: logger, metrics: metrics})
+}
+
+func (s *Server) ReactToMessage(ctx context.Context, request *messagev1.ReactToMessageRequest) (*messagev1.ReactToMessageResponse, error) {
+	if request == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	if err := s.validator.Validate(request); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	ack, err := s.operations.ReactToMessage(ctx, domain.ReactToMessage{
+		ReactorID: request.GetReactorId(), DeviceID: request.GetDeviceId(), ChatID: request.GetChatId(),
+		TargetSenderID: request.GetTargetSenderId(), TargetClientMsgID: request.GetTargetClientMsgId(),
+		ClientReactionID: request.GetClientReactionId(), TimestampMS: request.GetTimestampMs(),
+		Reaction: request.Reaction,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidMessage) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		if errors.Is(err, domain.ErrChatAccessDenied) {
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+		}
+		s.logger.Error(ctx, "could not persist reaction", "error", err, "chat_id", request.GetChatId(), "reactor_id", request.GetReactorId(), "client_reaction_id", request.GetClientReactionId())
+		return nil, status.Error(codes.Internal, "could not persist reaction")
+	}
+	return &messagev1.ReactToMessageResponse{ClientReactionId: ack.ClientReactionID, TimestampMs: ack.TimestampMS}, nil
 }
 
 func (s *Server) SendMessage(ctx context.Context, request *messagev1.SendMessageRequest) (*messagev1.SendMessageAck, error) {

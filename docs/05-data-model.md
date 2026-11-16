@@ -93,6 +93,7 @@ delivered_at
 attempt_count           -- delivery attempts, including initial WS dispatch; capped at 10
 
 -- Partial UNIQUE (sender_id, client_msg_id, device_id) WHERE event_type = 'NEW_MESSAGE'
+-- Partial UNIQUE (sender_id, client_msg_id, device_id) WHERE event_type = 'REACTION'
 -- Idempotency: on retry, the insert conflicts, and Message Service
 -- returns the same ack without re-inserting.
 -- Granularity: one row per (message, recipient device) in a DIRECT chat.
@@ -135,7 +136,7 @@ event_type
 payload        -- the wire payload (content included)
 created_at
 
--- UNIQUE (sender_id, client_msg_id)  -- for idempotency
+-- UNIQUE (sender_id, client_msg_id, event_type)  -- for event-scoped idempotency
 -- One row per group event. Shared by all recipient devices.
 -- This is where the payload lives, so it isn't duplicated per device.
 

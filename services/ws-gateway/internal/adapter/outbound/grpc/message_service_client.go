@@ -27,6 +27,22 @@ func (s *messageServiceClient) SendMessage(ctx context.Context, command domain.S
 	return domain.MessageAck{ClientMsgID: response.GetClientMsgId(), TimestampMS: response.GetTsUnixMilli()}, nil
 }
 
+func (s *messageServiceClient) ReactToMessage(ctx context.Context, reactorID, deviceID string, command domain.ReactToMessage) (domain.ReactionAck, error) {
+	request := &messagev1.ReactToMessageRequest{
+		ReactorId: reactorID, DeviceId: deviceID, ChatId: command.ChatID,
+		TargetSenderId: command.TargetSenderID, TargetClientMsgId: command.TargetClientMsgID,
+		ClientReactionId: command.ClientReactionID, TimestampMs: command.TimestampMS,
+	}
+	if command.Reaction != nil {
+		request.Reaction = command.Reaction
+	}
+	response, err := s.client.ReactToMessage(ctx, request)
+	if err != nil {
+		return domain.ReactionAck{}, fmt.Errorf("message service ReactToMessage RPC: %w", err)
+	}
+	return domain.ReactionAck{ClientReactionID: response.GetClientReactionId(), TimestampMS: response.GetTimestampMs()}, nil
+}
+
 func (s *messageServiceClient) MarkDelivered(ctx context.Context, deviceID, receiptSenderID, chatID, messageSenderID, clientMsgID, outboxType string, outboxID int64) error {
 	_, err := s.client.MarkDelivered(ctx, &messagev1.MarkDeliveredRequest{DeviceId: deviceID, ReceiptSenderId: receiptSenderID, ChatId: chatID, MessageSenderId: messageSenderID, ClientMsgId: clientMsgID, OutboxType: outboxType, OutboxId: outboxID})
 	if err != nil {

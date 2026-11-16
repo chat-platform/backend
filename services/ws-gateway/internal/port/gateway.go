@@ -9,6 +9,7 @@ import (
 
 type MessageService interface {
 	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
+	ReactToMessage(context.Context, string, string, domain.ReactToMessage) (domain.ReactionAck, error)
 	MarkDelivered(context.Context, string, string, string, string, string, string, int64) error
 	MarkRead(context.Context, string, string, string, string, string) error
 	MarkPlayed(context.Context, string, string, string, string, string) error

@@ -32,6 +32,7 @@ type Operations interface {
 	Refresh(context.Context, string, string, domain.Connection) (bool, error)
 	Unregister(context.Context, string, string, domain.Connection) error
 	Send(context.Context, domain.Identity, domain.SendMessage) (domain.MessageAck, error)
+	ReactToMessage(context.Context, domain.Identity, domain.ReactToMessage) (domain.ReactionAck, error)
 	MarkDelivered(context.Context, domain.Identity, wsframe.DeliveryReceiptPayload) error
 	MarkRead(context.Context, domain.Identity, wsframe.ReadReceiptPayload) error
 	MarkPlayed(context.Context, domain.Identity, wsframe.PlayedReceiptPayload) error
@@ -285,6 +286,39 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				continue
 			}
 			if err := socket.WriteJSON(wsframe.Envelope{Type: wsframe.TypeMessageDeleteAck, ID: envelope.ID, TS: time.Now().UnixMilli(), Payload: json.RawMessage(`{}`)}); err != nil {
+				return
+			}
+			continue
+		}
+		if envelope.Type == wsframe.TypeReaction {
+			var request wsframe.ReactionPayload
+			if len(envelope.Payload) == 0 || json.Unmarshal(envelope.Payload, &request) != nil ||
+				strings.TrimSpace(envelope.ID) == "" || strings.TrimSpace(request.ChatID) == "" ||
+				strings.TrimSpace(request.TargetSenderID) == "" || strings.TrimSpace(request.TargetClientMsgID) == "" ||
+				request.TimestampMS <= 0 || len(request.Reaction) == 0 {
+				s.writeError(ctx, socket, envelope.ID, "invalid_reaction", "reaction requires an id, chatId, target message identity, timestampMs, and reaction (or null)")
+				continue
+			}
+			if _, err := uuid.Parse(envelope.ID); err != nil {
+				s.writeError(ctx, socket, envelope.ID, "invalid_reaction", "reaction id must be a UUID")
+				continue
+			}
+			var reaction *string
+			if err := json.Unmarshal(request.Reaction, &reaction); err != nil {
+				s.writeError(ctx, socket, envelope.ID, "invalid_reaction", "reaction must be an emoji string or null")
+				continue
+			}
+			ack, err := s.operations.ReactToMessage(ctx, identity, domain.ReactToMessage{
+				ChatID: request.ChatID, TargetSenderID: request.TargetSenderID,
+				TargetClientMsgID: request.TargetClientMsgID, ClientReactionID: envelope.ID,
+				TimestampMS: request.TimestampMS, Reaction: reaction,
+			})
+			if err != nil {
+				s.logOperationFailure(ctx, "react to message", err, "request_id", envelope.ID, "user_id", identity.UserID, "device_id", identity.DeviceID, "chat_id", request.ChatID)
+				s.writeError(ctx, socket, envelope.ID, "reaction_failed", "reaction was not accepted")
+				continue
+			}
+			if err := socket.WriteJSON(wsframe.Envelope{Type: wsframe.TypeReactionAck, ID: envelope.ID, TS: ack.TimestampMS, Payload: marshalPayload(ctx, s.logger, wsframe.ReactionAckPayload{ClientReactionID: ack.ClientReactionID, TimestampMS: ack.TimestampMS})}); err != nil {
 				return
 			}
 			continue

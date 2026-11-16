@@ -607,6 +607,160 @@ func (*DeleteForEveryoneResponse) Descriptor() ([]byte, []int) {
 	return file_message_v1_message_proto_rawDescGZIP(), []int{9}
 }
 
+type ReactToMessageRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ReactorId         string                 `protobuf:"bytes,1,opt,name=reactor_id,json=reactorId,proto3" json:"reactor_id,omitempty"`
+	DeviceId          string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	ChatId            string                 `protobuf:"bytes,3,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	TargetSenderId    string                 `protobuf:"bytes,4,opt,name=target_sender_id,json=targetSenderId,proto3" json:"target_sender_id,omitempty"`
+	TargetClientMsgId string                 `protobuf:"bytes,5,opt,name=target_client_msg_id,json=targetClientMsgId,proto3" json:"target_client_msg_id,omitempty"`
+	// Client-generated idempotency key for this reaction change.
+	ClientReactionId string `protobuf:"bytes,6,opt,name=client_reaction_id,json=clientReactionId,proto3" json:"client_reaction_id,omitempty"`
+	TimestampMs      int64  `protobuf:"varint,7,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
+	// Absent means removal. A present value must be a reaction emoji.
+	Reaction      *string `protobuf:"bytes,8,opt,name=reaction,proto3,oneof" json:"reaction,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReactToMessageRequest) Reset() {
+	*x = ReactToMessageRequest{}
+	mi := &file_message_v1_message_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReactToMessageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReactToMessageRequest) ProtoMessage() {}
+
+func (x *ReactToMessageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_message_v1_message_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReactToMessageRequest.ProtoReflect.Descriptor instead.
+func (*ReactToMessageRequest) Descriptor() ([]byte, []int) {
+	return file_message_v1_message_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ReactToMessageRequest) GetReactorId() string {
+	if x != nil {
+		return x.ReactorId
+	}
+	return ""
+}
+
+func (x *ReactToMessageRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *ReactToMessageRequest) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *ReactToMessageRequest) GetTargetSenderId() string {
+	if x != nil {
+		return x.TargetSenderId
+	}
+	return ""
+}
+
+func (x *ReactToMessageRequest) GetTargetClientMsgId() string {
+	if x != nil {
+		return x.TargetClientMsgId
+	}
+	return ""
+}
+
+func (x *ReactToMessageRequest) GetClientReactionId() string {
+	if x != nil {
+		return x.ClientReactionId
+	}
+	return ""
+}
+
+func (x *ReactToMessageRequest) GetTimestampMs() int64 {
+	if x != nil {
+		return x.TimestampMs
+	}
+	return 0
+}
+
+func (x *ReactToMessageRequest) GetReaction() string {
+	if x != nil && x.Reaction != nil {
+		return *x.Reaction
+	}
+	return ""
+}
+
+type ReactToMessageResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ClientReactionId string                 `protobuf:"bytes,1,opt,name=client_reaction_id,json=clientReactionId,proto3" json:"client_reaction_id,omitempty"`
+	TimestampMs      int64                  `protobuf:"varint,2,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ReactToMessageResponse) Reset() {
+	*x = ReactToMessageResponse{}
+	mi := &file_message_v1_message_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReactToMessageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReactToMessageResponse) ProtoMessage() {}
+
+func (x *ReactToMessageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_message_v1_message_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReactToMessageResponse.ProtoReflect.Descriptor instead.
+func (*ReactToMessageResponse) Descriptor() ([]byte, []int) {
+	return file_message_v1_message_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ReactToMessageResponse) GetClientReactionId() string {
+	if x != nil {
+		return x.ClientReactionId
+	}
+	return ""
+}
+
+func (x *ReactToMessageResponse) GetTimestampMs() int64 {
+	if x != nil {
+		return x.TimestampMs
+	}
+	return 0
+}
+
 var File_message_v1_message_proto protoreflect.FileDescriptor
 
 const file_message_v1_message_proto_rawDesc = "" +
@@ -673,14 +827,35 @@ const file_message_v1_message_proto_rawDesc = "" +
 	"\achat_id\x18\x03 \x01(\tB\x0f\xbaH\fr\n" +
 	"\x10\x012\x06.*\\S.*R\x06chatId\x12\x84\x01\n" +
 	"\rclient_msg_id\x18\x04 \x01(\tB`\xbaH]r[2V^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$\xb0\x01\x01R\vclientMsgId\"\x1b\n" +
-	"\x19DeleteForEveryoneResponse2\xa7\x03\n" +
+	"\x19DeleteForEveryoneResponse\"\xa2\x03\n" +
+	"\x15ReactToMessageRequest\x12)\n" +
+	"\n" +
+	"reactor_id\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\xb0\x01\x01R\treactorId\x12'\n" +
+	"\tdevice_id\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\xb0\x01\x01R\bdeviceId\x12#\n" +
+	"\achat_id\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\xb0\x01\x01R\x06chatId\x124\n" +
+	"\x10target_sender_id\x18\x04 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\xb0\x01\x01R\x0etargetSenderId\x12;\n" +
+	"\x14target_client_msg_id\x18\x05 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\xb0\x01\x01R\x11targetClientMsgId\x128\n" +
+	"\x12client_reaction_id\x18\x06 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\xb0\x01\x01R\x10clientReactionId\x12*\n" +
+	"\ftimestamp_ms\x18\a \x01(\x03B\a\xbaH\x04\"\x02 \x00R\vtimestampMs\x12*\n" +
+	"\breaction\x18\b \x01(\tB\t\xbaH\x06r\x04\x10\x01( H\x00R\breaction\x88\x01\x01B\v\n" +
+	"\t_reaction\"i\n" +
+	"\x16ReactToMessageResponse\x12,\n" +
+	"\x12client_reaction_id\x18\x01 \x01(\tR\x10clientReactionId\x12!\n" +
+	"\ftimestamp_ms\x18\x02 \x01(\x03R\vtimestampMs2\x80\x04\n" +
 	"\x0eMessageService\x12I\n" +
 	"\vSendMessage\x12\x1e.message.v1.SendMessageRequest\x1a\x1a.message.v1.SendMessageAck\x12T\n" +
 	"\rMarkDelivered\x12 .message.v1.MarkDeliveredRequest\x1a!.message.v1.MarkDeliveredResponse\x12E\n" +
 	"\bMarkRead\x12\x1b.message.v1.MarkReadRequest\x1a\x1c.message.v1.MarkReadResponse\x12K\n" +
 	"\n" +
 	"MarkPlayed\x12\x1d.message.v1.MarkPlayedRequest\x1a\x1e.message.v1.MarkPlayedResponse\x12`\n" +
-	"\x11DeleteForEveryone\x12$.message.v1.DeleteForEveryoneRequest\x1a%.message.v1.DeleteForEveryoneResponseBBZ@github.com/chat-platform/backend/shared/gen/message/v1;messagev1b\x06proto3"
+	"\x11DeleteForEveryone\x12$.message.v1.DeleteForEveryoneRequest\x1a%.message.v1.DeleteForEveryoneResponse\x12W\n" +
+	"\x0eReactToMessage\x12!.message.v1.ReactToMessageRequest\x1a\".message.v1.ReactToMessageResponseBBZ@github.com/chat-platform/backend/shared/gen/message/v1;messagev1b\x06proto3"
 
 var (
 	file_message_v1_message_proto_rawDescOnce sync.Once
@@ -694,7 +869,7 @@ func file_message_v1_message_proto_rawDescGZIP() []byte {
 	return file_message_v1_message_proto_rawDescData
 }
 
-var file_message_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_message_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_message_v1_message_proto_goTypes = []any{
 	(*SendMessageRequest)(nil),        // 0: message.v1.SendMessageRequest
 	(*SendMessageAck)(nil),            // 1: message.v1.SendMessageAck
@@ -706,23 +881,27 @@ var file_message_v1_message_proto_goTypes = []any{
 	(*MarkPlayedResponse)(nil),        // 7: message.v1.MarkPlayedResponse
 	(*DeleteForEveryoneRequest)(nil),  // 8: message.v1.DeleteForEveryoneRequest
 	(*DeleteForEveryoneResponse)(nil), // 9: message.v1.DeleteForEveryoneResponse
+	(*ReactToMessageRequest)(nil),     // 10: message.v1.ReactToMessageRequest
+	(*ReactToMessageResponse)(nil),    // 11: message.v1.ReactToMessageResponse
 }
 var file_message_v1_message_proto_depIdxs = []int32{
-	0, // 0: message.v1.MessageService.SendMessage:input_type -> message.v1.SendMessageRequest
-	2, // 1: message.v1.MessageService.MarkDelivered:input_type -> message.v1.MarkDeliveredRequest
-	4, // 2: message.v1.MessageService.MarkRead:input_type -> message.v1.MarkReadRequest
-	6, // 3: message.v1.MessageService.MarkPlayed:input_type -> message.v1.MarkPlayedRequest
-	8, // 4: message.v1.MessageService.DeleteForEveryone:input_type -> message.v1.DeleteForEveryoneRequest
-	1, // 5: message.v1.MessageService.SendMessage:output_type -> message.v1.SendMessageAck
-	3, // 6: message.v1.MessageService.MarkDelivered:output_type -> message.v1.MarkDeliveredResponse
-	5, // 7: message.v1.MessageService.MarkRead:output_type -> message.v1.MarkReadResponse
-	7, // 8: message.v1.MessageService.MarkPlayed:output_type -> message.v1.MarkPlayedResponse
-	9, // 9: message.v1.MessageService.DeleteForEveryone:output_type -> message.v1.DeleteForEveryoneResponse
-	5, // [5:10] is the sub-list for method output_type
-	0, // [0:5] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0,  // 0: message.v1.MessageService.SendMessage:input_type -> message.v1.SendMessageRequest
+	2,  // 1: message.v1.MessageService.MarkDelivered:input_type -> message.v1.MarkDeliveredRequest
+	4,  // 2: message.v1.MessageService.MarkRead:input_type -> message.v1.MarkReadRequest
+	6,  // 3: message.v1.MessageService.MarkPlayed:input_type -> message.v1.MarkPlayedRequest
+	8,  // 4: message.v1.MessageService.DeleteForEveryone:input_type -> message.v1.DeleteForEveryoneRequest
+	10, // 5: message.v1.MessageService.ReactToMessage:input_type -> message.v1.ReactToMessageRequest
+	1,  // 6: message.v1.MessageService.SendMessage:output_type -> message.v1.SendMessageAck
+	3,  // 7: message.v1.MessageService.MarkDelivered:output_type -> message.v1.MarkDeliveredResponse
+	5,  // 8: message.v1.MessageService.MarkRead:output_type -> message.v1.MarkReadResponse
+	7,  // 9: message.v1.MessageService.MarkPlayed:output_type -> message.v1.MarkPlayedResponse
+	9,  // 10: message.v1.MessageService.DeleteForEveryone:output_type -> message.v1.DeleteForEveryoneResponse
+	11, // 11: message.v1.MessageService.ReactToMessage:output_type -> message.v1.ReactToMessageResponse
+	6,  // [6:12] is the sub-list for method output_type
+	0,  // [0:6] is the sub-list for method input_type
+	0,  // [0:0] is the sub-list for extension type_name
+	0,  // [0:0] is the sub-list for extension extendee
+	0,  // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_message_v1_message_proto_init() }
@@ -730,13 +909,14 @@ func file_message_v1_message_proto_init() {
 	if File_message_v1_message_proto != nil {
 		return
 	}
+	file_message_v1_message_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_message_v1_message_proto_rawDesc), len(file_message_v1_message_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

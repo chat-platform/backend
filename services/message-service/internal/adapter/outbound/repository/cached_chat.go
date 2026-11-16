@@ -109,6 +109,10 @@ func (r *CachedChatRepository) DeleteForEveryone(ctx context.Context, message do
 	return r.store.DeleteForEveryone(ctx, message, chatType)
 }
 
+func (r *CachedChatRepository) EnqueueReaction(ctx context.Context, reaction domain.ReactToMessage) error {
+	return r.store.EnqueueReaction(ctx, reaction)
+}
+
 func (r *CachedChatRepository) MarkDelivered(ctx context.Context, receipt domain.Receipt) (domain.DeliveryAck, error) {
 	return r.store.MarkDelivered(ctx, receipt)
 }

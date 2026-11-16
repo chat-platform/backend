@@ -12,6 +12,9 @@ type messageSenderFunc func(context.Context, domain.SendMessage) (domain.Message
 func (f messageSenderFunc) SendMessage(ctx context.Context, command domain.SendMessage) (domain.MessageAck, error) {
 	return f(ctx, command)
 }
+func (messageSenderFunc) ReactToMessage(context.Context, string, string, domain.ReactToMessage) (domain.ReactionAck, error) {
+	return domain.ReactionAck{}, nil
+}
 func (messageSenderFunc) MarkDelivered(context.Context, string, string, string, string, string, string, int64) error {
 	return nil
 }

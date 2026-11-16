@@ -243,6 +243,9 @@ func (f *fakeOperations) MarkPlayed(context.Context, domain.Identity, wsframe.Pl
 func (f *fakeOperations) DeleteForEveryone(context.Context, domain.Identity, wsframe.MessageDeletePayload) error {
 	return nil
 }
+func (f *fakeOperations) ReactToMessage(_ context.Context, _ domain.Identity, request domain.ReactToMessage) (domain.ReactionAck, error) {
+	return domain.ReactionAck{ClientReactionID: request.ClientReactionID, TimestampMS: request.TimestampMS}, nil
+}
 
 func TestConnectionAuthSendAndAck(t *testing.T) {
 	logger, err := logging.New(io.Discard, logging.Config{})

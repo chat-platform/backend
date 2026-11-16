@@ -201,6 +201,22 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 			return decodedDelivery{}, err
 		}
 		envelope = wsframe.Envelope{Type: wsframe.TypeMessageRevoked, TS: payload.TS, Payload: body}
+	case "REACTION":
+		var payload wsframe.ReactionEventPayload
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return decodedDelivery{}, err
+		}
+		if payload.ChatID == "" || payload.SenderID == "" || payload.TargetSenderID == "" ||
+			payload.TargetClientMsgID == "" || payload.ClientReactionID == "" || payload.TimestampMS <= 0 {
+			return decodedDelivery{}, fmt.Errorf("reaction payload is missing identity or timestamp")
+		}
+		payload.OutboxID = outboxID
+		payload.OutboxType = wsframe.OutboxType(typ)
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return decodedDelivery{}, err
+		}
+		envelope = wsframe.Envelope{Type: wsframe.TypeReactionRecv, TS: payload.TimestampMS, Payload: body}
 	default:
 		return decodedDelivery{}, fmt.Errorf("unsupported outbox event type %q", eventType)
 	}

@@ -23,6 +23,20 @@ type SendMessage struct {
 	Content     string
 }
 
+type ReactToMessage struct {
+	ChatID            string
+	TargetSenderID    string
+	TargetClientMsgID string
+	ClientReactionID  string
+	TimestampMS       int64
+	Reaction          *string
+}
+
+type ReactionAck struct {
+	ClientReactionID string
+	TimestampMS      int64
+}
+
 type MessageAck struct {
 	ClientMsgID string
 	TimestampMS int64

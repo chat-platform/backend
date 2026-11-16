@@ -19,6 +19,9 @@ const (
 	TypeMessageRevoked      = "message.revoked"
 	TypeMessageDelete       = "message.delete_for_everyone"
 	TypeMessageDeleteAck    = "message.delete_for_everyone.ack"
+	TypeReaction            = "reaction"
+	TypeReactionAck         = "reaction.ack"
+	TypeReactionRecv        = "reaction.recv"
 	TypeReceiptStatus       = "receipt.status"
 	TypeSyncReady           = "sync.ready"
 	TypeReceiptDelivered    = "receipt.delivered"
@@ -78,6 +81,31 @@ type MessageRevokedPayload struct {
 type MessageDeletePayload struct {
 	ChatID      string `json:"chatId"`
 	ClientMsgID string `json:"clientMsgId"`
+}
+
+type ReactionPayload struct {
+	ChatID            string          `json:"chatId"`
+	TargetSenderID    string          `json:"targetSenderId"`
+	TargetClientMsgID string          `json:"targetClientMsgId"`
+	TimestampMS       int64           `json:"timestampMs"`
+	Reaction          json.RawMessage `json:"reaction"`
+}
+
+type ReactionEventPayload struct {
+	ChatID            string     `json:"chatId"`
+	SenderID          string     `json:"senderId"`
+	TargetSenderID    string     `json:"targetSenderId"`
+	TargetClientMsgID string     `json:"targetClientMsgId"`
+	ClientReactionID  string     `json:"clientReactionId"`
+	TimestampMS       int64      `json:"timestampMs"`
+	Reaction          *string    `json:"reaction"`
+	OutboxType        OutboxType `json:"outboxType,omitempty"`
+	OutboxID          int64      `json:"outboxId,omitempty"`
+}
+
+type ReactionAckPayload struct {
+	ClientReactionID string `json:"clientReactionId"`
+	TimestampMS      int64  `json:"timestampMs"`
 }
 
 type DeliveryReceiptPayload struct {
