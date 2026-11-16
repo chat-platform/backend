@@ -16,6 +16,14 @@ func NewMessageServiceClient(client messagev1.MessageServiceClient) *messageServ
 	return &messageServiceClient{client: client}
 }
 
+func (s *messageServiceClient) ResolveDirectChatPeer(ctx context.Context, chatID, userID string) (string, error) {
+	response, err := s.client.ResolveDirectChat(ctx, &messagev1.ResolveDirectChatRequest{ChatId: chatID, UserId: userID})
+	if err != nil {
+		return "", fmt.Errorf("message service ResolveDirectChat RPC: %w", err)
+	}
+	return response.GetPeerUserId(), nil
+}
+
 func (s *messageServiceClient) SendMessage(ctx context.Context, command domain.SendMessage) (domain.MessageAck, error) {
 	response, err := s.client.SendMessage(ctx, &messagev1.SendMessageRequest{
 		SenderId: command.SenderID, DeviceId: command.DeviceID, ChatId: command.ChatID,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/chat-platform/backend/services/ws-gateway/internal/config"
 	"github.com/chat-platform/backend/services/ws-gateway/internal/domain"
+	wsmetrics "github.com/chat-platform/backend/services/ws-gateway/internal/metrics"
 	"github.com/chat-platform/backend/shared/pkg/logging"
 	"github.com/chat-platform/backend/shared/pkg/wsframe"
 	"github.com/google/uuid"
@@ -41,6 +42,8 @@ type Operations interface {
 	UnsubscribePresence(context.Context, string, string) error
 	GetPresence(context.Context, string, string) (domain.Presence, error)
 	PresenceExpired(context.Context, string) error
+	SignalCall(context.Context, domain.Identity, string, []byte) error
+	CallConnectionLost(context.Context, domain.Identity) error
 }
 
 type Server struct {
@@ -49,6 +52,7 @@ type Server struct {
 	logger            logging.Logger
 	upgrader          websocket.Upgrader
 	heartbeatInterval time.Duration
+	metrics           *wsmetrics.Metrics
 }
 
 func NewServer(operations Operations, logger logging.Logger, hub *Hub, allowedOrigins ...string) *Server {
@@ -79,6 +83,8 @@ func NewServer(operations Operations, logger logging.Logger, hub *Hub, allowedOr
 		},
 	}
 }
+
+func (s *Server) SetMetrics(metrics *wsmetrics.Metrics) { s.metrics = metrics }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	conn, err := s.upgrader.Upgrade(writer, request, nil)
@@ -123,11 +129,14 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		writeClose(conn, s.logger, request.Context(), websocket.CloseInternalServerErr, "connection registration failed")
 		return
 	}
-	s.hub.RegisterAuthenticated(connectionID, identity.SessionID, identity.DeviceID, connection, socket)
+	s.hub.RegisterAuthenticatedUser(connectionID, identity.UserID, identity.SessionID, identity.DeviceID, connection, socket)
 	defer func() {
 		s.hub.Remove(connection.ConnID, socket)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
+		if err := s.operations.CallConnectionLost(ctx, identity); err != nil {
+			s.logger.Warn(ctx, "could not start call signaling reconnect grace", "user_id", identity.UserID, "device_id", identity.DeviceID, "error", err)
+		}
 		if err := s.operations.Unregister(ctx, identity.DeviceID, identity.UserID, connection); err != nil {
 			s.logOperationFailure(ctx, "unregister websocket connection", err,
 				"user_id", identity.UserID, "device_id", identity.DeviceID,
@@ -385,6 +394,28 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			_ = socket.WriteJSON(wsframe.Envelope{Type: wsframe.TypePresenceSnapshot, ID: envelope.ID, TS: time.Now().UnixMilli(), Payload: payload})
 			continue
 		}
+		if isCallEvent(envelope.Type) {
+			if strings.TrimSpace(envelope.ID) == "" || len(envelope.Payload) == 0 || len(envelope.Payload) > 256*1024 {
+				s.metrics.RecordCallSignal(envelope.Type, "rejected")
+				s.writeError(ctx, socket, envelope.ID, "invalid_call", "call signaling requires an id and a bounded payload")
+				continue
+			}
+			var call wsframe.CallPayload
+			if json.Unmarshal(envelope.Payload, &call) != nil || strings.TrimSpace(call.CallID) == "" {
+				s.metrics.RecordCallSignal(envelope.Type, "rejected")
+				s.writeError(ctx, socket, envelope.ID, "invalid_call", "call signaling requires callId")
+				continue
+			}
+			if err := s.operations.SignalCall(ctx, identity, envelope.Type, envelope.Payload); err != nil {
+				s.metrics.RecordCallSignal(envelope.Type, "error")
+				s.logOperationFailure(ctx, "signal call", err, "request_id", envelope.ID, "call_id", call.CallID, "user_id", identity.UserID, "device_id", identity.DeviceID, "event_type", envelope.Type)
+				s.writeError(ctx, socket, envelope.ID, "call_signal_failed", "call signaling could not be delivered")
+			} else {
+				s.metrics.RecordCallSignal(envelope.Type, "accepted")
+				s.logger.Debug(ctx, "call signal accepted", "event_type", envelope.Type, "call_id", call.CallID, "user_id", identity.UserID, "device_id", identity.DeviceID)
+			}
+			continue
+		}
 		if envelope.Type != wsframe.TypeMessageSend {
 			s.logger.Warn(ctx, "websocket client sent unsupported frame type",
 				"frame_type", envelope.Type, "request_id", envelope.ID, "device_id", identity.DeviceID)
@@ -433,6 +464,17 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		s.logger.Info(ctx, "message acknowledgement sent",
 			"device_id", identity.DeviceID, "client_msg_id", ack.ClientMsgID,
 			"request_id", envelope.ID)
+	}
+}
+
+func isCallEvent(eventType string) bool {
+	switch eventType {
+	case wsframe.TypeCallInvite, wsframe.TypeCallRinging, wsframe.TypeCallAccept, wsframe.TypeCallReject,
+		wsframe.TypeCallBusy, wsframe.TypeCallCancel, wsframe.TypeCallEnd, wsframe.TypeCallOffer,
+		wsframe.TypeCallAnswer, wsframe.TypeCallICE, wsframe.TypeCallResume, wsframe.TypeCallFailed:
+		return true
+	default:
+		return false
 	}
 }
 

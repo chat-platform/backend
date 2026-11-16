@@ -214,6 +214,10 @@ func TestPresenceTTLRefreshRequiresAWebSocketPong(t *testing.T) {
 	}
 }
 func (f *fakeOperations) PresenceExpired(context.Context, string) error { return nil }
+func (f *fakeOperations) SignalCall(context.Context, domain.Identity, string, []byte) error {
+	return nil
+}
+func (f *fakeOperations) CallConnectionLost(context.Context, domain.Identity) error { return nil }
 func (f *fakeOperations) Send(_ context.Context, identity domain.Identity, command domain.SendMessage) (domain.MessageAck, error) {
 	f.identity = identity
 	f.command = command

@@ -17,12 +17,31 @@ import (
 )
 
 type ChatOperations interface {
+	ResolveDirectChatPeer(context.Context, string, string) (string, error)
 	SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error)
 	MarkDelivered(context.Context, domain.Receipt) (domain.DeliveryAck, error)
 	MarkRead(context.Context, domain.Receipt) error
 	MarkPlayed(context.Context, domain.Receipt) error
 	DeleteForEveryone(context.Context, domain.DeleteMessage) error
 	ReactToMessage(context.Context, domain.ReactToMessage) (domain.ReactionAck, error)
+}
+
+func (s *Server) ResolveDirectChat(ctx context.Context, request *messagev1.ResolveDirectChatRequest) (*messagev1.ResolveDirectChatResponse, error) {
+	if request == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	if err := s.validator.Validate(request); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	peerID, err := s.operations.ResolveDirectChatPeer(ctx, request.GetChatId(), request.GetUserId())
+	if err != nil {
+		if errors.Is(err, domain.ErrChatAccessDenied) {
+			return nil, status.Error(codes.PermissionDenied, "caller is not a member of a direct chat")
+		}
+		s.logger.Error(ctx, "could not validate direct chat for calling", "chat_id", request.GetChatId(), "user_id", request.GetUserId(), "error", err)
+		return nil, status.Error(codes.Internal, "could not validate direct chat")
+	}
+	return &messagev1.ResolveDirectChatResponse{PeerUserId: peerID}, nil
 }
 
 type Server struct {

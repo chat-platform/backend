@@ -21,6 +21,12 @@ type tokenRepo struct {
 func (r *tokenRepo) PushToken(context.Context, string) (string, string, error) {
 	return r.token, r.platform, r.err
 }
+func (r *tokenRepo) PushTokensForUser(context.Context, string) ([]UserPushTarget, error) {
+	if r.token == "" {
+		return nil, r.err
+	}
+	return []UserPushTarget{{DeviceID: "device", Platform: r.platform, Token: r.token}}, r.err
+}
 
 func (r *tokenRepo) ClearPushTokenIfCurrent(_ context.Context, deviceID, token string) error {
 	r.clearedDevice, r.clearedToken = deviceID, token
@@ -53,6 +59,18 @@ func TestNotifierSendsOpaqueChatHintAndSkipsMissingToken(t *testing.T) {
 	}
 	if len(out.pushes) != 0 {
 		t.Fatalf("push without token sent: %+v", out.pushes)
+	}
+}
+
+func TestNotifierSendsCallHintToAllUserDevices(t *testing.T) {
+	logger, _ := logging.New(&discard{}, logging.Config{Level: "error"})
+	out := &sender{}
+	notifier := New(&tokenRepo{token: "registration", platform: "WEB"}, out, logger, nil)
+	if err := notifier.Send(context.Background(), PushHint{UserID: "user", CallID: "call", ChatID: "chat", CallerID: "caller"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.pushes) != 1 || out.pushes[0].CallID != "call" || out.pushes[0].CallerID != "caller" {
+		t.Fatalf("call push=%+v", out.pushes)
 	}
 }
 

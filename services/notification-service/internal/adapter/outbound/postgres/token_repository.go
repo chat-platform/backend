@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/chat-platform/backend/services/notification-service/internal/app"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -22,6 +23,26 @@ func (r *TokenRepository) PushToken(ctx context.Context, deviceID string) (strin
 		return "", "", fmt.Errorf("query device push token: %w", err)
 	}
 	return token, platform, nil
+}
+
+func (r *TokenRepository) PushTokensForUser(ctx context.Context, userID string) ([]app.UserPushTarget, error) {
+	rows, err := r.pool.Query(ctx, `SELECT device_id::text, platform::text, push_token FROM device WHERE user_id=$1 AND revoked_at IS NULL AND push_token IS NOT NULL AND push_token<>''`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("query user push tokens: %w", err)
+	}
+	defer rows.Close()
+	var targets []app.UserPushTarget
+	for rows.Next() {
+		var target app.UserPushTarget
+		if err := rows.Scan(&target.DeviceID, &target.Platform, &target.Token); err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read user push tokens: %w", err)
+	}
+	return targets, nil
 }
 
 func (r *TokenRepository) ClearPushTokenIfCurrent(ctx context.Context, deviceID, token string) error {

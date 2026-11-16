@@ -35,6 +35,10 @@ func NewCachedChatRepository(store port.ChatRepository, cache ChatCache, logger 
 	return &CachedChatRepository{store: store, cache: cache, logger: logger}
 }
 
+func (r *CachedChatRepository) ResolveDirectChatPeer(ctx context.Context, chatID, userID string) (string, error) {
+	return r.store.ResolveDirectChatPeer(ctx, chatID, userID)
+}
+
 func (r *CachedChatRepository) AuthorizedChatType(ctx context.Context, chatID, userID string) (string, error) {
 	key := "chat_auth:" + chatID + ":" + userID
 	value, found, cacheErr := r.cache.Get(ctx, key)

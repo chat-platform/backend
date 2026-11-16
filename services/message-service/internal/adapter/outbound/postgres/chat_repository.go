@@ -27,6 +27,25 @@ func NewChatRepository(pool *pgxpool.Pool, logger logging.Logger) *ChatRepositor
 	return &ChatRepository{pool: pool, logger: logger}
 }
 
+// ResolveDirectChatPeer authorizes a caller against a live two-member DIRECT chat.
+func (r *ChatRepository) ResolveDirectChatPeer(ctx context.Context, chatID, userID string) (string, error) {
+	var peerID string
+	err := r.pool.QueryRow(ctx, `
+		SELECT peer.user_id::text
+		FROM chat c
+		JOIN chat_membership member ON member.chat_id=c.chat_id AND member.user_id=$2
+		JOIN chat_membership peer ON peer.chat_id=c.chat_id AND peer.user_id<>$2
+		WHERE c.chat_id=$1 AND c.type='DIRECT' AND c.deleted_at IS NULL
+		  AND (SELECT count(*) FROM chat_membership cm WHERE cm.chat_id=c.chat_id)=2`, chatID, userID).Scan(&peerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", domain.ErrChatAccessDenied
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve direct chat peer: %w", err)
+	}
+	return peerID, nil
+}
+
 type messagePayload struct {
 	ChatID      string `json:"chatId"`
 	SenderID    string `json:"senderId"`

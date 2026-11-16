@@ -22,6 +22,102 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ResolveDirectChatRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ChatId        string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveDirectChatRequest) Reset() {
+	*x = ResolveDirectChatRequest{}
+	mi := &file_message_v1_message_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveDirectChatRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveDirectChatRequest) ProtoMessage() {}
+
+func (x *ResolveDirectChatRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_message_v1_message_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveDirectChatRequest.ProtoReflect.Descriptor instead.
+func (*ResolveDirectChatRequest) Descriptor() ([]byte, []int) {
+	return file_message_v1_message_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ResolveDirectChatRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ResolveDirectChatRequest) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+type ResolveDirectChatResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PeerUserId    string                 `protobuf:"bytes,1,opt,name=peer_user_id,json=peerUserId,proto3" json:"peer_user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveDirectChatResponse) Reset() {
+	*x = ResolveDirectChatResponse{}
+	mi := &file_message_v1_message_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveDirectChatResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveDirectChatResponse) ProtoMessage() {}
+
+func (x *ResolveDirectChatResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_message_v1_message_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveDirectChatResponse.ProtoReflect.Descriptor instead.
+func (*ResolveDirectChatResponse) Descriptor() ([]byte, []int) {
+	return file_message_v1_message_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ResolveDirectChatResponse) GetPeerUserId() string {
+	if x != nil {
+		return x.PeerUserId
+	}
+	return ""
+}
+
 type SendMessageRequest struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	SenderId string                 `protobuf:"bytes,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
@@ -36,7 +132,7 @@ type SendMessageRequest struct {
 
 func (x *SendMessageRequest) Reset() {
 	*x = SendMessageRequest{}
-	mi := &file_message_v1_message_proto_msgTypes[0]
+	mi := &file_message_v1_message_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +144,7 @@ func (x *SendMessageRequest) String() string {
 func (*SendMessageRequest) ProtoMessage() {}
 
 func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[0]
+	mi := &file_message_v1_message_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +157,7 @@ func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessageRequest.ProtoReflect.Descriptor instead.
 func (*SendMessageRequest) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{0}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SendMessageRequest) GetSenderId() string {
@@ -109,7 +205,7 @@ type SendMessageAck struct {
 
 func (x *SendMessageAck) Reset() {
 	*x = SendMessageAck{}
-	mi := &file_message_v1_message_proto_msgTypes[1]
+	mi := &file_message_v1_message_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -121,7 +217,7 @@ func (x *SendMessageAck) String() string {
 func (*SendMessageAck) ProtoMessage() {}
 
 func (x *SendMessageAck) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[1]
+	mi := &file_message_v1_message_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -134,7 +230,7 @@ func (x *SendMessageAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessageAck.ProtoReflect.Descriptor instead.
 func (*SendMessageAck) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{1}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SendMessageAck) GetClientMsgId() string {
@@ -166,7 +262,7 @@ type MarkDeliveredRequest struct {
 
 func (x *MarkDeliveredRequest) Reset() {
 	*x = MarkDeliveredRequest{}
-	mi := &file_message_v1_message_proto_msgTypes[2]
+	mi := &file_message_v1_message_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -178,7 +274,7 @@ func (x *MarkDeliveredRequest) String() string {
 func (*MarkDeliveredRequest) ProtoMessage() {}
 
 func (x *MarkDeliveredRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[2]
+	mi := &file_message_v1_message_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -191,7 +287,7 @@ func (x *MarkDeliveredRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkDeliveredRequest.ProtoReflect.Descriptor instead.
 func (*MarkDeliveredRequest) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{2}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MarkDeliveredRequest) GetDeviceId() string {
@@ -251,7 +347,7 @@ type MarkDeliveredResponse struct {
 
 func (x *MarkDeliveredResponse) Reset() {
 	*x = MarkDeliveredResponse{}
-	mi := &file_message_v1_message_proto_msgTypes[3]
+	mi := &file_message_v1_message_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -263,7 +359,7 @@ func (x *MarkDeliveredResponse) String() string {
 func (*MarkDeliveredResponse) ProtoMessage() {}
 
 func (x *MarkDeliveredResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[3]
+	mi := &file_message_v1_message_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -276,7 +372,7 @@ func (x *MarkDeliveredResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkDeliveredResponse.ProtoReflect.Descriptor instead.
 func (*MarkDeliveredResponse) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{3}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{5}
 }
 
 type MarkReadRequest struct {
@@ -292,7 +388,7 @@ type MarkReadRequest struct {
 
 func (x *MarkReadRequest) Reset() {
 	*x = MarkReadRequest{}
-	mi := &file_message_v1_message_proto_msgTypes[4]
+	mi := &file_message_v1_message_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -304,7 +400,7 @@ func (x *MarkReadRequest) String() string {
 func (*MarkReadRequest) ProtoMessage() {}
 
 func (x *MarkReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[4]
+	mi := &file_message_v1_message_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -317,7 +413,7 @@ func (x *MarkReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkReadRequest.ProtoReflect.Descriptor instead.
 func (*MarkReadRequest) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{4}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *MarkReadRequest) GetDeviceId() string {
@@ -363,7 +459,7 @@ type MarkReadResponse struct {
 
 func (x *MarkReadResponse) Reset() {
 	*x = MarkReadResponse{}
-	mi := &file_message_v1_message_proto_msgTypes[5]
+	mi := &file_message_v1_message_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -375,7 +471,7 @@ func (x *MarkReadResponse) String() string {
 func (*MarkReadResponse) ProtoMessage() {}
 
 func (x *MarkReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[5]
+	mi := &file_message_v1_message_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -388,7 +484,7 @@ func (x *MarkReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkReadResponse.ProtoReflect.Descriptor instead.
 func (*MarkReadResponse) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{5}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{7}
 }
 
 type MarkPlayedRequest struct {
@@ -404,7 +500,7 @@ type MarkPlayedRequest struct {
 
 func (x *MarkPlayedRequest) Reset() {
 	*x = MarkPlayedRequest{}
-	mi := &file_message_v1_message_proto_msgTypes[6]
+	mi := &file_message_v1_message_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -416,7 +512,7 @@ func (x *MarkPlayedRequest) String() string {
 func (*MarkPlayedRequest) ProtoMessage() {}
 
 func (x *MarkPlayedRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[6]
+	mi := &file_message_v1_message_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -429,7 +525,7 @@ func (x *MarkPlayedRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkPlayedRequest.ProtoReflect.Descriptor instead.
 func (*MarkPlayedRequest) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{6}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *MarkPlayedRequest) GetDeviceId() string {
@@ -475,7 +571,7 @@ type MarkPlayedResponse struct {
 
 func (x *MarkPlayedResponse) Reset() {
 	*x = MarkPlayedResponse{}
-	mi := &file_message_v1_message_proto_msgTypes[7]
+	mi := &file_message_v1_message_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -487,7 +583,7 @@ func (x *MarkPlayedResponse) String() string {
 func (*MarkPlayedResponse) ProtoMessage() {}
 
 func (x *MarkPlayedResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[7]
+	mi := &file_message_v1_message_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -500,7 +596,7 @@ func (x *MarkPlayedResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkPlayedResponse.ProtoReflect.Descriptor instead.
 func (*MarkPlayedResponse) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{7}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{9}
 }
 
 type DeleteForEveryoneRequest struct {
@@ -515,7 +611,7 @@ type DeleteForEveryoneRequest struct {
 
 func (x *DeleteForEveryoneRequest) Reset() {
 	*x = DeleteForEveryoneRequest{}
-	mi := &file_message_v1_message_proto_msgTypes[8]
+	mi := &file_message_v1_message_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -527,7 +623,7 @@ func (x *DeleteForEveryoneRequest) String() string {
 func (*DeleteForEveryoneRequest) ProtoMessage() {}
 
 func (x *DeleteForEveryoneRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[8]
+	mi := &file_message_v1_message_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -540,7 +636,7 @@ func (x *DeleteForEveryoneRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteForEveryoneRequest.ProtoReflect.Descriptor instead.
 func (*DeleteForEveryoneRequest) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{8}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DeleteForEveryoneRequest) GetSenderId() string {
@@ -579,7 +675,7 @@ type DeleteForEveryoneResponse struct {
 
 func (x *DeleteForEveryoneResponse) Reset() {
 	*x = DeleteForEveryoneResponse{}
-	mi := &file_message_v1_message_proto_msgTypes[9]
+	mi := &file_message_v1_message_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +687,7 @@ func (x *DeleteForEveryoneResponse) String() string {
 func (*DeleteForEveryoneResponse) ProtoMessage() {}
 
 func (x *DeleteForEveryoneResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[9]
+	mi := &file_message_v1_message_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +700,7 @@ func (x *DeleteForEveryoneResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteForEveryoneResponse.ProtoReflect.Descriptor instead.
 func (*DeleteForEveryoneResponse) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{9}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{11}
 }
 
 type ReactToMessageRequest struct {
@@ -625,7 +721,7 @@ type ReactToMessageRequest struct {
 
 func (x *ReactToMessageRequest) Reset() {
 	*x = ReactToMessageRequest{}
-	mi := &file_message_v1_message_proto_msgTypes[10]
+	mi := &file_message_v1_message_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -637,7 +733,7 @@ func (x *ReactToMessageRequest) String() string {
 func (*ReactToMessageRequest) ProtoMessage() {}
 
 func (x *ReactToMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[10]
+	mi := &file_message_v1_message_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -650,7 +746,7 @@ func (x *ReactToMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactToMessageRequest.ProtoReflect.Descriptor instead.
 func (*ReactToMessageRequest) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{10}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ReactToMessageRequest) GetReactorId() string {
@@ -719,7 +815,7 @@ type ReactToMessageResponse struct {
 
 func (x *ReactToMessageResponse) Reset() {
 	*x = ReactToMessageResponse{}
-	mi := &file_message_v1_message_proto_msgTypes[11]
+	mi := &file_message_v1_message_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -731,7 +827,7 @@ func (x *ReactToMessageResponse) String() string {
 func (*ReactToMessageResponse) ProtoMessage() {}
 
 func (x *ReactToMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_v1_message_proto_msgTypes[11]
+	mi := &file_message_v1_message_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -744,7 +840,7 @@ func (x *ReactToMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactToMessageResponse.ProtoReflect.Descriptor instead.
 func (*ReactToMessageResponse) Descriptor() ([]byte, []int) {
-	return file_message_v1_message_proto_rawDescGZIP(), []int{11}
+	return file_message_v1_message_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ReactToMessageResponse) GetClientReactionId() string {
@@ -766,7 +862,15 @@ var File_message_v1_message_proto protoreflect.FileDescriptor
 const file_message_v1_message_proto_rawDesc = "" +
 	"\n" +
 	"\x18message/v1/message.proto\x12\n" +
-	"message.v1\x1a\x1bbuf/validate/validate.proto\"\xcc\x02\n" +
+	"message.v1\x1a\x1bbuf/validate/validate.proto\"d\n" +
+	"\x18ResolveDirectChatRequest\x12#\n" +
+	"\auser_id\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\xb0\x01\x01R\x06userId\x12#\n" +
+	"\achat_id\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\xb0\x01\x01R\x06chatId\"=\n" +
+	"\x19ResolveDirectChatResponse\x12 \n" +
+	"\fpeer_user_id\x18\x01 \x01(\tR\n" +
+	"peerUserId\"\xcc\x02\n" +
 	"\x12SendMessageRequest\x12,\n" +
 	"\tsender_id\x18\x01 \x01(\tB\x0f\xbaH\fr\n" +
 	"\x10\x012\x06.*\\S.*R\bsenderId\x12,\n" +
@@ -847,7 +951,7 @@ const file_message_v1_message_proto_rawDesc = "" +
 	"\t_reaction\"i\n" +
 	"\x16ReactToMessageResponse\x12,\n" +
 	"\x12client_reaction_id\x18\x01 \x01(\tR\x10clientReactionId\x12!\n" +
-	"\ftimestamp_ms\x18\x02 \x01(\x03R\vtimestampMs2\x80\x04\n" +
+	"\ftimestamp_ms\x18\x02 \x01(\x03R\vtimestampMs2\xe2\x04\n" +
 	"\x0eMessageService\x12I\n" +
 	"\vSendMessage\x12\x1e.message.v1.SendMessageRequest\x1a\x1a.message.v1.SendMessageAck\x12T\n" +
 	"\rMarkDelivered\x12 .message.v1.MarkDeliveredRequest\x1a!.message.v1.MarkDeliveredResponse\x12E\n" +
@@ -855,7 +959,8 @@ const file_message_v1_message_proto_rawDesc = "" +
 	"\n" +
 	"MarkPlayed\x12\x1d.message.v1.MarkPlayedRequest\x1a\x1e.message.v1.MarkPlayedResponse\x12`\n" +
 	"\x11DeleteForEveryone\x12$.message.v1.DeleteForEveryoneRequest\x1a%.message.v1.DeleteForEveryoneResponse\x12W\n" +
-	"\x0eReactToMessage\x12!.message.v1.ReactToMessageRequest\x1a\".message.v1.ReactToMessageResponseBBZ@github.com/chat-platform/backend/shared/gen/message/v1;messagev1b\x06proto3"
+	"\x0eReactToMessage\x12!.message.v1.ReactToMessageRequest\x1a\".message.v1.ReactToMessageResponse\x12`\n" +
+	"\x11ResolveDirectChat\x12$.message.v1.ResolveDirectChatRequest\x1a%.message.v1.ResolveDirectChatResponseBBZ@github.com/chat-platform/backend/shared/gen/message/v1;messagev1b\x06proto3"
 
 var (
 	file_message_v1_message_proto_rawDescOnce sync.Once
@@ -869,36 +974,40 @@ func file_message_v1_message_proto_rawDescGZIP() []byte {
 	return file_message_v1_message_proto_rawDescData
 }
 
-var file_message_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_message_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_message_v1_message_proto_goTypes = []any{
-	(*SendMessageRequest)(nil),        // 0: message.v1.SendMessageRequest
-	(*SendMessageAck)(nil),            // 1: message.v1.SendMessageAck
-	(*MarkDeliveredRequest)(nil),      // 2: message.v1.MarkDeliveredRequest
-	(*MarkDeliveredResponse)(nil),     // 3: message.v1.MarkDeliveredResponse
-	(*MarkReadRequest)(nil),           // 4: message.v1.MarkReadRequest
-	(*MarkReadResponse)(nil),          // 5: message.v1.MarkReadResponse
-	(*MarkPlayedRequest)(nil),         // 6: message.v1.MarkPlayedRequest
-	(*MarkPlayedResponse)(nil),        // 7: message.v1.MarkPlayedResponse
-	(*DeleteForEveryoneRequest)(nil),  // 8: message.v1.DeleteForEveryoneRequest
-	(*DeleteForEveryoneResponse)(nil), // 9: message.v1.DeleteForEveryoneResponse
-	(*ReactToMessageRequest)(nil),     // 10: message.v1.ReactToMessageRequest
-	(*ReactToMessageResponse)(nil),    // 11: message.v1.ReactToMessageResponse
+	(*ResolveDirectChatRequest)(nil),  // 0: message.v1.ResolveDirectChatRequest
+	(*ResolveDirectChatResponse)(nil), // 1: message.v1.ResolveDirectChatResponse
+	(*SendMessageRequest)(nil),        // 2: message.v1.SendMessageRequest
+	(*SendMessageAck)(nil),            // 3: message.v1.SendMessageAck
+	(*MarkDeliveredRequest)(nil),      // 4: message.v1.MarkDeliveredRequest
+	(*MarkDeliveredResponse)(nil),     // 5: message.v1.MarkDeliveredResponse
+	(*MarkReadRequest)(nil),           // 6: message.v1.MarkReadRequest
+	(*MarkReadResponse)(nil),          // 7: message.v1.MarkReadResponse
+	(*MarkPlayedRequest)(nil),         // 8: message.v1.MarkPlayedRequest
+	(*MarkPlayedResponse)(nil),        // 9: message.v1.MarkPlayedResponse
+	(*DeleteForEveryoneRequest)(nil),  // 10: message.v1.DeleteForEveryoneRequest
+	(*DeleteForEveryoneResponse)(nil), // 11: message.v1.DeleteForEveryoneResponse
+	(*ReactToMessageRequest)(nil),     // 12: message.v1.ReactToMessageRequest
+	(*ReactToMessageResponse)(nil),    // 13: message.v1.ReactToMessageResponse
 }
 var file_message_v1_message_proto_depIdxs = []int32{
-	0,  // 0: message.v1.MessageService.SendMessage:input_type -> message.v1.SendMessageRequest
-	2,  // 1: message.v1.MessageService.MarkDelivered:input_type -> message.v1.MarkDeliveredRequest
-	4,  // 2: message.v1.MessageService.MarkRead:input_type -> message.v1.MarkReadRequest
-	6,  // 3: message.v1.MessageService.MarkPlayed:input_type -> message.v1.MarkPlayedRequest
-	8,  // 4: message.v1.MessageService.DeleteForEveryone:input_type -> message.v1.DeleteForEveryoneRequest
-	10, // 5: message.v1.MessageService.ReactToMessage:input_type -> message.v1.ReactToMessageRequest
-	1,  // 6: message.v1.MessageService.SendMessage:output_type -> message.v1.SendMessageAck
-	3,  // 7: message.v1.MessageService.MarkDelivered:output_type -> message.v1.MarkDeliveredResponse
-	5,  // 8: message.v1.MessageService.MarkRead:output_type -> message.v1.MarkReadResponse
-	7,  // 9: message.v1.MessageService.MarkPlayed:output_type -> message.v1.MarkPlayedResponse
-	9,  // 10: message.v1.MessageService.DeleteForEveryone:output_type -> message.v1.DeleteForEveryoneResponse
-	11, // 11: message.v1.MessageService.ReactToMessage:output_type -> message.v1.ReactToMessageResponse
-	6,  // [6:12] is the sub-list for method output_type
-	0,  // [0:6] is the sub-list for method input_type
+	2,  // 0: message.v1.MessageService.SendMessage:input_type -> message.v1.SendMessageRequest
+	4,  // 1: message.v1.MessageService.MarkDelivered:input_type -> message.v1.MarkDeliveredRequest
+	6,  // 2: message.v1.MessageService.MarkRead:input_type -> message.v1.MarkReadRequest
+	8,  // 3: message.v1.MessageService.MarkPlayed:input_type -> message.v1.MarkPlayedRequest
+	10, // 4: message.v1.MessageService.DeleteForEveryone:input_type -> message.v1.DeleteForEveryoneRequest
+	12, // 5: message.v1.MessageService.ReactToMessage:input_type -> message.v1.ReactToMessageRequest
+	0,  // 6: message.v1.MessageService.ResolveDirectChat:input_type -> message.v1.ResolveDirectChatRequest
+	3,  // 7: message.v1.MessageService.SendMessage:output_type -> message.v1.SendMessageAck
+	5,  // 8: message.v1.MessageService.MarkDelivered:output_type -> message.v1.MarkDeliveredResponse
+	7,  // 9: message.v1.MessageService.MarkRead:output_type -> message.v1.MarkReadResponse
+	9,  // 10: message.v1.MessageService.MarkPlayed:output_type -> message.v1.MarkPlayedResponse
+	11, // 11: message.v1.MessageService.DeleteForEveryone:output_type -> message.v1.DeleteForEveryoneResponse
+	13, // 12: message.v1.MessageService.ReactToMessage:output_type -> message.v1.ReactToMessageResponse
+	1,  // 13: message.v1.MessageService.ResolveDirectChat:output_type -> message.v1.ResolveDirectChatResponse
+	7,  // [7:14] is the sub-list for method output_type
+	0,  // [0:7] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -909,14 +1018,14 @@ func file_message_v1_message_proto_init() {
 	if File_message_v1_message_proto != nil {
 		return
 	}
-	file_message_v1_message_proto_msgTypes[10].OneofWrappers = []any{}
+	file_message_v1_message_proto_msgTypes[12].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_message_v1_message_proto_rawDesc), len(file_message_v1_message_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

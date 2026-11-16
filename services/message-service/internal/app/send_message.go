@@ -18,6 +18,10 @@ type ChatOperations struct {
 	logger         logging.Logger
 }
 
+func (o *ChatOperations) ResolveDirectChatPeer(ctx context.Context, chatID, userID string) (string, error) {
+	return o.chatRepository.ResolveDirectChatPeer(ctx, chatID, userID)
+}
+
 func NewChatOperations(chatRepository port.ChatRepository, logger logging.Logger) *ChatOperations {
 	return &ChatOperations{chatRepository: chatRepository, logger: logger}
 }

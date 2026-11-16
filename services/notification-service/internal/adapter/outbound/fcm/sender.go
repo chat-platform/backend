@@ -61,8 +61,23 @@ func (s *Sender) Send(ctx context.Context, push app.Push) error {
 }
 
 func BuildMessage(push app.Push) (*messaging.Message, error) {
-	if push.Token == "" || push.ChatID == "" {
+	if push.Token == "" || (push.ChatID == "" && push.CallID == "") {
 		return nil, errors.New("FCM push requires a token and chat ID")
+	}
+	if push.CallID != "" {
+		message := &messaging.Message{Token: push.Token, Data: map[string]string{"type": "call", "callId": push.CallID, "chatId": push.ChatID, "callerId": push.CallerID}}
+		switch push.Platform {
+		case "ANDROID":
+			message.Android = &messaging.AndroidConfig{Priority: "high"}
+			message.Notification = &messaging.Notification{Title: "Incoming call", Body: "You have an incoming Orbit call"}
+		case "IOS":
+			message.APNS = &messaging.APNSConfig{Headers: map[string]string{"apns-push-type": "alert", "apns-priority": "10"}, Payload: &messaging.APNSPayload{Aps: &messaging.Aps{Alert: &messaging.ApsAlert{Title: "Incoming call", Body: "You have an incoming Orbit call"}, Sound: "default"}}}
+		case "WEB":
+			message.Webpush = &messaging.WebpushConfig{Data: map[string]string{"type": "call", "callId": push.CallID, "chatId": push.ChatID, "callerId": push.CallerID}, Notification: &messaging.WebpushNotification{Title: "Incoming call", Body: "You have an incoming Orbit call"}}
+		default:
+			return nil, fmt.Errorf("unsupported push platform %q", push.Platform)
+		}
+		return message, nil
 	}
 	message := &messaging.Message{
 		Token: push.Token,

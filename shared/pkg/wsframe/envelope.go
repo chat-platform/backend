@@ -11,29 +11,58 @@ type Envelope struct {
 }
 
 const (
-	TypeAuth                = "auth"
-	TypeAuthOK              = "auth_ok"
-	TypeMessageSend         = "message.send"
-	TypeMessageAck          = "message.ack"
-	TypeMessageRecv         = "message.recv"
-	TypeMessageRevoked      = "message.revoked"
-	TypeMessageDelete       = "message.delete_for_everyone"
-	TypeMessageDeleteAck    = "message.delete_for_everyone.ack"
-	TypeReaction            = "reaction"
-	TypeReactionAck         = "reaction.ack"
-	TypeReactionRecv        = "reaction.recv"
-	TypeReceiptStatus       = "receipt.status"
-	TypeSyncReady           = "sync.ready"
-	TypeReceiptDelivered    = "receipt.delivered"
-	TypeReceiptRead         = "receipt.read"
-	TypeReceiptPlayed       = "receipt.played"
-	TypeReceiptPlayedAck    = "receipt.played.ack"
-	TypePresenceSubscribe   = "presence.subscribe"
-	TypePresenceUnsubscribe = "presence.unsubscribe"
-	TypePresenceGet         = "presence.get"
-	TypePresenceSnapshot    = "presence.snapshot"
-	TypePresenceUpdate      = "presence.update"
+	TypeAuth                   = "auth"
+	TypeAuthOK                 = "auth_ok"
+	TypeMessageSend            = "message.send"
+	TypeMessageAck             = "message.ack"
+	TypeMessageRecv            = "message.recv"
+	TypeMessageRevoked         = "message.revoked"
+	TypeMessageDelete          = "message.delete_for_everyone"
+	TypeMessageDeleteAck       = "message.delete_for_everyone.ack"
+	TypeReaction               = "reaction"
+	TypeReactionAck            = "reaction.ack"
+	TypeReactionRecv           = "reaction.recv"
+	TypeReceiptStatus          = "receipt.status"
+	TypeSyncReady              = "sync.ready"
+	TypeReceiptDelivered       = "receipt.delivered"
+	TypeReceiptRead            = "receipt.read"
+	TypeReceiptPlayed          = "receipt.played"
+	TypeReceiptPlayedAck       = "receipt.played.ack"
+	TypePresenceSubscribe      = "presence.subscribe"
+	TypePresenceUnsubscribe    = "presence.unsubscribe"
+	TypePresenceGet            = "presence.get"
+	TypePresenceSnapshot       = "presence.snapshot"
+	TypePresenceUpdate         = "presence.update"
+	TypeCallInvite             = "call.invite"
+	TypeCallRinging            = "call.ringing"
+	TypeCallAccept             = "call.accept"
+	TypeCallReject             = "call.reject"
+	TypeCallBusy               = "call.busy"
+	TypeCallCancel             = "call.cancel"
+	TypeCallEnd                = "call.end"
+	TypeCallOffer              = "call.offer"
+	TypeCallAnswer             = "call.answer"
+	TypeCallICE                = "call.ice"
+	TypeCallResume             = "call.resume"
+	TypeCallFailed             = "call.failed"
+	TypeCallReconnecting       = "call.reconnecting"
+	TypeCallAcceptedElsewhere  = "call.accepted_elsewhere"
+	TypeCallDismissedElsewhere = "call.dismissed_elsewhere"
 )
+
+// CallPayload contains transient WebRTC signaling and must never be persisted or logged.
+type CallPayload struct {
+	CallID           string          `json:"callId"`
+	ChatID           string          `json:"chatId,omitempty"`
+	TargetUserID     string          `json:"targetUserId,omitempty"`
+	CallerUserID     string          `json:"callerUserId,omitempty"`
+	CallerDeviceID   string          `json:"callerDeviceId,omitempty"`
+	AcceptedDeviceID string          `json:"acceptedDeviceId,omitempty"`
+	CallMode         string          `json:"callMode,omitempty"`
+	SDP              json.RawMessage `json:"sdp,omitempty"`
+	Candidate        json.RawMessage `json:"candidate,omitempty"`
+	Reason           string          `json:"reason,omitempty"`
+}
 
 type OutboxType string
 

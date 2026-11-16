@@ -22,6 +22,7 @@ const (
 type Metrics struct {
 	deliveryHandling *prometheus.CounterVec
 	socketWrites     *prometheus.CounterVec
+	callSignals      *prometheus.CounterVec
 }
 
 func New(registry prometheus.Registerer) (*Metrics, error) {
@@ -34,13 +35,20 @@ func New(registry prometheus.Registerer) (*Metrics, error) {
 			Name: "ws_socket_write_attempts_total",
 			Help: "Actual WebSocket Hub socket write attempts by phase and result.",
 		}, []string{"phase", "result"}),
+		callSignals: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ws_call_signaling_events_total", Help: "Ephemeral call signaling events handled by event type and outcome."}, []string{"event_type", "outcome"}),
 	}
-	for _, collector := range []prometheus.Collector{m.deliveryHandling, m.socketWrites} {
+	for _, collector := range []prometheus.Collector{m.deliveryHandling, m.socketWrites, m.callSignals} {
 		if err := registry.Register(collector); err != nil {
 			return nil, fmt.Errorf("register WebSocket Gateway metrics: %w", err)
 		}
 	}
 	return m, nil
+}
+
+func (m *Metrics) RecordCallSignal(eventType, outcome string) {
+	if m != nil {
+		m.callSignals.WithLabelValues(eventType, outcome).Inc()
+	}
 }
 
 // RegisterActiveConnections exposes the Hub's current connection count without

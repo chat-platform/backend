@@ -64,6 +64,17 @@ func TestBuildMessageRejectsInvalidPush(t *testing.T) {
 	}
 }
 
+func TestBuildCallMessageUsesTransientCallHint(t *testing.T) {
+	message, err := BuildMessage(app.Push{Token: "token", Platform: "WEB", ChatID: "chat", CallID: "call", CallerID: "caller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"type": "call", "callId": "call", "chatId": "chat", "callerId": "caller"}
+	if !reflect.DeepEqual(message.Webpush.Data, want) || message.Webpush.Notification == nil || message.Webpush.Notification.Title != "Incoming call" {
+		t.Fatalf("web push call message=%+v", message.Webpush)
+	}
+}
+
 func TestSenderMapsUnregisteredTokenAndReturnsTransientErrors(t *testing.T) {
 	unregistered := errors.New("unregistered token")
 	client := &fakeMessagingClient{messageID: "projects/project/messages/id"}

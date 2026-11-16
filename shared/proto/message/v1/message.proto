@@ -15,7 +15,14 @@ service MessageService {
   rpc MarkPlayed(MarkPlayedRequest) returns (MarkPlayedResponse);
   rpc DeleteForEveryone(DeleteForEveryoneRequest) returns (DeleteForEveryoneResponse);
   rpc ReactToMessage(ReactToMessageRequest) returns (ReactToMessageResponse);
+  rpc ResolveDirectChat(ResolveDirectChatRequest) returns (ResolveDirectChatResponse);
 }
+
+message ResolveDirectChatRequest {
+  string user_id = 1 [(buf.validate.field).string = { min_len: 1, uuid: true }];
+  string chat_id = 2 [(buf.validate.field).string = { min_len: 1, uuid: true }];
+}
+message ResolveDirectChatResponse { string peer_user_id = 1; }
 
 message SendMessageRequest {
   string sender_id = 1 [(buf.validate.field).string = {
