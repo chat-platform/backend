@@ -192,20 +192,24 @@ func (r *Repository) GetOrCreateDirectChat(ctx context.Context, userID, phone st
 
 func (r *Repository) GetDirectChatPeer(ctx context.Context, userID, chatID string) (app.DirectChatPeer, error) {
 	var peer app.DirectChatPeer
+	var profilePicMediaID sql.NullString
 	err := r.pool.QueryRow(ctx, `
-		SELECT peer.user_id::text, COALESCE(u.display_name, '')
+		SELECT peer.user_id::text, u.phone, COALESCE(u.display_name, ''), u.profile_pic_media_id::text
 		FROM chat c
 		JOIN chat_membership member ON member.chat_id = c.chat_id AND member.user_id = $2
 		JOIN chat_membership peer ON peer.chat_id = c.chat_id AND peer.user_id <> $2
 		JOIN users u ON u.user_id = peer.user_id
 		WHERE c.chat_id = $1 AND c.type = 'DIRECT' AND c.deleted_at IS NULL
 		  AND (SELECT count(*) FROM chat_membership cm WHERE cm.chat_id = c.chat_id) = 2
-		LIMIT 1`, chatID, userID).Scan(&peer.UserID, &peer.DisplayName)
+		LIMIT 1`, chatID, userID).Scan(&peer.UserID, &peer.Phone, &peer.DisplayName, &profilePicMediaID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return app.DirectChatPeer{}, app.ErrNotFound
 	}
 	if err != nil {
 		return app.DirectChatPeer{}, fmt.Errorf("get direct chat peer: %w", err)
+	}
+	if profilePicMediaID.Valid {
+		peer.ProfilePicMediaID = &profilePicMediaID.String
 	}
 	return peer, nil
 }

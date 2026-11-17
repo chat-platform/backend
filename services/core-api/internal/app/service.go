@@ -26,8 +26,10 @@ var (
 
 type User struct{ ID, Phone, DisplayName string }
 type DirectChatPeer struct {
-	UserID      string `json:"peerUserId"`
-	DisplayName string `json:"displayName"`
+	UserID            string  `json:"peerUserId"`
+	Phone             string  `json:"phoneNumber"`
+	DisplayName       string  `json:"displayName"`
+	ProfilePicMediaID *string `json:"profilePicMediaId,omitempty"`
 }
 type Device struct{ ID, UserID string }
 type Session struct {
