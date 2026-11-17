@@ -25,6 +25,10 @@ type metricsOperationsStub struct {
 	deliveryError error
 }
 
+func (*metricsOperationsStub) ResolveDirectChatPeer(context.Context, string, string) (string, error) {
+	return "peer", nil
+}
+
 func (o *metricsOperationsStub) SendMessage(context.Context, domain.SendMessage) (domain.MessageAck, error) {
 	return domain.MessageAck{ClientMsgID: "01890f3e-7b2c-7abc-8def-1234567890ab", TimestampMS: 1}, o.sendError
 }

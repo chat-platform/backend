@@ -24,6 +24,10 @@ type chatRepositoryStub struct {
 	reactionError  error
 }
 
+func (r *chatRepositoryStub) ResolveDirectChatPeer(context.Context, string, string) (string, error) {
+	return "peer", nil
+}
+
 func (r *chatRepositoryStub) AuthorizedChatType(context.Context, string, string) (string, error) {
 	return r.chatType, nil
 }

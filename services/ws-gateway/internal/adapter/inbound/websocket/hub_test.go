@@ -59,6 +59,27 @@ func TestHubReportsMissingConnection(t *testing.T) {
 	}
 }
 
+func TestHubDeliverUserFansOutOnlyToThatUsersDevices(t *testing.T) {
+	hub := NewHub()
+	first, second, other := &captureSocket{}, &captureSocket{}, &captureSocket{}
+	for _, registration := range []struct {
+		id, user string
+		socket   *captureSocket
+	}{
+		{"device-a", "user-a", first}, {"device-b", "user-a", second}, {"device-c", "user-b", other},
+	} {
+		hub.RegisterAuthenticatedUser(registration.id, registration.user, "session", registration.id, domain.Connection{ConnID: registration.id}, registration.socket)
+		if err := hub.Ready(registration.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event := wsframe.Envelope{Type: wsframe.TypeCallInvite, ID: "call"}
+	hub.DeliverUser(context.Background(), "user-a", event)
+	if len(first.values) != 1 || len(second.values) != 1 || len(other.values) != 0 {
+		t.Fatalf("call delivery counts: first=%d second=%d other=%d", len(first.values), len(second.values), len(other.values))
+	}
+}
+
 func TestHubCloseAllRequestsReconnectAndRemovesConnections(t *testing.T) {
 	h := NewHub()
 	first, second := &captureSocket{}, &captureSocket{}

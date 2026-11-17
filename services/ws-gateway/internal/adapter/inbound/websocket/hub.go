@@ -34,6 +34,7 @@ type socketEntry struct {
 	mu                  sync.Mutex
 	socket              socketWriter
 	sessionID, deviceID string
+	userID              string
 	connection          domain.Connection
 	ready               bool
 	failed              bool
@@ -110,12 +111,32 @@ func (h *Hub) Register(id string, socket socketWriter) {
 }
 
 func (h *Hub) RegisterAuthenticated(id, sessionID, deviceID string, connection domain.Connection, socket socketWriter) {
+	h.RegisterAuthenticatedUser(id, "", sessionID, deviceID, connection, socket)
+}
+
+func (h *Hub) RegisterAuthenticatedUser(id, userID, sessionID, deviceID string, connection domain.Connection, socket socketWriter) {
 	h.mu.Lock()
 	h.entries[id] = &socketEntry{
 		socket: socket, sessionID: sessionID, deviceID: deviceID,
+		userID:     userID,
 		connection: connection, bufferedIDs: make(map[deliveryKey]struct{}),
 	}
 	h.mu.Unlock()
+}
+
+// DeliverUser sends an ephemeral event to each locally connected device for a user.
+func (h *Hub) DeliverUser(ctx context.Context, userID string, envelope wsframe.Envelope) {
+	h.mu.RLock()
+	ids := make([]string, 0)
+	for id, entry := range h.entries {
+		if entry.userID == userID {
+			ids = append(ids, id)
+		}
+	}
+	h.mu.RUnlock()
+	for _, id := range ids {
+		_ = h.Deliver(ctx, id, envelope)
+	}
 }
 
 func (h *Hub) Remove(id string, socket socketWriter) {

@@ -86,6 +86,25 @@ func (c *Consumer) Prepare(ctx context.Context) error {
 }
 
 func (c *Consumer) addMessage(ctx context.Context, pending map[string]*pendingBatch, owners map[string]string, message redis.XMessage) {
+	if kind, _ := stringValue(message.Values["notification_type"]); kind == "call" {
+		userID, _ := stringValue(message.Values["user_id"])
+		callID, _ := stringValue(message.Values["call_id"])
+		chatID, _ := stringValue(message.Values["chat_id"])
+		callerID, _ := stringValue(message.Values["caller_id"])
+		if userID == "" || callID == "" || chatID == "" {
+			c.logger.Warn(ctx, "malformed call notification discarded", "stream_entry_id", message.ID)
+			_ = c.client.XAck(ctx, notificationStream, notificationGroup, message.ID).Err()
+			return
+		}
+		if err := c.notifier.Send(ctx, app.PushHint{UserID: userID, CallID: callID, ChatID: chatID, CallerID: callerID}); err != nil {
+			c.logger.Warn(ctx, "call push hint failed; leaving for retry", "stream_entry_id", message.ID, "user_id", userID, "error", err)
+			return
+		}
+		if err := c.client.XAck(ctx, notificationStream, notificationGroup, message.ID).Err(); err != nil {
+			c.logger.Error(ctx, "could not acknowledge call push hint", "stream_entry_id", message.ID, "error", err)
+		}
+		return
+	}
 	deviceID, okDevice := stringValue(message.Values["device_id"])
 	chatID, okChat := stringValue(message.Values["chat_id"])
 	if !okDevice || !okChat || deviceID == "" || chatID == "" {

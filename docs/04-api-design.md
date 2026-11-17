@@ -218,6 +218,33 @@ block state do not restrict visibility for now. If a client refresh fails or
 times out, it hides the indicator until a later successful snapshot or valid
 `presence.update`. The Gateway does not run a per-subscription refresh timer.
 
+### Direct calls (ephemeral)
+
+Direct calls use `call.invite`, `call.ringing`, `call.accept`, `call.reject`,
+`call.busy`, `call.cancel`, `call.end`, `call.offer`, `call.answer`, `call.ice`,
+`call.resume`, `call.reconnecting`, and `call.failed` WebSocket events. Call
+events carry a `callId`; invitations also carry `chatId` and `callMode` (`audio`
+or `video`). SDP and ICE data are sent transiently through Redis Pub/Sub and are
+never written to message or notification outboxes. Call metadata and participant
+locks expire from Redis; direct chat membership is resolved by Message Service.
+All active callee devices receive invitations, and the first device to accept
+owns that call.
+
+An unanswered invitation expires after 45 seconds. Signaling loss starts a
+10-second reconnect grace period. Offline call alerts are best-effort FCM data
+notifications; opening the alert resumes an incoming call only while it remains
+ringing. Web clients use `VITE_ICE_SERVERS` as a JSON array of `RTCIceServer`
+objects, defaulting to `[{"urls":"stun:stun.l.google.com:19302"}]`. STUN-only
+connectivity cannot establish calls through every NAT or firewall; configure a
+TURN server in this setting when one is deployed. WebRTC negotiates supported
+media codecs and performs its own congestion control.
+
+For local verification, run the backend and frontend, sign in to two direct-chat
+accounts from separate browser profiles, and call between them. Use HTTPS or
+localhost for camera and microphone access. Test audio and video separately,
+decline and unanswered calls, and briefly disconnect the network during a live
+call to verify reconnect cleanup.
+
 ## 5. Core Flows
 
 ### 5.1 Registration

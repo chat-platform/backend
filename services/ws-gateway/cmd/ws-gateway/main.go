@@ -79,8 +79,9 @@ func main() {
 	}
 	sessionAuthenticator := authadapter.New([]byte(cfg.JWTSecret), registry, coreapiadapter.NewSessionValidator(sessionv1.NewSessionServiceClient(coreAPIConn)))
 	messageService := grpcadapter.NewMessageServiceClient(messagev1.NewMessageServiceClient(grpcConn))
+	callCoordinator := redisadapter.NewCallCoordinator(redisClient, messageService)
 	presenceCoreAPI := coreapiadapter.NewPresenceClient(sessionv1.NewSessionServiceClient(coreAPIConn))
-	operations := app.NewWithPresence(cfg.NodeID, registry, messageService, sessionAuthenticator, presenceRegistry, presenceCoreAPI)
+	operations := app.NewWithPresence(cfg.NodeID, registry, messageService, sessionAuthenticator, presenceRegistry, presenceCoreAPI, callCoordinator)
 	metricsRegistry, err := sharedmetrics.NewRegistry()
 	if err != nil {
 		logger.Error(ctx, "could not create metrics registry", "error", err)
@@ -126,8 +127,16 @@ func main() {
 			logger.Error(ctx, "presence Redis consumer stopped unexpectedly", "error", err, "node_id", cfg.NodeID)
 		}
 	}()
+	callConsumer := deliveryadapter.NewCallConsumer(redisClient, hub, logger.With("component", "call_consumer"))
+	go func() {
+		if err := callConsumer.Run(ctx); err != nil && ctx.Err() == nil {
+			logger.Error(ctx, "call signal subscriber stopped unexpectedly", "error", err, "node_id", cfg.NodeID)
+			stop()
+		}
+	}()
 	mux := http.NewServeMux()
 	websocketServer := wsadapter.NewServer(operations, logger.With("component", "websocket"), hub, cfg.AllowedOrigins...)
+	websocketServer.SetMetrics(gatewayMetrics)
 	mux.Handle(cfg.Path, websocketServer)
 	revocations := deliveryadapter.NewRevocationConsumer(redisClient, cfg.NodeID, func(err error) {
 		logger.Warn(ctx, "session revocation subscription will retry", "error", err)

@@ -21,13 +21,39 @@ type Gateway struct {
 	sessions port.SessionAuthenticator
 	presence port.PresenceStore
 	coreAPI  port.PresenceCoreAPI
+	calls    port.CallCoordinator
 }
 
-func NewWithPresence(nodeID string, registry port.ConnectionRegistry, messages port.MessageService, sessions port.SessionAuthenticator, presence port.PresenceStore, coreAPI port.PresenceCoreAPI) *Gateway {
+func NewWithPresence(nodeID string, registry port.ConnectionRegistry, messages port.MessageService, sessions port.SessionAuthenticator, presence port.PresenceStore, coreAPI port.PresenceCoreAPI, calls ...port.CallCoordinator) *Gateway {
 	g := New(nodeID, registry, messages, sessions)
 	g.presence = presence
 	g.coreAPI = coreAPI
+	if len(calls) > 0 {
+		g.calls = calls[0]
+	}
 	return g
+}
+
+func (g *Gateway) SignalCall(ctx context.Context, identity domain.Identity, eventType string, payload []byte) error {
+	if g.calls == nil {
+		return errors.New("call signaling is not configured")
+	}
+	return g.calls.Handle(ctx, identity, eventType, payload)
+}
+
+func (g *Gateway) CallConnectionLost(ctx context.Context, identity domain.Identity) error {
+	if g.calls == nil {
+		return nil
+	}
+	return g.calls.Disconnected(ctx, identity)
+}
+
+func (g *Gateway) ResolveDirectChatPeer(ctx context.Context, chatID, userID string) (string, error) {
+	resolver, ok := g.messages.(port.DirectChatResolver)
+	if !ok {
+		return "", errors.New("direct chat resolver is not configured")
+	}
+	return resolver.ResolveDirectChatPeer(ctx, chatID, userID)
 }
 
 func New(nodeID string, registry port.ConnectionRegistry, messages port.MessageService, sessions ...port.SessionAuthenticator) *Gateway {

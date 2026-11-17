@@ -16,6 +16,15 @@ type MessageService interface {
 	DeleteForEveryone(context.Context, string, string, string, string) error
 }
 
+type DirectChatResolver interface {
+	ResolveDirectChatPeer(context.Context, string, string) (string, error)
+}
+
+type CallCoordinator interface {
+	Handle(context.Context, domain.Identity, string, []byte) error
+	Disconnected(context.Context, domain.Identity) error
+}
+
 type ConnectionRegistry interface {
 	Register(context.Context, string, domain.Connection) error
 	Refresh(context.Context, string, domain.Connection) (bool, error)

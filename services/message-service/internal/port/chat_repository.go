@@ -7,6 +7,7 @@ import (
 )
 
 type ChatRepository interface {
+	ResolveDirectChatPeer(context.Context, string, string) (string, error)
 	AuthorizedChatType(context.Context, string, string) (string, error)
 	ResolveMessageRecipients(context.Context, string) ([]domain.RecipientDevice, error)
 	EnqueueDirectMessageEvent(context.Context, domain.SendMessage, []domain.RecipientDevice) (domain.MessageAck, error)
