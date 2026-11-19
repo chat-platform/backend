@@ -24,11 +24,30 @@ type updateGroupRequest struct {
 }
 
 func (s *Server) groupChats(c echo.Context) error {
-	chats, err := s.service.GroupChats(c.Request().Context(), claimsFrom(c.Request()).UserID)
+	var chats []app.GroupChat
+	var err error
+	groupIDs := c.QueryParams()["groupId"]
+	if len(groupIDs) > 0 {
+		chats, err = s.service.GroupChatsByID(c.Request().Context(), claimsFrom(c.Request()).UserID, groupIDs)
+	} else {
+		chats, err = s.service.GroupChats(c.Request().Context(), claimsFrom(c.Request()).UserID)
+	}
 	if err != nil {
 		return s.writeServiceError(c, err)
 	}
 	return writeJSON(c, http.StatusOK, chats)
+}
+
+func (s *Server) groupMembershipState(c echo.Context) error {
+	groupIDs := c.QueryParams()["groupId"]
+	if len(groupIDs) > 100 {
+		return s.writeInvalidRequest(c, errors.New("at most 100 groupId values are allowed"))
+	}
+	states, err := s.service.GroupMembershipState(c.Request().Context(), claimsFrom(c.Request()).UserID, groupIDs)
+	if err != nil {
+		return s.writeServiceError(c, err)
+	}
+	return writeJSON(c, http.StatusOK, states)
 }
 
 func (s *Server) lookupUser(c echo.Context) error {

@@ -233,8 +233,13 @@ func (h *Hub) Deliver(_ context.Context, id string, envelope wsframe.Envelope) e
 		return fmt.Errorf("encode websocket delivery: %w", err)
 	}
 	var payload wsframe.MessageRecvPayload
+	var management wsframe.GroupManagementPayload
 	if len(envelope.Payload) > 0 {
 		_ = json.Unmarshal(envelope.Payload, &payload)
+		if envelope.Type == wsframe.TypeGroupManagement {
+			_ = json.Unmarshal(envelope.Payload, &management)
+			payload.OutboxID, payload.OutboxType = management.OutboxID, management.OutboxType
+		}
 	}
 	entry.mu.Lock()
 	if entry.failed {
@@ -245,6 +250,10 @@ func (h *Hub) Deliver(_ context.Context, id string, envelope wsframe.Envelope) e
 		if envelope.Type == wsframe.TypeMessageRecv && (payload.OutboxID <= 0 || (payload.OutboxType != wsframe.OutboxTypeDirect && payload.OutboxType != wsframe.OutboxTypeGroup)) {
 			entry.mu.Unlock()
 			return fmt.Errorf("buffered message.recv requires a positive outboxId and valid outboxType")
+		}
+		if envelope.Type == wsframe.TypeGroupManagement && (payload.OutboxID <= 0 || payload.OutboxType != wsframe.OutboxTypeGroup) {
+			entry.mu.Unlock()
+			return fmt.Errorf("buffered group.management requires a positive outboxId and group outboxType")
 		}
 		if payload.OutboxID > 0 {
 			key := deliveryKey{outboxType: payload.OutboxType, outboxID: payload.OutboxID}

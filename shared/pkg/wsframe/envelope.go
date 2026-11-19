@@ -17,6 +17,7 @@ const (
 	TypeMessageAck             = "message.ack"
 	TypeMessageRecv            = "message.recv"
 	TypeMessageRevoked         = "message.revoked"
+	TypeGroupManagement        = "group.management"
 	TypeMessageDelete          = "message.delete_for_everyone"
 	TypeMessageDeleteAck       = "message.delete_for_everyone.ack"
 	TypeReaction               = "reaction"
@@ -95,6 +96,21 @@ type MessageRecvPayload struct {
 	ClientMsgID string     `json:"clientMsgId"`
 	Content     string     `json:"content"`
 	TS          int64      `json:"ts"`
+}
+
+type GroupManagementPayload struct {
+	ChatID        string     `json:"chatId"`
+	Revision      int64      `json:"revision"`
+	Action        string     `json:"action"`
+	ActorUserID   string     `json:"actorUserId"`
+	ClientMsgID   string     `json:"clientMsgId"`
+	TargetUserIDs []string   `json:"targetUserIds,omitempty"`
+	Role          string     `json:"role,omitempty"`
+	Name          string     `json:"name,omitempty"`
+	ProfilePic    *string    `json:"profilePic,omitempty"`
+	Members       any        `json:"members,omitempty"`
+	OutboxID      int64      `json:"outboxId"`
+	OutboxType    OutboxType `json:"outboxType"`
 }
 
 type MessageRevokedPayload struct {

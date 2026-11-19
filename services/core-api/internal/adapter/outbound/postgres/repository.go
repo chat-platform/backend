@@ -276,6 +276,19 @@ func (r *Repository) ListGroupEvents(ctx context.Context, deviceID string, curso
 		if err := rows.Scan(&event.OutboxID, &event.EventType, &payload); err != nil {
 			return nil, fmt.Errorf("scan group sync event: %w", err)
 		}
+		if event.EventType == "GROUP_MANAGEMENT" {
+			var management map[string]any
+			if err := json.Unmarshal([]byte(payload), &management); err != nil {
+				return nil, fmt.Errorf("decode group management sync event: %w", err)
+			}
+			management["outboxId"] = event.OutboxID
+			management["outboxType"] = "group"
+			payloadBytes, err := json.Marshal(management)
+			if err != nil {
+				return nil, fmt.Errorf("encode group management sync event: %w", err)
+			}
+			payload = string(payloadBytes)
+		}
 		event.Payload = json.RawMessage(payload)
 		events = append(events, event)
 	}

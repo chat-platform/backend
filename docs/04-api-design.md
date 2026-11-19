@@ -75,6 +75,7 @@ Conventions:
 | `DELETE` | `/v1/groups/{id}/members/{userId}` | Remove member. |
 | `POST` | `/v1/groups/{id}/admins` | Promote to admin. |
 | `DELETE` | `/v1/groups/{id}/admins/{userId}` | Demote admin. |
+| `GET` | `/v1/groups/membership-state` | Return active group membership, role, and latest group event revision. Repeated `groupId` values target a subset; groups without an active membership are omitted. |
 
 ### Blocking
 
@@ -176,7 +177,7 @@ its active sockets.
 | `presence.get` | C → S | `{ targetUserId }` | Optional one-time authenticated query; returns `presence.snapshot`. |
 | `presence.snapshot` | S → C | `{ userId, status, lastSeen? }` | Initial or refreshed snapshot. Online snapshots omit `lastSeen`. |
 | `presence.update` | S → C | `{ userId, status, lastSeen? }` | Best-effort update pushed to subscribed clients only. |
-| `group.*` | S → C | `{ groupId, ... }` | Member added, admin promoted, etc. |
+| `group.management` | S → C | `{ chatId, revision, action, actorUserId, targetUserIds?, role?, name?, profilePic?, members?, outboxId, outboxType }` | Durable, versioned membership and metadata update. The per-device outbox entry is acknowledged with `receipt.delivered`; clients ignore revisions no newer than their stored group revision. Removal is delivered to the removed member's eligible devices, while later events target active members only. |
 
 Reconnect sync is not a WS event — it goes over HTTP (`/v1/sync`).
 The client opens and authenticates its WebSocket, pages `/v1/sync` from its

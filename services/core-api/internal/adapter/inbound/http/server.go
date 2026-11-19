@@ -68,6 +68,7 @@ func NewWithMetrics(service *app.Service, logger logging.Logger, metrics *coreme
 	v1.Add(POST, "/chats/direct", s.directChat)
 	v1.Add(GET, "/chats/direct/:id/peer", s.directChatPeer)
 	v1.Add(GET, "/chats/groups", s.groupChats)
+	v1.Add(GET, "/groups/membership-state", s.groupMembershipState)
 	v1.Add(POST, "/groups", s.createGroup)
 	v1.Add(PATCH, "/groups/:id", s.updateGroup)
 	v1.Add(POST, "/groups/:id/members", s.addGroupMembers)

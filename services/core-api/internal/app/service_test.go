@@ -57,6 +57,12 @@ func (r *repoFake) GetDirectChatPeer(context.Context, string, string) (DirectCha
 	return DirectChatPeer{UserID: "peer-1", DisplayName: "Alice"}, nil
 }
 func (r *repoFake) ListGroupChats(context.Context, string) ([]GroupChat, error) { return nil, nil }
+func (r *repoFake) ListGroupChatsByID(context.Context, string, []string) ([]GroupChat, error) {
+	return nil, nil
+}
+func (r *repoFake) ListGroupMembershipState(context.Context, string, []string) ([]GroupMembershipState, error) {
+	return nil, nil
+}
 func (r *repoFake) CreateGroup(context.Context, string, string, []string) (string, error) {
 	return "group-1", nil
 }
