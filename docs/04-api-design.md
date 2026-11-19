@@ -177,7 +177,7 @@ its active sockets.
 | `presence.get` | C → S | `{ targetUserId }` | Optional one-time authenticated query; returns `presence.snapshot`. |
 | `presence.snapshot` | S → C | `{ userId, status, lastSeen? }` | Initial or refreshed snapshot. Online snapshots omit `lastSeen`. |
 | `presence.update` | S → C | `{ userId, status, lastSeen? }` | Best-effort update pushed to subscribed clients only. |
-| `group.management` | S → C | `{ chatId, revision, action, actorUserId, targetUserIds?, role?, name?, profilePic?, members?, outboxId, outboxType }` | Durable, versioned membership and metadata update. The per-device outbox entry is acknowledged with `receipt.delivered`; clients ignore revisions no newer than their stored group revision. Removal is delivered to the removed member's eligible devices, while later events target active members only. |
+| `group.management` | S → C | `{ chatId, revision, action, actorUserId, targetUserIds?, role?, name?, profilePic?, members?, changes?, outboxId, outboxType }` | Durable, versioned membership and metadata update. Metadata changes include generic `{ field, oldValue, newValue }` entries. The per-device outbox entry is acknowledged with `receipt.delivered`; clients ignore revisions no newer than their stored group revision. Removal is delivered to the removed member's eligible devices, while later events target active members only. |
 
 Reconnect sync is not a WS event — it goes over HTTP (`/v1/sync`).
 The client opens and authenticates its WebSocket, pages `/v1/sync` from its

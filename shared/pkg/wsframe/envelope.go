@@ -99,18 +99,25 @@ type MessageRecvPayload struct {
 }
 
 type GroupManagementPayload struct {
-	ChatID        string     `json:"chatId"`
-	Revision      int64      `json:"revision"`
-	Action        string     `json:"action"`
-	ActorUserID   string     `json:"actorUserId"`
-	ClientMsgID   string     `json:"clientMsgId"`
-	TargetUserIDs []string   `json:"targetUserIds,omitempty"`
-	Role          string     `json:"role,omitempty"`
-	Name          string     `json:"name,omitempty"`
-	ProfilePic    *string    `json:"profilePic,omitempty"`
-	Members       any        `json:"members,omitempty"`
-	OutboxID      int64      `json:"outboxId"`
-	OutboxType    OutboxType `json:"outboxType"`
+	ChatID        string                         `json:"chatId"`
+	Revision      int64                          `json:"revision"`
+	Action        string                         `json:"action"`
+	ActorUserID   string                         `json:"actorUserId"`
+	ClientMsgID   string                         `json:"clientMsgId"`
+	TargetUserIDs []string                       `json:"targetUserIds,omitempty"`
+	Role          string                         `json:"role,omitempty"`
+	Name          string                         `json:"name,omitempty"`
+	ProfilePic    *string                        `json:"profilePic"`
+	Members       any                            `json:"members,omitempty"`
+	Changes       []GroupManagementChangePayload `json:"changes,omitempty"`
+	OutboxID      int64                          `json:"outboxId"`
+	OutboxType    OutboxType                     `json:"outboxType"`
+}
+
+type GroupManagementChangePayload struct {
+	Field    string `json:"field"`
+	OldValue any    `json:"oldValue"`
+	NewValue any    `json:"newValue"`
 }
 
 type MessageRevokedPayload struct {

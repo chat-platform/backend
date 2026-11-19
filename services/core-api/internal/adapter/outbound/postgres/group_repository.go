@@ -133,7 +133,7 @@ func (r *Repository) CreateGroup(ctx context.Context, creatorID, name string, me
 			return "", fmt.Errorf("add initial group member: %w", err)
 		}
 	}
-	if _, err := recordGroupManagementEvent(ctx, tx, chatID, creatorID, "created", append([]string{creatorID}, memberIDs...), true); err != nil {
+	if _, err := recordGroupManagementEvent(ctx, tx, chatID, creatorID, "created", append([]string{creatorID}, memberIDs...), true, "", nil); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -151,11 +151,32 @@ func (r *Repository) UpdateGroup(ctx context.Context, actorID, groupID string, n
 	if _, err := requireGroupAdmin(ctx, tx, groupID, actorID); err != nil {
 		return err
 	}
+	var oldName, oldPicture pgtype.Text
+	if err := tx.QueryRow(ctx, `SELECT name, profile_pic FROM chat WHERE chat_id=$1`, groupID).Scan(&oldName, &oldPicture); err != nil {
+		return fmt.Errorf("load previous group metadata: %w", err)
+	}
+	changes := make([]groupManagementChange, 0, 2)
+	if name != nil && (!oldName.Valid || oldName.String != *name) {
+		changes = append(changes, groupManagementChange{Field: "name", OldValue: nullableTextValue(oldName), NewValue: *name})
+	}
+	if profilePic != nil {
+		var newPicture any
+		if *profilePic != "" {
+			newPicture = *profilePic
+		}
+		oldValue := nullableTextValue(oldPicture)
+		if oldValue != newPicture {
+			changes = append(changes, groupManagementChange{Field: "profilePic", OldValue: oldValue, NewValue: newPicture})
+		}
+	}
+	if len(changes) == 0 {
+		return tx.Commit(ctx)
+	}
 	_, err = tx.Exec(ctx, `UPDATE chat SET name = CASE WHEN $2 THEN $3 ELSE name END, profile_pic = CASE WHEN $4 THEN NULLIF($5, '') ELSE profile_pic END, updated_at = now() WHERE chat_id = $1`, groupID, name != nil, name, profilePic != nil, profilePic)
 	if err != nil {
 		return fmt.Errorf("update group metadata: %w", err)
 	}
-	if _, err := recordGroupManagementEvent(ctx, tx, groupID, actorID, "updated", nil, true); err != nil {
+	if _, err := recordGroupManagementEvent(ctx, tx, groupID, actorID, "updated", nil, true, "", changes); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -181,7 +202,7 @@ func (r *Repository) AddGroupMembers(ctx context.Context, actorID, groupID strin
 	if _, err := tx.Exec(ctx, `UPDATE chat SET updated_at = now() WHERE chat_id = $1`, groupID); err != nil {
 		return fmt.Errorf("update group timestamp: %w", err)
 	}
-	if _, err := recordGroupManagementEvent(ctx, tx, groupID, actorID, "members_added", memberIDs, true); err != nil {
+	if _, err := recordGroupManagementEvent(ctx, tx, groupID, actorID, "members_added", memberIDs, true, "", nil); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -219,7 +240,7 @@ func (r *Repository) RemoveGroupMember(ctx context.Context, actorID, groupID, me
 	if actorID == memberID {
 		action = "member_left"
 	}
-	if _, err := recordGroupManagementEvent(ctx, tx, groupID, actorID, action, []string{memberID}, false); err != nil {
+	if _, err := recordGroupManagementEvent(ctx, tx, groupID, actorID, action, []string{memberID}, false, "", nil); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -259,7 +280,7 @@ func (r *Repository) SetGroupAdmins(ctx context.Context, actorID, groupID string
 	if admin {
 		action, role = "members_promoted", "admin"
 	}
-	if _, err := recordGroupManagementEvent(ctx, tx, groupID, actorID, action, memberIDs, true, role); err != nil {
+	if _, err := recordGroupManagementEvent(ctx, tx, groupID, actorID, action, memberIDs, true, role, nil); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -272,28 +293,42 @@ type groupTx interface {
 }
 
 type groupManagementPayload struct {
-	ChatID        string            `json:"chatId"`
-	Revision      int64             `json:"revision"`
-	Action        string            `json:"action"`
-	ActorUserID   string            `json:"actorUserId"`
-	ClientMsgID   string            `json:"clientMsgId"`
-	TargetUserIDs []string          `json:"targetUserIds,omitempty"`
-	Role          string            `json:"role,omitempty"`
-	TimestampMS   int64             `json:"timestampMs"`
-	Name          string            `json:"name,omitempty"`
-	ProfilePic    *string           `json:"profilePic"`
-	Members       []app.GroupMember `json:"members,omitempty"`
-	OutboxID      int64             `json:"outboxId,omitempty"`
-	OutboxType    string            `json:"outboxType,omitempty"`
+	ChatID        string                  `json:"chatId"`
+	Revision      int64                   `json:"revision"`
+	Action        string                  `json:"action"`
+	ActorUserID   string                  `json:"actorUserId"`
+	ClientMsgID   string                  `json:"clientMsgId"`
+	TargetUserIDs []string                `json:"targetUserIds,omitempty"`
+	Role          string                  `json:"role,omitempty"`
+	TimestampMS   int64                   `json:"timestampMs"`
+	Name          string                  `json:"name,omitempty"`
+	ProfilePic    *string                 `json:"profilePic"`
+	Members       []app.GroupMember       `json:"members,omitempty"`
+	Changes       []groupManagementChange `json:"changes,omitempty"`
+	OutboxID      int64                   `json:"outboxId,omitempty"`
+	OutboxType    string                  `json:"outboxType,omitempty"`
+}
+
+type groupManagementChange struct {
+	Field    string `json:"field"`
+	OldValue any    `json:"oldValue"`
+	NewValue any    `json:"newValue"`
+}
+
+func nullableTextValue(value pgtype.Text) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
 }
 
 // recordGroupManagementEvent persists a durable state event and snapshots its
 // per-device recipients in the same transaction as the membership mutation.
-func recordGroupManagementEvent(ctx context.Context, tx groupTx, groupID, actorID, action string, targetIDs []string, includeSnapshot bool, roles ...string) (int64, error) {
+func recordGroupManagementEvent(ctx context.Context, tx groupTx, groupID, actorID, action string, targetIDs []string, includeSnapshot bool, role string, changes []groupManagementChange) (int64, error) {
 	clientMsgID := uuid.NewString()
-	payload := groupManagementPayload{ChatID: groupID, Action: action, ActorUserID: actorID, ClientMsgID: clientMsgID, TargetUserIDs: targetIDs, OutboxType: "group"}
-	if len(roles) > 0 {
-		payload.Role = roles[0]
+	payload := groupManagementPayload{ChatID: groupID, Action: action, ActorUserID: actorID, ClientMsgID: clientMsgID, TargetUserIDs: targetIDs, OutboxType: "group", Changes: changes}
+	if role != "" {
+		payload.Role = role
 	}
 	if includeSnapshot {
 		var name string
