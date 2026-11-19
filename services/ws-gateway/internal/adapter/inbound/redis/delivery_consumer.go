@@ -217,6 +217,21 @@ func decodeDelivery(message redis.XMessage) (decodedDelivery, error) {
 			return decodedDelivery{}, err
 		}
 		envelope = wsframe.Envelope{Type: wsframe.TypeReactionRecv, TS: payload.TimestampMS, Payload: body}
+	case "GROUP_MANAGEMENT":
+		var payload wsframe.GroupManagementPayload
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return decodedDelivery{}, err
+		}
+		if payload.ChatID == "" || payload.Revision <= 0 || payload.Action == "" || payload.ActorUserID == "" || payload.ClientMsgID == "" {
+			return decodedDelivery{}, fmt.Errorf("group management payload is missing identity or revision")
+		}
+		payload.OutboxID = outboxID
+		payload.OutboxType = wsframe.OutboxType(typ)
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return decodedDelivery{}, err
+		}
+		envelope = wsframe.Envelope{Type: wsframe.TypeGroupManagement, TS: time.Now().UnixMilli(), Payload: body}
 	default:
 		return decodedDelivery{}, fmt.Errorf("unsupported outbox event type %q", eventType)
 	}

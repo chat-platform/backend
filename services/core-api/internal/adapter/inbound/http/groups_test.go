@@ -40,6 +40,12 @@ type groupHTTPRepo struct {
 func (r *groupHTTPRepo) ListGroupChats(context.Context, string) ([]app.GroupChat, error) {
 	return r.chats, r.operationErr
 }
+func (r *groupHTTPRepo) ListGroupChatsByID(context.Context, string, []string) ([]app.GroupChat, error) {
+	return r.chats, r.operationErr
+}
+func (r *groupHTTPRepo) ListGroupMembershipState(context.Context, string, []string) ([]app.GroupMembershipState, error) {
+	return nil, r.operationErr
+}
 func (r *groupHTTPRepo) CreateGroup(_ context.Context, creator, name string, members []string) (string, error) {
 	r.createdBy, r.createdName, r.createdMember = creator, name, members
 	return "44444444-4444-4444-8444-444444444444", r.operationErr

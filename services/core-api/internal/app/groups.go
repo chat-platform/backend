@@ -12,6 +12,17 @@ type GroupMember struct {
 	UserID      string `json:"userId"`
 	PhoneNumber string `json:"phoneNumber"`
 	DisplayName string `json:"displayName"`
+	Role        string `json:"role"`
+}
+
+type GroupMembershipState struct {
+	ChatID     string     `json:"chatId"`
+	Status     string     `json:"status"`
+	Role       string     `json:"role,omitempty"`
+	Revision   int64      `json:"revision"`
+	Name       string     `json:"name,omitempty"`
+	ProfilePic *string    `json:"profilePic"`
+	UpdatedAt  *time.Time `json:"updatedAt,omitempty"`
 }
 
 type GroupChat struct {
@@ -19,11 +30,37 @@ type GroupChat struct {
 	Name       string        `json:"name"`
 	ProfilePic *string       `json:"profilePic"`
 	UpdatedAt  time.Time     `json:"updatedAt"`
+	Role       string        `json:"role"`
+	Revision   int64         `json:"revision"`
 	Members    []GroupMember `json:"members"`
+}
+
+func (s *Service) GroupMembershipState(ctx context.Context, userID string, groupIDs []string) ([]GroupMembershipState, error) {
+	if !validUUID(userID) {
+		return nil, ErrInvalidRequest
+	}
+	for _, id := range groupIDs {
+		if !validUUID(id) {
+			return nil, ErrInvalidRequest
+		}
+	}
+	return s.repo.ListGroupMembershipState(ctx, userID, groupIDs)
 }
 
 func (s *Service) GroupChats(ctx context.Context, userID string) ([]GroupChat, error) {
 	return s.repo.ListGroupChats(ctx, userID)
+}
+
+func (s *Service) GroupChatsByID(ctx context.Context, userID string, groupIDs []string) ([]GroupChat, error) {
+	if !validUUID(userID) || len(groupIDs) == 0 || len(groupIDs) > 100 {
+		return nil, ErrInvalidRequest
+	}
+	for _, id := range groupIDs {
+		if !validUUID(id) {
+			return nil, ErrInvalidRequest
+		}
+	}
+	return s.repo.ListGroupChatsByID(ctx, userID, groupIDs)
 }
 
 func (s *Service) CreateGroup(ctx context.Context, creatorID, name string, memberIDs []string) (string, error) {

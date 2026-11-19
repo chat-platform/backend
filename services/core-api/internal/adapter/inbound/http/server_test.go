@@ -72,6 +72,12 @@ func (r *sessionRepoStub) GetDirectChatPeer(_ context.Context, userID, chatID st
 func (r *sessionRepoStub) ListGroupChats(context.Context, string) ([]app.GroupChat, error) {
 	return nil, nil
 }
+func (r *sessionRepoStub) ListGroupChatsByID(context.Context, string, []string) ([]app.GroupChat, error) {
+	return nil, nil
+}
+func (r *sessionRepoStub) ListGroupMembershipState(context.Context, string, []string) ([]app.GroupMembershipState, error) {
+	return nil, nil
+}
 func (r *sessionRepoStub) CreateGroup(context.Context, string, string, []string) (string, error) {
 	return "group-id", nil
 }

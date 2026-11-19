@@ -64,6 +64,8 @@ type Repository interface {
 	GetOrCreateDirectChat(context.Context, string, string) (string, error)
 	GetDirectChatPeer(context.Context, string, string) (DirectChatPeer, error)
 	ListGroupChats(context.Context, string) ([]GroupChat, error)
+	ListGroupChatsByID(context.Context, string, []string) ([]GroupChat, error)
+	ListGroupMembershipState(context.Context, string, []string) ([]GroupMembershipState, error)
 	CreateGroup(context.Context, string, string, []string) (string, error)
 	UpdateGroup(context.Context, string, string, *string, *string) error
 	AddGroupMembers(context.Context, string, string, []string) error

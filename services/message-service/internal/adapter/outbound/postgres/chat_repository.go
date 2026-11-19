@@ -201,6 +201,14 @@ func (r *ChatRepository) EnqueueGroupMessageEvent(ctx context.Context, message d
 		return domain.MessageAck{}, fmt.Errorf("begin group message write transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	var authorized bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM chat c JOIN chat_membership cm ON cm.chat_id=c.chat_id
+		WHERE c.chat_id=$1 AND c.type='GROUP' AND c.deleted_at IS NULL AND cm.user_id=$2)`, message.ChatID, message.SenderID).Scan(&authorized); err != nil {
+		return domain.MessageAck{}, fmt.Errorf("recheck group send authorization: %w", err)
+	}
+	if !authorized {
+		return domain.MessageAck{}, domain.ErrChatAccessDenied
+	}
 
 	// Insert first so the unique key serializes concurrent retries. If no
 	// recipient devices exist, the deferred rollback removes this provisional row.
