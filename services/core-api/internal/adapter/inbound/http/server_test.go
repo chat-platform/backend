@@ -114,6 +114,21 @@ func (r *sessionRepoStub) ListGroupEvents(_ context.Context, _ string, cursor in
 	r.groupSyncCursor, r.groupSyncLimit = cursor, limit
 	return r.groupEvents, nil
 }
+func (r *sessionRepoStub) RegisterDeviceKeys(context.Context, string, string, app.DeviceKeysRegistration, time.Time) (int64, error) {
+	return 1, nil
+}
+func (r *sessionRepoStub) UploadOneTimePreKeys(context.Context, string, string, []app.PublicPreKey) error {
+	return nil
+}
+func (r *sessionRepoStub) CountOneTimePreKeys(context.Context, string, string) (int, error) {
+	return 0, nil
+}
+func (r *sessionRepoStub) DirectDeviceList(context.Context, string, string) (app.DirectDeviceList, error) {
+	return app.DirectDeviceList{}, nil
+}
+func (r *sessionRepoStub) ConsumePreKeyBundle(context.Context, string, string, string) (app.PublicPreKeyBundle, error) {
+	return app.PublicPreKeyBundle{}, nil
+}
 
 type sessionCacheStub struct {
 	status           string

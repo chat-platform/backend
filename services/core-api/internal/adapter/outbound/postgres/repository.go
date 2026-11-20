@@ -35,19 +35,54 @@ func (r *Repository) CompleteOTP(ctx context.Context, phone, platform, deviceNam
 	if err != nil {
 		return user, app.Device{}, app.Session{}, fmt.Errorf("load user: %w", err)
 	}
+	if _, err = tx.Exec(ctx, `SELECT user_id FROM users WHERE user_id = $1 FOR UPDATE`, user.ID); err != nil {
+		return user, app.Device{}, app.Session{}, fmt.Errorf("serialize device registration: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO user_device_state (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, user.ID); err != nil {
+		return user, app.Device{}, app.Session{}, fmt.Errorf("initialize device-list version: %w", err)
+	}
 	device := app.Device{ID: requestedDeviceID, UserID: user.ID}
 	if device.ID == "" {
 		device.ID = uuid.NewString()
 	}
 	var owner string
-	err = tx.QueryRow(ctx, `SELECT user_id::text FROM device WHERE device_id = $1`, device.ID).Scan(&owner)
+	var protocolDeviceID int32
+	var wasRevoked bool
+	err = tx.QueryRow(ctx, `SELECT user_id::text, protocol_device_id, revoked_at IS NOT NULL FROM device WHERE device_id = $1 FOR UPDATE`, device.ID).Scan(&owner, &protocolDeviceID, &wasRevoked)
 	if err == nil {
 		if owner != user.ID {
 			return user, app.Device{}, app.Session{}, app.ErrUnauthorized
 		}
-		_, err = tx.Exec(ctx, `UPDATE device SET revoked_at = NULL, platform = $2, device_name = $3, last_seen_at = now() WHERE device_id = $1`, device.ID, platform, deviceName)
+		if wasRevoked {
+			err = tx.QueryRow(ctx, `SELECT candidate::smallint FROM generate_series(1, 255) candidate WHERE NOT EXISTS (SELECT 1 FROM device d WHERE d.user_id = $1 AND d.protocol_device_id = candidate AND d.revoked_at IS NULL) ORDER BY candidate LIMIT 1`, user.ID).Scan(&protocolDeviceID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return user, app.Device{}, app.Session{}, app.ErrConflict
+			}
+			if err != nil {
+				return user, app.Device{}, app.Session{}, fmt.Errorf("allocate protocol device id: %w", err)
+			}
+			for _, table := range []string{"device_one_time_prekey", "device_kyber_prekey", "device_signed_prekey", "device_e2ee_key"} {
+				if _, err = tx.Exec(ctx, `DELETE FROM `+table+` WHERE device_id = $1`, device.ID); err != nil {
+					return user, app.Device{}, app.Session{}, fmt.Errorf("reset revoked device keys: %w", err)
+				}
+			}
+			_, err = tx.Exec(ctx, `UPDATE user_device_state SET version = version + 1, updated_at = now() WHERE user_id = $1`, user.ID)
+			if err != nil {
+				return user, app.Device{}, app.Session{}, fmt.Errorf("update device-list version: %w", err)
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE device SET revoked_at = NULL, platform = $2, device_name = $3, protocol_device_id = $4, last_seen_at = now() WHERE device_id = $1`, device.ID, platform, deviceName, protocolDeviceID)
 	} else if errors.Is(err, pgx.ErrNoRows) {
-		_, err = tx.Exec(ctx, `INSERT INTO device (device_id, user_id, platform, device_name, is_primary, last_seen_at) VALUES ($1, $2, $3, $4, NOT EXISTS (SELECT 1 FROM device WHERE user_id = $2 AND revoked_at IS NULL), now())`, device.ID, user.ID, platform, deviceName)
+		err = tx.QueryRow(ctx, `SELECT candidate::smallint FROM generate_series(1, 255) candidate WHERE NOT EXISTS (SELECT 1 FROM device d WHERE d.user_id = $1 AND d.protocol_device_id = candidate AND d.revoked_at IS NULL) ORDER BY candidate LIMIT 1`, user.ID).Scan(&protocolDeviceID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return user, app.Device{}, app.Session{}, app.ErrConflict
+		}
+		if err == nil {
+			_, err = tx.Exec(ctx, `INSERT INTO device (device_id, user_id, platform, device_name, is_primary, protocol_device_id, last_seen_at) VALUES ($1, $2, $3, $4, NOT EXISTS (SELECT 1 FROM device WHERE user_id = $2 AND revoked_at IS NULL), $5, now())`, device.ID, user.ID, platform, deviceName, protocolDeviceID)
+			if err == nil {
+				_, err = tx.Exec(ctx, `UPDATE user_device_state SET version = version + 1, updated_at = now() WHERE user_id = $1`, user.ID)
+			}
+		}
 	}
 	if err != nil {
 		return user, app.Device{}, app.Session{}, fmt.Errorf("register device: %w", err)
