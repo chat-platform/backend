@@ -115,6 +115,19 @@ func (r *repoFake) ListGroupEvents(_ context.Context, deviceID string, cursor in
 
 func (r *repoFake) GetLastSeen(context.Context, string) (*time.Time, error) { return nil, nil }
 func (r *repoFake) UpdateLastSeen(context.Context, string, time.Time) error { return nil }
+func (r *repoFake) RegisterDeviceKeys(context.Context, string, string, DeviceKeysRegistration, time.Time) (int64, error) {
+	return 1, nil
+}
+func (r *repoFake) UploadOneTimePreKeys(context.Context, string, string, []PublicPreKey) error {
+	return nil
+}
+func (r *repoFake) CountOneTimePreKeys(context.Context, string, string) (int, error) { return 0, nil }
+func (r *repoFake) DirectDeviceList(context.Context, string, string) (DirectDeviceList, error) {
+	return DirectDeviceList{}, nil
+}
+func (r *repoFake) ConsumePreKeyBundle(context.Context, string, string, string) (PublicPreKeyBundle, error) {
+	return PublicPreKeyBundle{}, nil
+}
 
 func TestSyncUsesDeviceCursorAndPagesWithOneLookahead(t *testing.T) {
 	repo := &repoFake{syncEvents: []SyncEvent{

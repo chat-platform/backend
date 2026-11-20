@@ -54,6 +54,44 @@ type SyncResponse struct {
 	Group  SyncPage `json:"group"`
 }
 
+type PublicPreKey struct {
+	ID        int32  `json:"id"`
+	PublicKey []byte `json:"publicKey"`
+}
+type SignedPublicPreKey struct {
+	ID        int32  `json:"id"`
+	PublicKey []byte `json:"publicKey"`
+	Signature []byte `json:"signature"`
+}
+type DeviceKeysRegistration struct {
+	RegistrationID uint32             `json:"registrationId"`
+	IdentityKey    []byte             `json:"identityKey"`
+	SignedPreKey   SignedPublicPreKey `json:"signedPreKey"`
+	KyberPreKey    SignedPublicPreKey `json:"kyberPreKey"`
+}
+type PublicDevice struct {
+	DeviceID         string `json:"deviceId"`
+	UserID           string `json:"userId"`
+	ProtocolDeviceID uint32 `json:"protocolDeviceId"`
+	RegistrationID   uint32 `json:"registrationId"`
+	IdentityKey      []byte `json:"identityKey,omitempty"`
+	E2EEReady        bool   `json:"e2eeReady"`
+}
+type DirectDeviceList struct {
+	Versions map[string]int64 `json:"versions"`
+	Devices  []PublicDevice   `json:"devices"`
+}
+type PublicPreKeyBundle struct {
+	DeviceID         string             `json:"deviceId"`
+	UserID           string             `json:"userId"`
+	ProtocolDeviceID uint32             `json:"protocolDeviceId"`
+	RegistrationID   uint32             `json:"registrationId"`
+	IdentityKey      []byte             `json:"identityKey"`
+	SignedPreKey     SignedPublicPreKey `json:"signedPreKey"`
+	KyberPreKey      SignedPublicPreKey `json:"kyberPreKey"`
+	OneTimePreKey    *PublicPreKey      `json:"oneTimePreKey,omitempty"`
+}
+
 type Repository interface {
 	CompleteOTP(context.Context, string, string, string, string, string, time.Time) (User, Device, Session, error)
 	GetProfile(context.Context, string) (User, error)
@@ -75,6 +113,11 @@ type Repository interface {
 	SessionActive(context.Context, sessiontoken.Claims, time.Time) (bool, error)
 	ListDirectEvents(context.Context, string, int64, int) ([]SyncEvent, error)
 	ListGroupEvents(context.Context, string, int64, int) ([]SyncEvent, error)
+	RegisterDeviceKeys(context.Context, string, string, DeviceKeysRegistration, time.Time) (int64, error)
+	UploadOneTimePreKeys(context.Context, string, string, []PublicPreKey) error
+	CountOneTimePreKeys(context.Context, string, string) (int, error)
+	DirectDeviceList(context.Context, string, string) (DirectDeviceList, error)
+	ConsumePreKeyBundle(context.Context, string, string, string) (PublicPreKeyBundle, error)
 }
 
 type PresenceRepository interface {
@@ -321,6 +364,85 @@ func (s *Service) ClearPushToken(ctx context.Context, deviceID string) error {
 		return ErrUnavailable
 	}
 	return nil
+}
+
+func (s *Service) RegisterDeviceKeys(ctx context.Context, claims sessiontoken.Claims, registration DeviceKeysRegistration) (int64, error) {
+	if registration.RegistrationID == 0 || len(registration.IdentityKey) != 33 || registration.SignedPreKey.ID <= 0 || len(registration.SignedPreKey.PublicKey) != 33 || len(registration.SignedPreKey.Signature) != 64 || registration.KyberPreKey.ID <= 0 || len(registration.KyberPreKey.PublicKey) != 1569 || len(registration.KyberPreKey.Signature) != 64 {
+		return 0, ErrInvalidRequest
+	}
+	version, err := s.repo.RegisterDeviceKeys(ctx, claims.UserID, claims.DeviceID, registration, s.cfg.Now())
+	if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
+		return 0, err
+	}
+	if err != nil {
+		return 0, ErrUnavailable
+	}
+	return version, nil
+}
+
+func (s *Service) UploadOneTimePreKeys(ctx context.Context, claims sessiontoken.Claims, keys []PublicPreKey) error {
+	if len(keys) == 0 || len(keys) > 100 {
+		return ErrInvalidRequest
+	}
+	seen := make(map[int32]struct{}, len(keys))
+	for _, key := range keys {
+		if key.ID <= 0 || len(key.PublicKey) != 33 {
+			return ErrInvalidRequest
+		}
+		if _, ok := seen[key.ID]; ok {
+			return ErrInvalidRequest
+		}
+		seen[key.ID] = struct{}{}
+	}
+	if err := s.repo.UploadOneTimePreKeys(ctx, claims.UserID, claims.DeviceID, keys); err != nil {
+		if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return ErrUnavailable
+	}
+	return nil
+}
+
+func (s *Service) CountOneTimePreKeys(ctx context.Context, claims sessiontoken.Claims) (int, error) {
+	count, err := s.repo.CountOneTimePreKeys(ctx, claims.UserID, claims.DeviceID)
+	if errors.Is(err, ErrNotFound) {
+		return 0, err
+	}
+	if err != nil {
+		return 0, ErrUnavailable
+	}
+	return count, nil
+}
+
+func (s *Service) DirectDeviceList(ctx context.Context, claims sessiontoken.Claims, chatID string) (DirectDeviceList, error) {
+	if _, err := uuid.Parse(chatID); err != nil {
+		return DirectDeviceList{}, ErrNotFound
+	}
+	list, err := s.repo.DirectDeviceList(ctx, claims.UserID, chatID)
+	if errors.Is(err, ErrNotFound) {
+		return DirectDeviceList{}, ErrNotFound
+	}
+	if err != nil {
+		return DirectDeviceList{}, ErrUnavailable
+	}
+	return list, nil
+}
+
+func (s *Service) PreKeyBundle(ctx context.Context, claims sessiontoken.Claims, chatID, deviceID string) (PublicPreKeyBundle, error) {
+	if _, err := uuid.Parse(chatID); err != nil {
+		return PublicPreKeyBundle{}, ErrNotFound
+	}
+	if _, err := uuid.Parse(deviceID); err != nil {
+		return PublicPreKeyBundle{}, ErrNotFound
+	}
+	bundle, err := s.repo.ConsumePreKeyBundle(ctx, claims.UserID, chatID, deviceID)
+	if errors.Is(err, ErrNotFound) {
+		return PublicPreKeyBundle{}, ErrNotFound
+	}
+	if err != nil {
+		return PublicPreKeyBundle{}, ErrUnavailable
+	}
+	return bundle, nil
 }
 func (s *Service) DirectChat(ctx context.Context, userID, phone string) (string, error) {
 	if !IsE164Phone(phone) {
